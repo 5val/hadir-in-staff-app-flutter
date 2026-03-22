@@ -68,18 +68,18 @@ class _SalaryScreenState extends State<SalaryScreen>
     final isMonthly = user.position.payrollType == PayrollType.monthly;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.slate50,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
+        backgroundColor: AppColors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 18, color: AppColors.textPrimary),
+              size: 18, color: AppColors.slate900),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Slip Gaji', style: AppText.headline3),
         actions: [
           IconButton(
-            icon: const Icon(Icons.download_rounded, color: AppColors.primary),
+            icon: const Icon(Icons.download_rounded, color: AppColors.brandNavy),
             onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Download PDF slip gaji...')),
             ),
@@ -87,7 +87,7 @@ class _SalaryScreenState extends State<SalaryScreen>
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppColors.border),
+          child: Container(height: 1, color: AppColors.slate200),
         ),
       ),
       body: SingleChildScrollView(
@@ -104,11 +104,11 @@ class _SalaryScreenState extends State<SalaryScreen>
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.12),
+                        color: AppColors.brandNavy.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(Icons.business_center_rounded,
-                          color: AppColors.primary, size: 16),
+                          color: AppColors.brandNavy, size: 16),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -163,13 +163,13 @@ class _SalaryScreenState extends State<SalaryScreen>
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         decoration: BoxDecoration(
                           color: i == _selectedIndex
-                              ? AppColors.primary
-                              : AppColors.surface,
+                              ? AppColors.brandNavy
+                              : AppColors.white,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: i == _selectedIndex
-                                ? AppColors.primary
-                                : AppColors.border,
+                                ? AppColors.brandNavy
+                                : AppColors.slate200,
                           ),
                         ),
                         alignment: Alignment.center,
@@ -180,7 +180,7 @@ class _SalaryScreenState extends State<SalaryScreen>
                             fontSize: 12,
                             color: i == _selectedIndex
                                 ? Colors.white
-                                : AppColors.textSecondary,
+                                : AppColors.slate600,
                           ),
                         ),
                       ),
@@ -195,9 +195,9 @@ class _SalaryScreenState extends State<SalaryScreen>
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.brandNavy,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                  border: Border.all(color: AppColors.brandNavy.withOpacity(0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -275,7 +275,7 @@ class _SalaryScreenState extends State<SalaryScreen>
                         Expanded(child: _AttendStat(
                             label: 'Hari Kerja',
                             value: '${slip.workingDays}',
-                            color: AppColors.primary)),
+                            color: AppColors.brandNavy)),
                         Expanded(child: _AttendStat(
                             label: 'Hadir',
                             value: '${slip.presentDays}',
@@ -287,7 +287,7 @@ class _SalaryScreenState extends State<SalaryScreen>
                         Expanded(child: _AttendStat(
                             label: 'Lembur',
                             value: '${slip.overtimeHours}j',
-                            color: AppColors.teal)),
+                            color: AppColors.brandCyan)),
                       ],
                     ),
                   ],
@@ -350,21 +350,21 @@ class _SalaryScreenState extends State<SalaryScreen>
 
               // ── Net total row ────────────────────────────
               SectionCard(
-                borderColor: AppColors.primary.withOpacity(0.4),
-                color: AppColors.primary.withOpacity(0.08),
+                borderColor: AppColors.brandNavy.withOpacity(0.4),
+                color: AppColors.brandNavy.withOpacity(0.08),
                 child: Row(
                   children: [
                     Text('Gaji Bersih',
                         style: AppText.body1
                             .copyWith(fontWeight: FontWeight.w700,
-                                color: AppColors.primary)),
+                                color: AppColors.brandNavy)),
                     const Spacer(),
                     Text(
                       _fmtCurrency(slip.netSalary),
                       style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
-                        color: AppColors.primary,
+                        color: AppColors.brandNavy,
                       ),
                     ),
                   ],
@@ -375,7 +375,7 @@ class _SalaryScreenState extends State<SalaryScreen>
 
               GradientButton(
                 label: 'Download Slip Gaji PDF',
-                color: AppColors.primary,
+                color: AppColors.brandNavy,
                 icon: Icons.picture_as_pdf_rounded,
                 onTap: () => ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Mengunduh slip gaji PDF...')),
@@ -481,7 +481,7 @@ class _SalaryRow extends StatelessWidget {
                   ? (isDeduction ? AppColors.danger : AppColors.success)
                   : isDeduction
                       ? AppColors.danger
-                      : AppColors.textPrimary,
+                      : AppColors.slate900,
             ),
           ),
         ],

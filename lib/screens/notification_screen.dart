@@ -140,7 +140,7 @@ class _NotificationScreenState extends State<NotificationScreen>
       case NotificationType.reminder:
         return AppColors.warning;
       case NotificationType.info:
-        return AppColors.primary;
+        return AppColors.brandNavy;
     }
   }
 
@@ -185,13 +185,13 @@ class _NotificationScreenState extends State<NotificationScreen>
     final filtered = _filtered;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.slate50,
       appBar: AppBar(
-        backgroundColor: AppColors.surface,
+        backgroundColor: AppColors.white,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: AppColors.textPrimary, size: 20),
+              color: AppColors.slate900, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
@@ -199,10 +199,10 @@ class _NotificationScreenState extends State<NotificationScreen>
           children: [
             Text('Notifikasi',
                 style: AppText.headline3
-                    .copyWith(fontSize: 18, color: AppColors.textPrimary)),
+                    .copyWith(fontSize: 18, color: AppColors.slate900)),
             if (_unreadCount > 0)
               Text('$_unreadCount belum dibaca',
-                  style: AppText.caption.copyWith(color: AppColors.primary)),
+                  style: AppText.caption.copyWith(color: AppColors.brandNavy)),
           ],
         ),
         actions: [
@@ -211,7 +211,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               onPressed: _markAllRead,
               child: Text('Baca Semua',
                   style: AppText.caption.copyWith(
-                      color: AppColors.primary, fontWeight: FontWeight.w600)),
+                      color: AppColors.brandNavy, fontWeight: FontWeight.w600)),
             ),
         ],
       ),
@@ -219,7 +219,7 @@ class _NotificationScreenState extends State<NotificationScreen>
         children: [
           // ── Filter chips ──────────────────────────────────────────
           Container(
-            color: AppColors.surface,
+            color: AppColors.white,
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -236,15 +236,15 @@ class _NotificationScreenState extends State<NotificationScreen>
                             horizontal: 14, vertical: 7),
                         decoration: BoxDecoration(
                           color: selected
-                              ? AppColors.primary
-                              : AppColors.surfaceVariant,
+                              ? AppColors.brandNavy
+                              : AppColors.slate300,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
                           f,
                           style: AppText.caption.copyWith(
                             color:
-                                selected ? Colors.white : AppColors.textSecondary,
+                                selected ? Colors.white : AppColors.slate600,
                             fontWeight: selected
                                 ? FontWeight.w700
                                 : FontWeight.w500,
@@ -283,11 +283,11 @@ class _NotificationScreenState extends State<NotificationScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.notifications_off_outlined,
-                size: 64, color: AppColors.textSecondary.withOpacity(0.4)),
+                size: 64, color: AppColors.slate600.withOpacity(0.4)),
             const SizedBox(height: 16),
             Text('Tidak ada notifikasi',
                 style: AppText.body1
-                    .copyWith(color: AppColors.textSecondary)),
+                    .copyWith(color: AppColors.slate600)),
           ],
         ),
       );
@@ -331,7 +331,7 @@ class _NotificationScreenState extends State<NotificationScreen>
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             decoration: BoxDecoration(
-              color: n.isRead ? AppColors.surface : AppColors.surfaceVariant,
+              color: n.isRead ? AppColors.white : AppColors.slate300,
               borderRadius: BorderRadius.circular(16),
               border: n.isRead
                   ? null
@@ -368,14 +368,14 @@ class _NotificationScreenState extends State<NotificationScreen>
                                       fontWeight: n.isRead
                                           ? FontWeight.w500
                                           : FontWeight.w700,
-                                      color: AppColors.textPrimary)),
+                                      color: AppColors.slate900)),
                             ),
                             if (!n.isRead)
                               Container(
                                 width: 8,
                                 height: 8,
                                 decoration: BoxDecoration(
-                                  color: AppColors.primary,
+                                  color: AppColors.brandNavy,
                                   shape: BoxShape.circle,
                                 ),
                               ),
@@ -384,7 +384,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                         const SizedBox(height: 4),
                         Text(n.message,
                             style: AppText.caption.copyWith(
-                                color: AppColors.textSecondary, height: 1.4),
+                                color: AppColors.slate600, height: 1.4),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 8),
@@ -406,7 +406,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                             const SizedBox(width: 8),
                             Text(_formatTime(n.createdAt),
                                 style: AppText.caption.copyWith(
-                                    color: AppColors.textSecondary,
+                                    color: AppColors.slate600,
                                     fontSize: 11)),
                           ],
                         ),
@@ -431,7 +431,7 @@ class _NotificationScreenState extends State<NotificationScreen>
       builder: (_) => Container(
         padding: const EdgeInsets.all(24),
         decoration: const BoxDecoration(
-          color: AppColors.surface,
+          color: AppColors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: Column(
@@ -443,7 +443,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
+                  color: AppColors.slate100,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -467,7 +467,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                     children: [
                       Text(n.title,
                           style: AppText.headline3
-                              .copyWith(fontSize: 16, color: AppColors.textPrimary)),
+                              .copyWith(fontSize: 16, color: AppColors.slate900)),
                       const SizedBox(height: 2),
                       Text(_typeLabel(n.type),
                           style: AppText.caption.copyWith(color: color)),
@@ -481,18 +481,18 @@ class _NotificationScreenState extends State<NotificationScreen>
             const SizedBox(height: 16),
             Text(n.message,
                 style: AppText.body1.copyWith(
-                    color: AppColors.textSecondary, height: 1.6)),
+                    color: AppColors.slate600, height: 1.6)),
             const SizedBox(height: 16),
             Row(
               children: [
                 Icon(Icons.access_time_rounded,
-                    size: 14, color: AppColors.textSecondary),
+                    size: 14, color: AppColors.slate600),
                 const SizedBox(width: 6),
                 Text(
                   DateFormat('EEEE, dd MMMM yyyy · HH:mm', 'id_ID')
                       .format(n.createdAt),
                   style:
-                      AppText.caption.copyWith(color: AppColors.textSecondary),
+                      AppText.caption.copyWith(color: AppColors.slate600),
                 ),
               ],
             ),

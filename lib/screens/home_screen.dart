@@ -7,13 +7,11 @@ import '../models/models.dart';
 import 'break_screen.dart';
 import 'salary_screen.dart';
 import 'leave_request_screen.dart';
-import 'permission_screen.dart';
 import 'notification_screen.dart';
 import 'landing_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
-
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -21,38 +19,35 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final UserProfile user = SampleData.currentUser;
 
-  AttendanceState _state = AttendanceState.checkedIn;
-  DateTime _now = DateTime.now();
-  DateTime? _checkInTime;
-  Duration _workDuration = Duration.zero;
+  AttendanceState _state      = AttendanceState.checkedIn;
+  DateTime        _now        = DateTime.now();
+  DateTime?       _checkInTime;
+  Duration        _workDuration = Duration.zero;
+  bool            _showForgotDialog = false;
+  bool            _showMascot = false;
+  String          _mascotMsg  = '';
+  bool            _mascotWave = true;
+  int             _currentPoints = 420;
+  int             _msgIndex   = 0;
 
-  Timer? _clockTimer;
-  Timer? _workTimer;
-
-  bool _showForgotDialog = false;
-  int _currentPoints = 420;
-  int _msgIndex = 0;
+  Timer? _clockTimer, _workTimer;
 
   late AnimationController _stateCtrl;
-  late Animation<double> _stateFade;
+  late Animation<double>   _stateFade;
 
   @override
   void initState() {
     super.initState();
     _checkInTime = DateTime.now().subtract(const Duration(hours: 2));
-    _msgIndex = DateTime.now().second % SampleData.motivationalMessages.length;
+    _msgIndex    = DateTime.now().second % SampleData.motivationalMessages.length;
 
-    _stateCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
+    _stateCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
     _stateFade = CurvedAnimation(parent: _stateCtrl, curve: Curves.easeIn);
     _stateCtrl.forward();
 
     _clockTimer = Timer.periodic(const Duration(seconds: 1),
         (_) => setState(() => _now = DateTime.now()));
-
-    _workTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+    _workTimer  = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_state == AttendanceState.checkedIn && _checkInTime != null) {
         setState(() => _workDuration = _now.difference(_checkInTime!));
       }
@@ -61,20 +56,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _clockTimer?.cancel();
-    _workTimer?.cancel();
-    _stateCtrl.dispose();
+    _clockTimer?.cancel(); _workTimer?.cancel(); _stateCtrl.dispose();
     super.dispose();
   }
 
-  // ── Helpers ───────────────────────────────────────────────
-  String _formatDuration(Duration d) =>
-      '${d.inHours.toString().padLeft(2, '0')}:'
-      '${(d.inMinutes % 60).toString().padLeft(2, '0')}:'
-      '${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+  String _fmtDuration(Duration d) =>
+      '${d.inHours.toString().padLeft(2,'0')}:${(d.inMinutes%60).toString().padLeft(2,'0')}:${(d.inSeconds%60).toString().padLeft(2,'0')}';
 
-  String _formatTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  String _fmtTime(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
 
   String _greet() {
     final h = _now.hour;
@@ -85,14 +75,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   bool get _canCheckout {
-    if (_state != AttendanceState.checkedIn &&
-        _state != AttendanceState.breakEnded) return false;
-    if (_state == AttendanceState.breakEnded) return false;
-    final shift = user.currentShift;
+    if (_state != AttendanceState.checkedIn) return false;
     final shiftEnd = DateTime(_now.year, _now.month, _now.day,
-        shift.endTime.hour, shift.endTime.minute);
-    return _now.isAfter(
-        shiftEnd.subtract(Duration(minutes: user.position.earlyCheckoutToleranceMinutes)));
+        user.currentShift.endTime.hour, user.currentShift.endTime.minute);
+    return _now.isAfter(shiftEnd.subtract(
+        Duration(minutes: user.position.earlyCheckoutToleranceMinutes)));
   }
 
   int get _overtimeMinutes {
@@ -107,74 +94,66 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _stateCtrl.reset();
     setState(() => _state = AttendanceState.onBreak);
     _stateCtrl.forward();
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BreakScreen(
-          onBreakEnd: () {
-            setState(() => _state = AttendanceState.breakEnded);
-            _stateCtrl
-              ..reset()
-              ..forward();
-          },
-        ),
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => BreakScreen(
+        onBreakEnd: () {
+          setState(() => _state = AttendanceState.breakEnded);
+          _stateCtrl..reset()..forward();
+        },
       ),
-    );
+    ));
   }
 
   void _returnFromBreak() {
     _stateCtrl.reset();
-    setState(() {
-      _state = AttendanceState.checkedIn;
-      _currentPoints += 5;
-    });
+    setState(() { _state = AttendanceState.checkedIn; _currentPoints += 5; });
     _stateCtrl.forward();
-    _snack('Selamat kembali! Semangat lanjut kerja 💪', AppColors.success);
+    // Show mascot for return from break
+    setState(() {
+      _showMascot = true;
+      _mascotMsg  = 'Semangat Kembali! 💪\nLanjut produktif ya!';
+      _mascotWave = true;
+    });
   }
 
   Future<void> _checkout() async {
     if (!_canCheckout) {
-      final tolerance = user.position.earlyCheckoutToleranceMinutes;
       _infoDialog(
         title: 'Belum Bisa Check-out',
-        message:
-            'Check-out diizinkan dalam $tolerance menit sebelum akhir shift '
-            '(${user.currentShift.endTimeStr}).\n\nHubungi supervisor jika ada keperluan mendesak.',
+        message: 'Check-out diizinkan dalam '
+            '${user.position.earlyCheckoutToleranceMinutes} menit '
+            'sebelum akhir shift (${user.currentShift.endTimeStr}).',
         icon: Icons.lock_clock_rounded,
         iconColor: AppColors.warning,
       );
       return;
     }
     if (_state == AttendanceState.breakEnded) {
-      _snack('Tekan tombol "IN" setelah istirahat terlebih dahulu', AppColors.warning);
+      _snack('Tekan tombol "IN" setelah istirahat terlebih dahulu');
       return;
     }
     final shiftEnd = DateTime(_now.year, _now.month, _now.day,
         user.currentShift.endTime.hour, user.currentShift.endTime.minute);
     if (_now.isBefore(shiftEnd)) {
-      final ok = await _confirmDialog(
-        'Pulang Lebih Awal?',
-        'Shift berakhir pukul ${user.currentShift.endTimeStr}. Yakin ingin check-out sekarang?',
-      );
+      final ok = await _confirmDialog('Pulang Lebih Awal?',
+          'Shift berakhir pukul ${user.currentShift.endTimeStr}. Yakin check-out sekarang?');
       if (ok != true) return;
     }
     _stateCtrl.reset();
-    setState(() {
-      _state = AttendanceState.checkedOut;
-      _currentPoints += 10;
-    });
+    setState(() { _state = AttendanceState.checkedOut; _currentPoints += 10; });
     _stateCtrl.forward();
-    _snack(SampleData.checkoutMessages[_now.second % 3], AppColors.success);
+    // Show mascot after checkout
+    setState(() {
+      _showMascot = true;
+      _mascotMsg  = SampleData.checkoutMessages[_now.second % 3];
+      _mascotWave = true;
+    });
   }
 
-  // ── Dialogs ───────────────────────────────────────────────
-  void _snack(String msg, Color bg) {
+  void _snack(String msg, {Color? bg}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg, style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
-      backgroundColor: bg,
-      duration: const Duration(seconds: 3),
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      backgroundColor: bg ?? AppColors.brandNavyDark,
     ));
   }
 
@@ -185,25 +164,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           title: Text(title),
           content: Text(msg, style: AppText.body2),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text('Batal',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Ya, Check-out'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context, false),
+                child: const Text('Batal')),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true),
+                child: const Text('Ya, Check-out')),
           ],
         ),
       );
 
-  void _infoDialog({
-    required String title,
-    required String message,
-    required IconData icon,
-    Color iconColor = AppColors.info,
-  }) {
+  void _infoDialog({required String title, required String message,
+      required IconData icon, Color iconColor = AppColors.brandCyan}) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -212,10 +182,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         content: Text(message, style: AppText.body2, textAlign: TextAlign.center),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Mengerti'),
-          ),
+          ElevatedButton(onPressed: () => Navigator.pop(context),
+              child: const Text('Mengerti')),
         ],
       ),
     );
@@ -225,28 +193,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.slate50,
       body: Stack(
         children: [
           CustomScrollView(
             slivers: [
-              // ── Sliver App Bar ────────────────────────────
               SliverAppBar(
-                expandedHeight: 190,
+                expandedHeight: 195,
                 pinned: true,
-                backgroundColor: AppColors.background,
+                backgroundColor: AppColors.white,
                 surfaceTintColor: Colors.transparent,
                 automaticallyImplyLeading: false,
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildHeader(),
                   collapseMode: CollapseMode.pin,
                 ),
-                // Collapsed bar — shown when scrolled
                 title: _buildCollapsedBar(),
                 titleSpacing: 0,
                 bottom: PreferredSize(
                   preferredSize: const Size.fromHeight(1),
-                  child: Container(height: 1, color: AppColors.border),
+                  child: Container(height: 1, color: AppColors.slate200),
                 ),
               ),
 
@@ -258,27 +224,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     children: [
                       const SizedBox(height: 16),
 
-                      FadeTransition(
-                        opacity: _stateFade,
-                        child: _buildStateCard(),
-                      ),
+                      FadeTransition(opacity: _stateFade, child: _buildStateCard()),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
 
-                      if (_state == AttendanceState.checkedIn)
+                      if (_state == AttendanceState.checkedIn) ...[
                         _buildWorkTimer(),
+                        const SizedBox(height: 14),
+                      ],
 
-                      if (_state == AttendanceState.checkedIn)
-                        const SizedBox(height: 16),
-
-                      // ── Quick Menu ────────────────────────
                       Text('Menu', style: AppText.headline3),
                       const SizedBox(height: 12),
                       _buildQuickMenu(),
 
                       const SizedBox(height: 20),
 
-                      // ── Attendance history ────────────────
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -286,16 +246,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           TextButton(
                             onPressed: () {},
                             child: Text('Lihat Semua',
-                                style: TextStyle(
-                                    color: AppColors.primary, fontSize: 13)),
+                                style: TextStyle(color: AppColors.brandNavy, fontSize: 13)),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
-                      ...SampleData.recentAttendance
-                          .take(5)
-                          .map((r) => _AttendanceRow(record: r)),
-
+                      ...SampleData.recentAttendance.take(5).map((r) => _AttendanceRow(record: r)),
                       const SizedBox(height: 80),
                     ],
                   ),
@@ -305,107 +261,93 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
 
           if (_showForgotDialog) _buildForgotCheckoutOverlay(),
+
+          if (_showMascot)
+            Positioned.fill(
+              child: MascotOverlay(
+                wave: _mascotWave,
+                message: _mascotMsg,
+                onDismiss: () => setState(() => _showMascot = false),
+              ),
+            ),
         ],
       ),
     );
   }
 
-  // ── Collapsed AppBar bar ──────────────────────────────────
   Widget _buildCollapsedBar() {
     return Row(
       children: [
         const SizedBox(width: 4),
         IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 16, color: AppColors.textPrimary),
+              size: 16, color: AppColors.slate700),
           tooltip: 'Kembali ke Beranda',
-          onPressed: () => Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const LandingScreen()),
-          ),
+          onPressed: () => Navigator.pushReplacement(context,
+              MaterialPageRoute(builder: (_) => const LandingScreen())),
         ),
-        Expanded(
-          child: Text('HadirIn', style: AppText.headline3),
-        ),
-        _notifButton(),
+        Image.asset(AppAssets.logoIcon, height: 24),
+        const SizedBox(width: 6),
+        Expanded(child: Text('Hadir-In', style: AppText.headline3)),
+        _notifBtn(),
         const SizedBox(width: 4),
       ],
     );
   }
 
-  Widget _notifButton() {
-    return Stack(
-      children: [
-        IconButton(
-          icon: const Icon(Icons.notifications_outlined,
-              color: AppColors.textPrimary),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const NotificationScreen()),
-          ),
+  Widget _notifBtn() => Stack(
+    children: [
+      IconButton(
+        icon: const Icon(Icons.notifications_outlined, color: AppColors.slate700),
+        onPressed: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const NotificationScreen())),
+      ),
+      Positioned(
+        right: 8, top: 8,
+        child: Container(
+          width: 8, height: 8,
+          decoration: const BoxDecoration(
+              color: AppColors.danger, shape: BoxShape.circle),
         ),
-        Positioned(
-          right: 8,
-          top: 8,
-          child: Container(
-            width: 8,
-            height: 8,
-            decoration: const BoxDecoration(
-              color: AppColors.danger,
-              shape: BoxShape.circle,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+      ),
+    ],
+  );
 
-  // ── Header ────────────────────────────────────────────────
   Widget _buildHeader() {
     return Container(
-      color: AppColors.background,
-      padding: const EdgeInsets.fromLTRB(16, 52, 16, 14),
+      color: AppColors.white,
+      padding: const EdgeInsets.fromLTRB(16, 50, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              // ── Back button (small) ──
+              // Back button
               GestureDetector(
-                onTap: () => Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LandingScreen()),
-                ),
+                onTap: () => Navigator.pushReplacement(context,
+                    MaterialPageRoute(builder: (_) => const LandingScreen())),
                 child: Container(
-                  width: 36,
-                  height: 36,
+                  width: 34, height: 34,
                   decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
+                    color: AppColors.slate100,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: AppColors.slate200),
                   ),
                   child: const Icon(Icons.arrow_back_ios_new_rounded,
-                      size: 15, color: AppColors.textSecondary),
+                      size: 14, color: AppColors.slate600),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               // Avatar
               Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  shape: BoxShape.circle,
+                width: 42, height: 42,
+                decoration: const BoxDecoration(
+                  color: AppColors.brandNavy, shape: BoxShape.circle,
                 ),
                 child: Center(
-                  child: Text(
-                    user.name[0],
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
+                  child: Text(user.name[0],
+                      style: GoogleFonts.inter(color: Colors.white,
+                          fontSize: 17, fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 10),
@@ -414,42 +356,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(_greet(), style: AppText.body2),
-                    Text(user.name, style: AppText.headline3),
-                    Text(
-                      '${user.position.name} · ${user.employeeId}',
-                      style: AppText.caption,
-                    ),
+                    Text(user.name,
+                        style: AppText.headline3.copyWith(color: AppColors.brandNavy)),
+                    Text('${user.position.name} · ${user.employeeId}',
+                        style: AppText.caption),
                   ],
                 ),
               ),
-              // Notif + Points
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _notifButton(),
+                  _notifBtn(),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.15),
+                      color: AppColors.brandNavy.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: AppColors.primary.withOpacity(0.3)),
+                      border: Border.all(color: AppColors.brandNavy.withOpacity(0.2)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(Icons.star_rounded,
-                            color: AppColors.primary, size: 13),
+                            color: AppColors.brandNavy, size: 13),
                         const SizedBox(width: 4),
-                        Text(
-                          '$_currentPoints pts',
-                          style: GoogleFonts.inter(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                          ),
-                        ),
+                        Text('$_currentPoints pts',
+                            style: GoogleFonts.inter(
+                              color: AppColors.brandNavy, fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            )),
                       ],
                     ),
                   ),
@@ -457,28 +392,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Shift bar
+          const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: AppColors.surface,
+              color: AppColors.brandNavy.withOpacity(0.05),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: AppColors.brandNavy.withOpacity(0.15)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.schedule_rounded,
-                    color: AppColors.primary, size: 14),
+                const Icon(Icons.schedule_rounded, color: AppColors.brandNavy, size: 14),
                 const SizedBox(width: 6),
                 Text(
-                  '${user.currentShift.name}: '
-                  '${user.currentShift.startTimeStr} – ${user.currentShift.endTimeStr}',
-                  style: AppText.body2
-                      .copyWith(color: AppColors.primary, fontSize: 12),
+                  '${user.currentShift.name}: ${user.currentShift.startTimeStr} – ${user.currentShift.endTimeStr}',
+                  style: AppText.body2.copyWith(
+                      color: AppColors.brandNavy, fontWeight: FontWeight.w600, fontSize: 12),
                 ),
                 const Spacer(),
-                _buildStateChip(),
+                _stateChip(),
               ],
             ),
           ),
@@ -487,32 +419,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStateChip() {
-    Color color;
-    String label;
+  Widget _stateChip() {
+    Color c; String label;
     switch (_state) {
-      case AttendanceState.notCheckedIn:
-        color = AppColors.textMuted;
-        label = 'Belum Masuk';
-        break;
-      case AttendanceState.checkedIn:
-        color = AppColors.success;
-        label = 'Sedang Kerja';
-        break;
-      case AttendanceState.onBreak:
-        color = AppColors.warning;
-        label = 'Istirahat';
-        break;
-      case AttendanceState.breakEnded:
-        color = AppColors.info;
-        label = 'Selesai Istirahat';
-        break;
-      case AttendanceState.checkedOut:
-        color = AppColors.teal;
-        label = 'Sudah Pulang';
-        break;
+      case AttendanceState.notCheckedIn: c = AppColors.slate400;      label = 'Belum Masuk';     break;
+      case AttendanceState.checkedIn:    c = AppColors.brandLimeDark;  label = 'Sedang Kerja';    break;
+      case AttendanceState.onBreak:      c = AppColors.warning;        label = 'Istirahat';       break;
+      case AttendanceState.breakEnded:   c = AppColors.brandCyanDark;  label = 'Selesai Istirahat'; break;
+      case AttendanceState.checkedOut:   c = AppColors.brandNavyLight; label = 'Sudah Pulang';   break;
     }
-    return StatusBadge(label: label, color: color);
+    return StatusBadge(label: label, color: c);
   }
 
   // ── State Card ────────────────────────────────────────────
@@ -522,8 +438,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return SectionCard(
           child: Column(
             children: [
-              Icon(Icons.login_rounded,
-                  color: AppColors.textMuted, size: 36),
+              const Icon(Icons.login_rounded, color: AppColors.slate300, size: 36),
               const SizedBox(height: 10),
               Text('Belum Check-in', style: AppText.headline3),
               const SizedBox(height: 4),
@@ -535,38 +450,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       case AttendanceState.checkedIn:
         return Column(
           children: [
-            // Motivational banner
             SectionCard(
-              borderColor: AppColors.success.withOpacity(0.3),
-              color: AppColors.success.withOpacity(0.06),
+              color: AppColors.brandLime.withOpacity(0.07),
+              borderColor: AppColors.brandLime.withOpacity(0.3),
               child: Row(
                 children: [
                   const Text('💪', style: TextStyle(fontSize: 22)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      SampleData.motivationalMessages[_msgIndex],
-                      style: AppText.body1.copyWith(fontWeight: FontWeight.w500),
-                    ),
+                    child: Text(SampleData.motivationalMessages[_msgIndex],
+                        style: AppText.body1.copyWith(fontWeight: FontWeight.w500,
+                            color: AppColors.slate800)),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 10),
-            // Break button
             GradientButton(
               label: '☕  Mulai Istirahat',
               color: AppColors.warning,
-              height: 56,
+              textColor: AppColors.brandNavyDark,
+              height: 52,
               icon: Icons.free_breakfast_rounded,
               onTap: _startBreak,
             ),
-            const SizedBox(height: 10),
-            // Checkout button
+            const SizedBox(height: 8),
             GradientButton(
               label: 'Check-out',
-              color: _canCheckout ? AppColors.teal : AppColors.surfaceVariant,
-              height: 52,
+              color: _canCheckout ? AppColors.brandNavy : AppColors.slate200,
+              textColor: _canCheckout ? Colors.white : AppColors.slate400,
+              height: 48,
               icon: Icons.logout_rounded,
               onTap: _checkout,
             ),
@@ -575,25 +488,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       case AttendanceState.onBreak:
         return SectionCard(
+          color: AppColors.warning.withOpacity(0.05),
           borderColor: AppColors.warning.withOpacity(0.3),
-          color: AppColors.warning.withOpacity(0.06),
           child: Column(
             children: [
-              const Text('☕', style: TextStyle(fontSize: 42)),
-              const SizedBox(height: 10),
+              const Text('☕', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 8),
               Text('Sedang Istirahat', style: AppText.headline3),
               const SizedBox(height: 4),
-              Text(
-                'Kamu sedang dalam sesi istirahat.\nKembali ke layar istirahat untuk melanjutkan.',
-                style: AppText.body2,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 14),
+              Text('Kamu sedang dalam sesi istirahat.',
+                  style: AppText.body2, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
               GradientButton(
                 label: 'Kembali ke Layar Istirahat',
                 color: AppColors.warning,
-                height: 44,
-                onTap: _startBreak,
+                textColor: AppColors.brandNavyDark,
+                height: 44, onTap: _startBreak,
               ),
             ],
           ),
@@ -601,25 +511,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       case AttendanceState.breakEnded:
         return SectionCard(
-          borderColor: AppColors.primary.withOpacity(0.3),
-          color: AppColors.primary.withOpacity(0.06),
+          color: AppColors.brandCyan.withOpacity(0.06),
+          borderColor: AppColors.brandCyan.withOpacity(0.3),
           child: Column(
             children: [
-              const Text('🔔', style: TextStyle(fontSize: 42)),
-              const SizedBox(height: 10),
+              const Text('🔔', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 8),
               Text('Istirahat Selesai!', style: AppText.headline3),
               const SizedBox(height: 4),
-              Text(
-                'Tekan tombol IN untuk kembali bekerja',
-                style: AppText.body2,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 14),
+              Text('Tekan tombol IN untuk kembali bekerja',
+                  style: AppText.body2, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
               GradientButton(
                 label: '▶  Kembali Bekerja (IN)',
-                color: AppColors.success,
-                height: 52,
-                onTap: _returnFromBreak,
+                color: AppColors.brandLimeDark,
+                height: 48, onTap: _returnFromBreak,
               ),
             ],
           ),
@@ -627,24 +533,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       case AttendanceState.checkedOut:
         return SectionCard(
-          borderColor: AppColors.teal.withOpacity(0.3),
-          color: AppColors.teal.withOpacity(0.06),
+          color: AppColors.brandNavy.withOpacity(0.04),
+          borderColor: AppColors.brandNavy.withOpacity(0.2),
           child: Column(
             children: [
-              const Text('🌙', style: TextStyle(fontSize: 42)),
-              const SizedBox(height: 10),
+              const Text('🌙', style: TextStyle(fontSize: 40)),
+              const SizedBox(height: 8),
               Text('Sudah Check-out', style: AppText.headline3),
               const SizedBox(height: 4),
-              Text(
-                'Kerja hari ini sudah selesai.\nSampai jumpa besok!',
-                style: AppText.body2,
-                textAlign: TextAlign.center,
-              ),
+              Text('Kerja hari ini selesai. Sampai jumpa besok!',
+                  style: AppText.body2, textAlign: TextAlign.center),
               if (_overtimeMinutes > 0) ...[
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 StatusBadge(
                   label: 'Lembur: ${_overtimeMinutes ~/ 60}j ${_overtimeMinutes % 60}m',
-                  color: AppColors.primary,
+                  color: AppColors.brandNavy,
                 ),
               ],
             ],
@@ -661,34 +564,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         children: [
           Row(
             children: [
-              Icon(Icons.timer_outlined, color: AppColors.primary, size: 16),
-              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.brandNavy.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(Icons.timer_outlined, color: AppColors.brandNavy, size: 15),
+              ),
+              const SizedBox(width: 8),
               Text('Timer Kerja', style: AppText.label),
               const Spacer(),
               if (_checkInTime != null)
-                Text('Masuk: ${_formatTime(_checkInTime!)}',
-                    style: AppText.caption),
+                Text('Masuk: ${_fmtTime(_checkInTime!)}', style: AppText.caption),
             ],
           ),
           const SizedBox(height: 10),
           Center(
             child: Text(
-              _formatDuration(_workDuration),
+              _fmtDuration(_workDuration),
               style: GoogleFonts.jetBrainsMono(
-                fontSize: 34,
-                fontWeight: FontWeight.w800,
-                color: AppColors.primary,
+                fontSize: 32, fontWeight: FontWeight.w800, color: AppColors.brandNavy,
               ),
             ),
           ),
           if (_overtimeMinutes > 0) ...[
             const SizedBox(height: 6),
-            Center(
-              child: StatusBadge(
-                label: '⏰ Lembur: ${_overtimeMinutes ~/ 60}j ${_overtimeMinutes % 60}m',
-                color: AppColors.warning,
-              ),
-            ),
+            Center(child: StatusBadge(
+              label: '⏰ Lembur: ${_overtimeMinutes ~/ 60}j ${_overtimeMinutes % 60}m',
+              color: AppColors.warning,
+            )),
           ],
         ],
       ),
@@ -698,28 +603,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── Quick Menu ────────────────────────────────────────────
   Widget _buildQuickMenu() {
     final items = [
-      _MenuItem(icon: Icons.receipt_long_rounded, label: 'Slip Gaji',
-          color: AppColors.teal,
-          onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const SalaryScreen()))),
-      _MenuItem(icon: Icons.event_available_rounded, label: 'Cuti',
-          color: AppColors.success,
-          onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) =>
-                  const LeaveRequestScreen(user: SampleData.currentUser)))),
-      _MenuItem(icon: Icons.sick_rounded, label: 'Izin / Sakit',
-          color: AppColors.danger,
-          onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const PermissionScreen()))),
-      _MenuItem(icon: Icons.notifications_outlined, label: 'Notifikasi',
-          color: AppColors.warning,
-          onTap: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const NotificationScreen()))),
+      _MenuItem(icon: Icons.receipt_long_rounded,    label: 'Slip Gaji',    color: AppColors.brandCyanDark,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SalaryScreen()))),
+      _MenuItem(icon: Icons.event_available_rounded, label: 'Cuti',         color: AppColors.brandLimeDark,
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => const LeaveRequestScreen(user: SampleData.currentUser, initialTab: 0)))),
+      _MenuItem(icon: Icons.sick_rounded,            label: 'Izin / Sakit', color: AppColors.danger,
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (_) => const LeaveRequestScreen(user: SampleData.currentUser, initialTab: 1)))),
+      _MenuItem(icon: Icons.notifications_outlined,  label: 'Notifikasi',   color: AppColors.warning,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationScreen()))),
     ];
 
     return GridView.count(
-      crossAxisCount: 4,
-      shrinkWrap: true,
+      crossAxisCount: 4, shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       crossAxisSpacing: 8,
       children: items.map(_buildMenuItem).toList(),
@@ -733,22 +630,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 52, height: 52,
             decoration: BoxDecoration(
-              color: item.color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: item.color.withOpacity(0.25)),
+              color: item.color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: item.color.withOpacity(0.2)),
             ),
             child: Icon(item.icon, color: item.color, size: 24),
           ),
           const SizedBox(height: 6),
-          Text(
-            item.label,
-            style: AppText.caption.copyWith(fontSize: 10),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-          ),
+          Text(item.label,
+              style: AppText.caption.copyWith(
+                  fontSize: 10, color: AppColors.slate700),
+              textAlign: TextAlign.center, maxLines: 2),
         ],
       ),
     );
@@ -758,7 +652,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildForgotCheckoutOverlay() {
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withOpacity(0.5),
         child: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -767,35 +661,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('🤔', style: TextStyle(fontSize: 48)),
-                  const SizedBox(height: 12),
+                  const Text('🤔', style: TextStyle(fontSize: 46)),
+                  const SizedBox(height: 10),
                   Text('Are you still at work?', style: AppText.headline3,
                       textAlign: TextAlign.center),
                   const SizedBox(height: 6),
-                  Text(
-                    'Shift kamu sudah berakhir. Apakah kamu masih di tempat kerja?',
-                    style: AppText.body2,
-                    textAlign: TextAlign.center,
-                  ),
+                  Text('Shift kamu sudah berakhir. Apakah kamu masih di tempat kerja?',
+                      style: AppText.body2, textAlign: TextAlign.center),
                   const SizedBox(height: 20),
                   Row(
                     children: [
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () =>
-                              setState(() => _showForgotDialog = false),
-                          child: const Text('Tidak'),
+                        child: GradientButton(
+                          label: 'Tidak', outlined: true, color: AppColors.slate400,
+                          textColor: AppColors.slate600,
+                          onTap: () => setState(() => _showForgotDialog = false),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
+                        child: GradientButton(
+                          label: 'Ya, Masih', color: AppColors.brandNavy,
+                          onTap: () {
                             setState(() => _showForgotDialog = false);
-                            _snack('✅ Lembur dicatat. Tetap semangat!',
-                                AppColors.success);
+                            _snack('✅ Lembur dicatat. Tetap semangat!');
                           },
-                          child: const Text('Ya, Masih'),
                         ),
                       ),
                     ],
@@ -812,15 +702,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
 // ── Helper classes ────────────────────────────────────────────
 class _MenuItem {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _MenuItem(
-      {required this.icon,
-      required this.label,
-      required this.color,
-      required this.onTap});
+  final IconData icon; final String label; final Color color; final VoidCallback onTap;
+  const _MenuItem({required this.icon, required this.label, required this.color, required this.onTap});
 }
 
 // ── Attendance Row ────────────────────────────────────────────
@@ -829,38 +712,26 @@ class _AttendanceRow extends StatelessWidget {
   const _AttendanceRow({required this.record});
 
   String _fmtDate(DateTime dt) {
-    const days = ['', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
-    const months = [
-      '', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
-      'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
-    ];
+    const days = ['','Sen','Sel','Rab','Kam','Jum','Sab','Min'];
+    const months = ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
     return '${days[dt.weekday]}, ${dt.day} ${months[dt.month]}';
   }
 
   String _fmtTime(DateTime? dt) {
     if (dt == null) return '--:--';
-    return '${dt.hour.toString().padLeft(2, '0')}:'
-        '${dt.minute.toString().padLeft(2, '0')}';
+    return '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
   }
 
   @override
   Widget build(BuildContext context) {
-    Color c;
-    String label;
-    IconData icon;
+    Color c; String label; IconData icon;
     switch (record.status) {
-      case AttendanceStatus.present:
-        c = AppColors.success; label = 'Hadir'; icon = Icons.check_circle_rounded; break;
-      case AttendanceStatus.late:
-        c = AppColors.warning; label = 'Terlambat'; icon = Icons.schedule_rounded; break;
-      case AttendanceStatus.absent:
-        c = AppColors.danger; label = 'Absen'; icon = Icons.cancel_rounded; break;
-      case AttendanceStatus.leave:
-        c = AppColors.primary; label = 'Cuti'; icon = Icons.event_available_rounded; break;
-      case AttendanceStatus.holiday:
-        c = AppColors.teal; label = 'Libur'; icon = Icons.beach_access_rounded; break;
+      case AttendanceStatus.present: c = AppColors.brandLimeDark; label = 'Hadir';    icon = Icons.check_circle_rounded;    break;
+      case AttendanceStatus.late:    c = AppColors.warning;       label = 'Terlambat'; icon = Icons.schedule_rounded;        break;
+      case AttendanceStatus.absent:  c = AppColors.danger;        label = 'Absen';    icon = Icons.cancel_rounded;          break;
+      case AttendanceStatus.leave:   c = AppColors.brandNavy;     label = 'Cuti';     icon = Icons.event_available_rounded;  break;
+      case AttendanceStatus.holiday: c = AppColors.brandCyanDark; label = 'Libur';    icon = Icons.beach_access_rounded;    break;
     }
-
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: SectionCard(
@@ -870,8 +741,7 @@ class _AttendanceRow extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: c.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
+                color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, color: c, size: 16),
             ),
@@ -881,7 +751,8 @@ class _AttendanceRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_fmtDate(record.date),
-                      style: AppText.body1.copyWith(fontWeight: FontWeight.w600)),
+                      style: AppText.body1.copyWith(fontWeight: FontWeight.w600,
+                          color: AppColors.slate900)),
                   const SizedBox(height: 2),
                   Text(
                     record.checkIn != null
@@ -889,12 +760,12 @@ class _AttendanceRow extends StatelessWidget {
                         : label,
                     style: AppText.body2,
                   ),
-                  if (record.lateMinutes != null && record.lateMinutes! > 0)
+                  if ((record.lateMinutes ?? 0) > 0)
                     Text('Terlambat ${record.lateMinutes} menit',
                         style: AppText.caption.copyWith(color: AppColors.warning)),
-                  if (record.overtimeMinutes != null && record.overtimeMinutes! > 0)
+                  if ((record.overtimeMinutes ?? 0) > 0)
                     Text('Lembur ${record.overtimeMinutes} menit',
-                        style: AppText.caption.copyWith(color: AppColors.primary)),
+                        style: AppText.caption.copyWith(color: AppColors.brandNavy)),
                 ],
               ),
             ),
@@ -905,7 +776,7 @@ class _AttendanceRow extends StatelessWidget {
                 if (record.pointsEarned > 0) ...[
                   const SizedBox(height: 4),
                   Text('+${record.pointsEarned} pts',
-                      style: AppText.caption.copyWith(color: AppColors.primary)),
+                      style: AppText.caption.copyWith(color: AppColors.brandNavy)),
                 ],
               ],
             ),
