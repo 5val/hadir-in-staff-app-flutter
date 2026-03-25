@@ -22,10 +22,21 @@ class _CheckinScreenState extends State<CheckinScreen>
   bool   _showSuccess       = false;
   bool   _showMascot        = false;
   String _locationLabel     = '';
-  String _checkType         = 'checkin';
-
   DateTime _now = DateTime.now();
   Timer?   _clockTimer;
+
+  // ── Auto check-type cutoff ───────────────────────────────
+  /// Jam berapa sistem beralih otomatis ke check-out.
+  /// Sebelum jam ini → hanya bisa check-in.
+  /// Setelah/tepat jam ini → hanya bisa check-out (check-in dikunci).
+  static const int _checkoutCutoffHour = 12; // 12:00 siang
+
+  /// True jika sudah lewat cutoff hour — check-in tidak bisa lagi.
+  bool get _pastCutoff => _now.hour >= _checkoutCutoffHour;
+
+  /// Tipe aktif berdasarkan waktu sekarang (bukan pilihan manual).
+  /// Sebelum 12:00 → checkin; Setelah 12:00 → checkout.
+  String get _autoCheckType => _pastCutoff ? 'checkout' : 'checkin';
 
   late AnimationController _successCtrl, _locationCtrl;
   late Animation<double>   _successScale, _successFade, _locationFade;
@@ -76,6 +87,81 @@ class _CheckinScreenState extends State<CheckinScreen>
     return '${days[dt.weekday]}, ${dt.day} ${months[dt.month]} ${dt.year}';
   }
 
+  // ── Cutoff info banner ───────────────────────────────────
+  Widget _buildCutoffBanner() {
+    if (_pastCutoff) {
+      // Setelah jam 12: banner bahwa hanya checkout yang tersedia
+      return SectionCard(
+        color: AppColors.brandNavy.withOpacity(0.05),
+        borderColor: AppColors.brandNavy.withOpacity(0.2),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.brandNavy.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.schedule_rounded,
+                  color: AppColors.brandNavy, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Mode Check-out Aktif',
+                    style: AppText.label.copyWith(color: AppColors.brandNavy),
+                  ),
+                  Text(
+                    'Sudah lewat pukul $_checkoutCutoffHour:00 — hanya check-out yang tersedia.',
+                    style: AppText.body2,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Sebelum jam 12: info bahwa check-in aktif
+      return SectionCard(
+        color: AppColors.brandLime.withOpacity(0.06),
+        borderColor: AppColors.brandLimeDark.withOpacity(0.25),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.brandLimeDark.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.login_rounded,
+                  color: AppColors.brandLimeDark, size: 16),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Mode Check-in Aktif',
+                    style: AppText.label.copyWith(color: AppColors.brandLimeDark),
+                  ),
+                  Text(
+                    'Check-out tersedia setelah pukul $_checkoutCutoffHour:00 siang.',
+                    style: AppText.body2,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Future<void> _fetchLocation() async {
     setState(() { _isLoadingLocation = true; _locationLabel = ''; });
     _locationCtrl.reset();
@@ -100,16 +186,20 @@ class _CheckinScreenState extends State<CheckinScreen>
     _successCtrl.forward();
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
-    // Show mascot for on-time check-in
-    if (_isEarly || _lateMinutes == 0) {
+
+    if (_autoCheckType == 'checkin' && (_isEarly || _lateMinutes == 0)) {
+      // Check-in tepat waktu / lebih awal → tampilkan maskot melambai
       _successCtrl.reverse().then((_) {
         setState(() { _showSuccess = false; _showMascot = true; });
       });
     } else {
+      // Check-in terlambat ATAU check-out → langsung ke HomeScreen
       _successCtrl.reverse().then((_) {
         setState(() => _showSuccess = false);
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (_) => const HomeScreen()));
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
       });
     }
   }
@@ -147,10 +237,18 @@ class _CheckinScreenState extends State<CheckinScreen>
                         ),
                         child: Row(
                           children: [
-                            _TypeBtn(label: 'Check-in',  selected: _checkType == 'checkin',
-                                color: AppColors.brandNavy, onTap: () => setState(() => _checkType = 'checkin')),
-                            _TypeBtn(label: 'Check-out', selected: _checkType == 'checkout',
-                                color: AppColors.brandNavy, onTap: () => setState(() => _checkType = 'checkout')),
+                            _TypeBtn(
+                              label: 'Check-in',
+                              selected: _autoCheckType == 'checkin',
+                              enabled: !_pastCutoff,
+                              color: AppColors.brandNavy,
+                            ),
+                            _TypeBtn(
+                              label: 'Check-out',
+                              selected: _autoCheckType == 'checkout',
+                              enabled: _pastCutoff,
+                              color: AppColors.brandNavy,
+                            ),
                           ],
                         ),
                       ),
@@ -173,6 +271,11 @@ class _CheckinScreenState extends State<CheckinScreen>
                           isLate: _isLate, isEarly: _isEarly,
                           lateMinutes: _lateMinutes,
                         ),
+
+                        const SizedBox(height: 14),
+
+                        // ── Auto cutoff info banner ─────────
+                        _buildCutoffBanner(),
 
                         const SizedBox(height: 14),
 
@@ -324,7 +427,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                               ],
                             ),
                           )
-                        else if (_checkType == 'checkin' && !_canCheckin)
+                        else if (_autoCheckType == 'checkin' && !_canCheckin)
                           SectionCard(
                             color: AppColors.brandNavy.withOpacity(0.05),
                             borderColor: AppColors.brandNavy.withOpacity(0.2),
@@ -344,7 +447,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                           )
                         else
                           PulseButton(
-                            pulseColor: _checkType == 'checkin'
+                            pulseColor: _autoCheckType == 'checkin'
                                 ? AppColors.brandNavy
                                 : AppColors.brandCyanDark,
                             size: 180,
@@ -352,13 +455,13 @@ class _CheckinScreenState extends State<CheckinScreen>
                             child: Container(
                               width: 160, height: 160,
                               decoration: BoxDecoration(
-                                color: _checkType == 'checkin'
+                                color: _autoCheckType == 'checkin'
                                     ? AppColors.brandNavy
                                     : AppColors.brandCyanDark,
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: (_checkType == 'checkin'
+                                    color: (_autoCheckType == 'checkin'
                                             ? AppColors.brandNavy
                                             : AppColors.brandCyanDark)
                                         .withOpacity(0.3),
@@ -370,14 +473,14 @@ class _CheckinScreenState extends State<CheckinScreen>
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(
-                                    _checkType == 'checkin'
+                                    _autoCheckType == 'checkin'
                                         ? Icons.login_rounded
                                         : Icons.logout_rounded,
                                     color: Colors.white, size: 44,
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    _checkType == 'checkin' ? 'Check-in' : 'Check-out',
+                                    _autoCheckType == 'checkin' ? 'Check-in' : 'Check-out',
                                     style: GoogleFonts.inter(
                                       color: Colors.white, fontSize: 15,
                                       fontWeight: FontWeight.w700,
@@ -390,7 +493,7 @@ class _CheckinScreenState extends State<CheckinScreen>
 
                         const SizedBox(height: 14),
 
-                        if (_isLate && _checkType == 'checkin')
+                        if (_isLate && _autoCheckType == 'checkin')
                           SectionCard(
                             color: AppColors.danger.withOpacity(0.05),
                             borderColor: AppColors.danger.withOpacity(0.3),
@@ -442,7 +545,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: _checkType == 'checkin'
+                                color: _autoCheckType == 'checkin'
                                     ? AppColors.brandNavy
                                     : AppColors.brandCyanDark,
                                 shape: BoxShape.circle,
@@ -452,7 +555,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              _checkType == 'checkin'
+                              _autoCheckType == 'checkin'
                                   ? (_isEarly || _lateMinutes == 0
                                       ? '🎉 Tepat Waktu!'
                                       : 'Check-in Berhasil!')
@@ -462,7 +565,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                             ),
                             const SizedBox(height: 6),
                             Text(
-                              _checkType == 'checkin'
+                              _autoCheckType == 'checkin'
                                   ? (_isEarly || _lateMinutes == 0
                                       ? 'Kamu datang tepat waktu. Semangat! 💪'
                                       : 'Terlambat $_lateMinutes menit. Lebih awal besok ya!')
@@ -501,27 +604,58 @@ class _CheckinScreenState extends State<CheckinScreen>
 class _TypeBtn extends StatelessWidget {
   final String label;
   final bool selected;
+  final bool enabled;
   final Color color;
-  final VoidCallback onTap;
-  const _TypeBtn({required this.label, required this.selected,
-      required this.color, required this.onTap});
+  final VoidCallback? onTap;
+
+  const _TypeBtn({
+    required this.label,
+    required this.selected,
+    required this.color,
+    this.enabled = true,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? color : Colors.transparent,
-          borderRadius: BorderRadius.circular(7),
+    return Tooltip(
+      // Tampilkan tooltip kalau button dikunci
+      message: !enabled
+          ? (label == 'Check-in'
+              ? 'Tidak bisa check-in setelah pukul 12:00'
+              : 'Tidak bisa check-out sebelum pukul 12:00')
+          : '',
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? color : Colors.transparent,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!enabled && !selected)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(Icons.lock_rounded,
+                      size: 10, color: AppColors.slate400),
+                ),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? Colors.white
+                      : (!enabled ? AppColors.slate300 : AppColors.slate400),
+                ),
+              ),
+            ],
+          ),
         ),
-        child: Text(label,
-            style: GoogleFonts.inter(
-              fontSize: 12, fontWeight: FontWeight.w600,
-              color: selected ? Colors.white : AppColors.slate400,
-            )),
       ),
     );
   }

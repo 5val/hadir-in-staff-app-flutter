@@ -7,6 +7,7 @@ import 'login_screen.dart';
 
 class LandingScreen extends StatefulWidget {
   const LandingScreen({super.key});
+
   @override
   State<LandingScreen> createState() => _LandingScreenState();
 }
@@ -14,15 +15,15 @@ class LandingScreen extends StatefulWidget {
 class _LandingScreenState extends State<LandingScreen>
     with TickerProviderStateMixin {
   late AnimationController _logoCtrl, _cardsCtrl, _mascotCtrl;
-  late Animation<double>   _logoFade, _logoScale, _cardFade, _mascotBounce, _mascotFade;
+  late Animation<double>   _logoFade, _logoScale, _cardFade, _mascotBounce;
   late Animation<Offset>   _card1Slide, _card2Slide;
 
   @override
   void initState() {
     super.initState();
 
-    _logoCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
-    _cardsCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _logoCtrl   = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _cardsCtrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
     _mascotCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
       ..repeat(reverse: true);
 
@@ -36,9 +37,8 @@ class _LandingScreenState extends State<LandingScreen>
         .animate(CurvedAnimation(parent: _cardsCtrl, curve: Curves.easeOut));
     _cardFade = CurvedAnimation(parent: _cardsCtrl, curve: Curves.easeIn);
 
-    _mascotBounce = Tween<double>(begin: 0, end: -10)
-        .animate(CurvedAnimation(parent: _mascotCtrl, curve: Curves.easeInOut));
-    _mascotFade = CurvedAnimation(parent: _mascotCtrl, curve: Curves.easeIn);
+    _mascotBounce = Tween<double>(begin: 0, end: -10).animate(
+        CurvedAnimation(parent: _mascotCtrl, curve: Curves.easeInOut));
 
     _logoCtrl.forward().then((_) =>
         Future.delayed(const Duration(milliseconds: 150), _cardsCtrl.forward));
@@ -54,6 +54,7 @@ class _LandingScreenState extends State<LandingScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.slate50,
+      // Tidak ada back button — ini home screen setelah login awal
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -61,14 +62,13 @@ class _LandingScreenState extends State<LandingScreen>
             children: [
               const SizedBox(height: 32),
 
-              // ── Logo ────────────────────────────────────
+              // ── Logo ──────────────────────────────────
               FadeTransition(
                 opacity: _logoFade,
                 child: ScaleTransition(
                   scale: _logoScale,
                   child: Column(
                     children: [
-                      // Logo with text
                       Image.asset(
                         AppAssets.logoFull,
                         height: 56,
@@ -78,40 +78,38 @@ class _LandingScreenState extends State<LandingScreen>
                       Text(
                         'Sistem Kehadiran & HR Karyawan',
                         style: GoogleFonts.inter(
-                          fontSize: 13, color: AppColors.slate600,
-                        ),
+                            fontSize: 13, color: AppColors.slate600),
                       ),
                     ],
                   ),
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
 
-              // ── Mascot ──────────────────────────────────
+              // ── Mascot (bouncing) ─────────────────────
               AnimatedBuilder(
                 animation: _mascotBounce,
                 builder: (_, child) => Transform.translate(
                   offset: Offset(0, _mascotBounce.value), child: child,
                 ),
-                child: Image.asset(AppAssets.mascotWave, height: 180),
+                child: Image.asset(AppAssets.mascotWave, height: 175),
               ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
-              // ── Welcome text ─────────────────────────────
+              // ── Welcome text ──────────────────────────
               FadeTransition(
                 opacity: _cardFade,
                 child: Column(
                   children: [
                     Text(
-                      'Selamat Datang! 👋',
-                      style: AppText.headline2.copyWith(
-                          color: AppColors.brandNavy),
+                      'Pilih Aktivitas 👇',
+                      style: AppText.headline2.copyWith(color: AppColors.brandNavy),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 5),
                     Text(
-                      'Pilih aktivitas yang ingin kamu lakukan',
+                      'Apa yang ingin kamu lakukan hari ini?',
                       style: AppText.body2,
                       textAlign: TextAlign.center,
                     ),
@@ -119,45 +117,83 @@ class _LandingScreenState extends State<LandingScreen>
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
 
-              // ── Action Cards ─────────────────────────────
+              // ── Action Cards ──────────────────────────
               FadeTransition(
                 opacity: _cardFade,
                 child: Column(
                   children: [
+                    // Check-in/out: langsung tanpa login lagi
                     SlideTransition(
                       position: _card1Slide,
                       child: _ActionCard(
                         icon: Icons.fingerprint_rounded,
                         title: 'Check-in / Check-out',
                         subtitle: 'Catat kehadiran harian kamu',
+                        badge: null,
                         accentColor: AppColors.brandNavy,
-                        bgColor: AppColors.brandNavy.withOpacity(0.06),
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const CheckinScreen())),
+                        bgColor: AppColors.brandNavy.withOpacity(0.07),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const CheckinScreen()),
+                        ),
                       ),
                     ),
+
                     const SizedBox(height: 12),
+
+                    // Cuti & Izin: perlu login ulang (re-verifikasi)
                     SlideTransition(
                       position: _card2Slide,
                       child: _ActionCard(
                         icon: Icons.event_note_rounded,
                         title: 'Cuti & Izin',
                         subtitle: 'Ajukan cuti, sakit, atau izin',
+                        badge: 'Verifikasi diperlukan',
                         accentColor: AppColors.brandCyanDark,
                         bgColor: AppColors.brandCyan.withOpacity(0.08),
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => const LoginScreen())),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LoginScreen(
+                              destination: LoginDestination.leaveRequest,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 32),
+              const SizedBox(height: 28),
 
-              // ── Footer ────────────────────────────────────
+              // ── Logout button ─────────────────────────
+              FadeTransition(
+                opacity: _cardFade,
+                child: TextButton.icon(
+                  onPressed: () {
+                    // Kembali ke login screen awal, clear stack
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (_) => const LoginScreen(
+                            destination: LoginDestination.landing),
+                      ),
+                      (route) => false,
+                    );
+                  },
+                  icon: const Icon(Icons.logout_rounded,
+                      size: 16, color: AppColors.slate400),
+                  label: Text('Keluar dari Akun',
+                      style: GoogleFonts.inter(
+                          color: AppColors.slate400, fontSize: 13)),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              // ── Footer ────────────────────────────────
               FadeTransition(
                 opacity: _cardFade,
                 child: Text(
@@ -166,7 +202,7 @@ class _LandingScreenState extends State<LandingScreen>
                   textAlign: TextAlign.center,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -179,12 +215,18 @@ class _LandingScreenState extends State<LandingScreen>
 class _ActionCard extends StatefulWidget {
   final IconData icon;
   final String title, subtitle;
+  final String? badge;
   final Color accentColor, bgColor;
   final VoidCallback onTap;
 
   const _ActionCard({
-    required this.icon, required this.title, required this.subtitle,
-    required this.accentColor, required this.bgColor, required this.onTap,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    required this.accentColor,
+    required this.bgColor,
+    required this.onTap,
   });
 
   @override
@@ -210,7 +252,7 @@ class _ActionCardState extends State<_ActionCard>
   Widget build(BuildContext context) {
     return GestureDetector(
       onTapDown: (_) => _ctrl.forward(),
-      onTapUp: (_) { _ctrl.reverse(); widget.onTap(); },
+      onTapUp:   (_) { _ctrl.reverse(); widget.onTap(); },
       onTapCancel: () => _ctrl.reverse(),
       child: ScaleTransition(
         scale: _scale,
@@ -237,22 +279,44 @@ class _ActionCardState extends State<_ActionCard>
                 ),
                 child: Icon(widget.icon, color: widget.accentColor, size: 26),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(widget.title,
-                        style: GoogleFonts.inter(
-                          fontSize: 15, fontWeight: FontWeight.w700,
-                          color: AppColors.slate900,
-                        )),
+                    Text(
+                      widget.title,
+                      style: GoogleFonts.inter(
+                        fontSize: 15, fontWeight: FontWeight.w700,
+                        color: AppColors.slate900,
+                      ),
+                    ),
                     const SizedBox(height: 3),
                     Text(widget.subtitle, style: AppText.body2),
+                    // Badge "verifikasi diperlukan"
+                    if (widget.badge != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.lock_outline_rounded,
+                              size: 11, color: AppColors.brandCyanDark),
+                          const SizedBox(width: 4),
+                          Text(
+                            widget.badge!,
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.brandCyanDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, color: AppColors.slate400, size: 22),
+              Icon(Icons.chevron_right_rounded,
+                  color: AppColors.slate400, size: 22),
             ],
           ),
         ),

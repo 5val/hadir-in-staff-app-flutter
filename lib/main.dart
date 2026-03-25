@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'screens/landing_screen.dart';
+import 'screens/login_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
@@ -27,7 +27,8 @@ class HadirInApp extends StatelessWidget {
       title: 'Hadir-In',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const LandingScreen(),
+      // App selalu dimulai dari LoginScreen
+      home: const LoginScreen(destination: LoginDestination.landing),
     );
   }
 }

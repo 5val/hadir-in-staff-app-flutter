@@ -322,21 +322,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         children: [
           Row(
             children: [
-              // Back button
-              GestureDetector(
-                onTap: () => Navigator.pushReplacement(context,
-                    MaterialPageRoute(builder: (_) => const LandingScreen())),
-                child: Container(
-                  width: 34, height: 34,
-                  decoration: BoxDecoration(
-                    color: AppColors.slate100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.slate200),
-                  ),
-                  child: const Icon(Icons.arrow_back_ios_new_rounded,
-                      size: 14, color: AppColors.slate600),
-                ),
-              ),
               const SizedBox(width: 8),
               // Avatar
               Container(
@@ -366,7 +351,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _notifBtn(),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
