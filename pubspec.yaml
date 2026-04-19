@@ -9,11 +9,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  google_fonts: ^6.1.0
+  google_fonts: ^6.2.1
   intl: ^0.18.1
   intl_utils: ^2.8.5
   shared_preferences: ^2.2.0
   percent_indicator: ^4.2.3
+  google_sign_in: ^6.2.1
+  googleapis: ^13.1.0
+  extension_google_sign_in_as_googleapis_auth: ^2.0.12
 
 flutter:
   uses-material-design: true

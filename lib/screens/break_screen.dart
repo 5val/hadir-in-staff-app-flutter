@@ -268,7 +268,7 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Tips: Gunakan waktu ini untuk minum air putih, peregangan, atau tarik napas dalam 😊',
+                          'Gunakan waktu ini untuk minum air putih, peregangan, atau tarik napas dalam 😊',
                           style: AppText.body2,
                         ),
                       ),

@@ -7,481 +7,410 @@ import '../models/models.dart';
 
 class SalaryScreen extends StatefulWidget {
   const SalaryScreen({super.key});
-
   @override
   State<SalaryScreen> createState() => _SalaryScreenState();
 }
 
-class _SalaryScreenState extends State<SalaryScreen>
-    with SingleTickerProviderStateMixin {
-  final UserProfile user = SampleData.currentUser;
-  final List<SalarySlip> _slips = SampleData.salaryHistory;
+class _SalaryScreenState extends State<SalaryScreen> {
+  final user   = SampleData.currentUser;
+  final slips  = SampleData.salaryHistory;
+  int _idx     = 0;
 
-  int  _selectedIndex = 0;
-  bool _showEarlyMonth = false;
-
-  late AnimationController _slideCtrl;
-  late Animation<Offset>   _slide;
-
-  SalarySlip get _current => _slips[_selectedIndex];
-
-  @override
-  void initState() {
-    super.initState();
-    _slideCtrl = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 300),
-    );
-    _slide = Tween<Offset>(
-      begin: const Offset(0.1, 0), end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
-    _slideCtrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _slideCtrl.dispose();
-    super.dispose();
-  }
+  SalarySlip get _slip => slips[_idx];
 
   String _fmtCurrency(int amount) =>
-      NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0)
+      NumberFormat.currency(locale: 'id_ID', symbol: '', decimalDigits: 0)
           .format(amount);
 
-  void _changePeriod(int i) {
-    setState(() => _selectedIndex = i);
-    _slideCtrl
-      ..reset()
-      ..forward();
-  }
-
-  String _payrollLabel(PayrollType t) {
-    switch (t) {
-      case PayrollType.weekly:    return 'Mingguan (7 hari)';
-      case PayrollType.biweekly:  return '2 Mingguan (14 hari)';
-      case PayrollType.monthly:   return 'Bulanan (30 hari)';
+  String _fmtCurrencyShort(int amount) {
+    if (amount >= 1000000) {
+      final m = amount / 1000000;
+      return '${m % 1 == 0 ? m.toInt() : m.toStringAsFixed(1)}M';
     }
+    if (amount >= 1000) {
+      return '${(amount / 1000).toStringAsFixed(0)}K';
+    }
+    return _fmtCurrency(amount);
   }
 
   @override
   Widget build(BuildContext context) {
-    final slip      = _current;
-    final isMonthly = user.position.payrollType == PayrollType.monthly;
+    final income = _slip.components.where((c) => !c.isDeduction).toList();
+    final deductions = _slip.components.where((c) => c.isDeduction).toList();
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
-      appBar: AppBar(
-        backgroundColor: AppColors.white,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 18, color: AppColors.slate900),
-          onPressed: () => Navigator.pop(context),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ── AppBar ────────────────────────────────────
+            Container(
+              color: AppColors.white,
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+              child: Row(
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('FINANCIAL STATEMENT',
+                          style: GoogleFonts.inter(
+                            fontSize: 10, fontWeight: FontWeight.w700,
+                            color: AppColors.brandNavy, letterSpacing: 1.2,
+                          )),
+                      Text('Salary Slip',
+                          style: AppText.headline2.copyWith(
+                              color: AppColors.slate900)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(height: 1, color: AppColors.slate200),
+
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+                  // ── Period selector ───────────────────
+                  _buildPeriodDropdown(),
+                  const SizedBox(height: 16),
+
+                  // ── Hero card ─────────────────────────
+                  _buildHeroCard(),
+                  const SizedBox(height: 16),
+
+                  // ── 4 stat cards grid ─────────────────
+                  _buildStatGrid(income),
+                  const SizedBox(height: 20),
+
+                  // ── Earnings detail ───────────────────
+                  _buildEarningsDetail(income, deductions),
+                ],
+              ),
+            ),
+          ],
         ),
-        title: Text('Slip Gaji', style: AppText.headline3),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.download_rounded, color: AppColors.brandNavy),
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Download PDF slip gaji...')),
+      ),
+    );
+  }
+
+  Widget _buildPeriodDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.slate200),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _slip.periodStart.day <= 15
+                  ? 'Start of Month - ${_slip.period}'
+                  : 'End of Month - ${_slip.period}',
+              style: GoogleFonts.inter(
+                  fontSize: 14, fontWeight: FontWeight.w600,
+                  color: AppColors.slate900),
+            ),
+          ),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: _idx,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: AppColors.slate600, size: 20),
+              isDense: true,
+              items: slips.asMap().entries.map((e) =>
+                DropdownMenuItem(value: e.key, child: Text(e.value.period))).toList(),
+              onChanged: (v) { if (v != null) setState(() => _idx = v); },
             ),
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppColors.slate200),
-        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: SlideTransition(
-          position: _slide,
+    );
+  }
+
+  Widget _buildHeroCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppColors.brandNavy,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.account_balance_wallet_outlined,
+                color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 12),
+          Text('Total Take Home Pay',
+              style: GoogleFonts.inter(
+                fontSize: 13, color: Colors.white.withOpacity(0.75),
+              )),
+          const SizedBox(height: 6),
+          Text(
+            'IDR ${_fmtCurrency(_slip.netSalary).replaceAll(',', '.')}',
+            style: GoogleFonts.inter(
+              fontSize: 30, fontWeight: FontWeight.w900,
+              color: Colors.white, letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 7, height: 7,
+                decoration: const BoxDecoration(
+                    color: AppColors.brandLime, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Transferred on ${DateFormat("MMM dd, yyyy").format(_slip.periodEnd)}',
+                style: GoogleFonts.inter(
+                  fontSize: 12, color: Colors.white.withOpacity(0.8),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatGrid(List<SalaryComponent> income) {
+    // Pick up to 4 income components for the grid
+    final display = income.take(4).toList();
+    final icons   = [
+      Icons.account_balance_wallet_outlined,
+      Icons.timer_outlined,
+      Icons.favorite_border_rounded,
+      Icons.directions_car_outlined,
+    ];
+    final colors = [
+      AppColors.brandNavy,
+      AppColors.brandCyanDark,
+      AppColors.danger,
+      const Color(0xFF374151),
+    ];
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.35,
+      ),
+      itemCount: display.length,
+      itemBuilder: (_, i) {
+        final c = display[i];
+        final color = colors[i % colors.length];
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.slate200),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.brandNavy.withOpacity(0.04),
+                blurRadius: 8, offset: const Offset(0, 3),
+              ),
+            ],
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Payroll type info ───────────────────────
-              SectionCard(
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.brandNavy.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.business_center_rounded,
-                          color: AppColors.brandNavy, size: 16),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Sistem Penggajian: ${_payrollLabel(user.position.payrollType)}',
-                            style: AppText.body2.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          Text(
-                            'Dihitung per ${user.position.payrollPeriodDays} hari kerja',
-                            style: AppText.caption,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (isMonthly)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('Akhir Bulan', style: AppText.caption),
-                          Switch.adaptive(
-                            value: _showEarlyMonth
-                                ? !user.position.payrollEndMonth
-                                : user.position.payrollEndMonth,
-                            onChanged: (v) =>
-                                setState(() => _showEarlyMonth = !v),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Period selector ─────────────────────────
-              Text('Pilih Periode', style: AppText.label),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 38,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _slips.length,
-                  itemBuilder: (_, i) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: GestureDetector(
-                      onTap: () => _changePeriod(i),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: i == _selectedIndex
-                              ? AppColors.brandNavy
-                              : AppColors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: i == _selectedIndex
-                                ? AppColors.brandNavy
-                                : AppColors.slate200,
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          _slips[i].period,
-                          style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                            color: i == _selectedIndex
-                                ? Colors.white
-                                : AppColors.slate600,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Net salary hero ─────────────────────────
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.brandNavy,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.brandNavy.withOpacity(0.3)),
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(user.name,
-                            style: GoogleFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white.withOpacity(0.9))),
-                        const Spacer(),
-                        Text(slip.period,
-                            style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: Colors.white.withOpacity(0.75))),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(user.position.name,
-                        style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: Colors.white.withOpacity(0.65))),
-                    const SizedBox(height: 16),
-                    Text('Gaji Bersih',
-                        style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Colors.white.withOpacity(0.8))),
-                    const SizedBox(height: 2),
-                    Text(
-                      _fmtCurrency(slip.netSalary),
+                child: Icon(icons[i % icons.length], color: color, size: 18),
+              ),
+              const Spacer(),
+              Text(
+                c.label.toUpperCase().replaceAll(' ', '\n'),
+                style: GoogleFonts.inter(
+                  fontSize: 9, fontWeight: FontWeight.w700,
+                  color: AppColors.slate400, letterSpacing: 0.6,
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                _fmtCurrencyShort(c.amount),
+                style: GoogleFonts.inter(
+                  fontSize: 20, fontWeight: FontWeight.w800,
+                  color: AppColors.slate900,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 3,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                width: (c.amount / _slip.totalIncome) * 100,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildEarningsDetail(
+      List<SalaryComponent> income, List<SalaryComponent> deductions) {
+    final allItems = [...income, ...deductions];
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Earnings Detail',
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
+            GestureDetector(
+              onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mengunduh PDF...')),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.download_outlined,
+                      color: AppColors.brandNavy, size: 16),
+                  const SizedBox(width: 4),
+                  Text('PDF EXPORT',
                       style: GoogleFonts.inter(
-                        fontSize: 28, fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Container(height: 1, color: Colors.white.withOpacity(0.2)),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _HeroStat(
-                            label: 'Pendapatan',
-                            value: _fmtCurrency(slip.totalIncome),
-                          ),
-                        ),
-                        Container(
-                          width: 1, height: 28,
-                          color: Colors.white.withOpacity(0.25),
-                        ),
-                        Expanded(
-                          child: _HeroStat(
-                            label: 'Potongan',
-                            value: _fmtCurrency(slip.totalDeduction),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                        fontSize: 11, fontWeight: FontWeight.w700,
+                        color: AppColors.brandNavy, letterSpacing: 0.5,
+                      )),
+                ],
               ),
-
-              const SizedBox(height: 16),
-
-              // ── Attendance summary ──────────────────────
-              SectionCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Ringkasan Kehadiran', style: AppText.label),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(child: _AttendStat(
-                            label: 'Hari Kerja',
-                            value: '${slip.workingDays}',
-                            color: AppColors.brandNavy)),
-                        Expanded(child: _AttendStat(
-                            label: 'Hadir',
-                            value: '${slip.presentDays}',
-                            color: AppColors.success)),
-                        Expanded(child: _AttendStat(
-                            label: 'Terlambat',
-                            value: '${slip.lateDays}x',
-                            color: AppColors.warning)),
-                        Expanded(child: _AttendStat(
-                            label: 'Lembur',
-                            value: '${slip.overtimeHours}j',
-                            color: AppColors.brandCyan)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Income ──────────────────────────────────
-              Text('Pendapatan', style: AppText.label),
-              const SizedBox(height: 8),
-              SectionCard(
-                child: Column(
-                  children: [
-                    ...slip.components
-                        .where((c) => !c.isDeduction)
-                        .map((c) => _SalaryRow(
-                              label: c.label,
-                              amount: _fmtCurrency(c.amount),
-                              isDeduction: false)),
-                    const AppDivider(),
-                    const SizedBox(height: 8),
-                    _SalaryRow(
-                      label: 'Total Pendapatan',
-                      amount: _fmtCurrency(slip.totalIncome),
-                      isDeduction: false,
-                      isTotal: true,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Deductions ──────────────────────────────
-              Text('Potongan', style: AppText.label),
-              const SizedBox(height: 8),
-              SectionCard(
-                child: Column(
-                  children: [
-                    ...slip.components
-                        .where((c) => c.isDeduction)
-                        .map((c) => _SalaryRow(
-                              label: c.label,
-                              amount: _fmtCurrency(c.amount),
-                              isDeduction: true)),
-                    const AppDivider(),
-                    const SizedBox(height: 8),
-                    _SalaryRow(
-                      label: 'Total Potongan',
-                      amount: _fmtCurrency(slip.totalDeduction),
-                      isDeduction: true,
-                      isTotal: true,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              // ── Net total row ────────────────────────────
-              SectionCard(
-                borderColor: AppColors.brandNavy.withOpacity(0.4),
-                color: AppColors.brandNavy.withOpacity(0.08),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SectionCard(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            children: [
+              ...allItems.map((c) => _EarningsRow(
+                    label: c.label,
+                    subLabel: _getSubLabel(c),
+                    amount: _fmtCurrency(c.amount),
+                    isDeduction: c.isDeduction,
+                    accentColor: c.isDeduction ? AppColors.danger : _getAccentColor(c),
+                  )),
+              const AppDivider(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Row(
                   children: [
-                    Text('Gaji Bersih',
-                        style: AppText.body1
-                            .copyWith(fontWeight: FontWeight.w700,
-                                color: AppColors.brandNavy)),
-                    const Spacer(),
-                    Text(
-                      _fmtCurrency(slip.netSalary),
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.brandNavy,
+                    const Icon(Icons.info_outline_rounded,
+                        size: 14, color: AppColors.slate400),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'After tax and mandatory pension deductions.',
+                        style: AppText.caption,
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text('GROSS:',
+                            style: AppText.caption.copyWith(letterSpacing: 0.5)),
+                        Text(_fmtCurrencyShort(_slip.totalIncome),
+                            style: GoogleFonts.inter(
+                                fontSize: 13, fontWeight: FontWeight.w800,
+                                color: AppColors.slate900)),
+                      ],
                     ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 20),
-
-              GradientButton(
-                label: 'Download Slip Gaji PDF',
-                color: AppColors.brandNavy,
-                icon: Icons.picture_as_pdf_rounded,
-                onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Mengunduh slip gaji PDF...')),
-                ),
-              ),
-
-              const SizedBox(height: 40),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Hero Stat ─────────────────────────────────────────────────
-class _HeroStat extends StatelessWidget {
-  final String label;
-  final String value;
-  const _HeroStat({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(label,
-            style: GoogleFonts.inter(
-                fontSize: 11, color: Colors.white.withOpacity(0.75)),
-            textAlign: TextAlign.center),
-        const SizedBox(height: 3),
-        Text(value,
-            style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Colors.white),
-            textAlign: TextAlign.center),
+        const SizedBox(height: 60),
       ],
     );
   }
-}
 
-// ── Attendance Stat ───────────────────────────────────────────
-class _AttendStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  const _AttendStat({required this.label, required this.value, required this.color});
+  String _getSubLabel(SalaryComponent c) {
+    if (c.label.contains('Pokok')) return 'Level ${SampleData.currentUser.position.name}';
+    if (c.label.contains('Lembur')) return '${_slip.overtimeHours * 5.3} Hours total';
+    if (c.label.contains('Kesehatan')) return 'Insurance Tier 1';
+    if (c.label.contains('Transport')) return 'Reimbursement';
+    if (c.label.contains('Makan')) return 'Daily Allowance';
+    if (c.label.contains('BPJS')) return 'Mandatory';
+    if (c.label.contains('Keterlambatan')) return 'Deduction';
+    return '';
+  }
 
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(value,
-            style: GoogleFonts.inter(
-                fontSize: 18, fontWeight: FontWeight.w800, color: color)),
-        Text(label, style: AppText.caption),
-      ],
-    );
+  Color _getAccentColor(SalaryComponent c) {
+    if (c.label.contains('Pokok')) return AppColors.brandNavy;
+    if (c.label.contains('Lembur')) return AppColors.brandCyanDark;
+    if (c.label.contains('Kesehatan')) return AppColors.danger;
+    return const Color(0xFF374151);
   }
 }
 
-// ── Salary Row ────────────────────────────────────────────────
-class _SalaryRow extends StatelessWidget {
-  final String label;
-  final String amount;
+class _EarningsRow extends StatelessWidget {
+  final String label, subLabel, amount;
   final bool isDeduction;
-  final bool isTotal;
+  final Color accentColor;
 
-  const _SalaryRow({
-    required this.label,
-    required this.amount,
-    required this.isDeduction,
-    this.isTotal = false,
+  const _EarningsRow({
+    required this.label, required this.subLabel, required this.amount,
+    required this.isDeduction, required this.accentColor,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          if (!isTotal)
-            Container(
-              width: 6, height: 6,
-              margin: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                color: isDeduction ? AppColors.danger : AppColors.success,
-                shape: BoxShape.circle,
-              ),
+          Container(
+            width: 4, height: 36,
+            decoration: BoxDecoration(
+              color: accentColor,
+              borderRadius: BorderRadius.circular(2),
             ),
+          ),
+          const SizedBox(width: 14),
           Expanded(
-            child: Text(label,
-                style: isTotal
-                    ? AppText.body1.copyWith(fontWeight: FontWeight.w700)
-                    : AppText.body2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: GoogleFonts.inter(
+                        fontSize: 14, fontWeight: FontWeight.w700,
+                        color: AppColors.slate900)),
+                if (subLabel.isNotEmpty)
+                  Text(subLabel, style: AppText.body2.copyWith(fontSize: 12)),
+              ],
+            ),
           ),
           Text(
-            isDeduction && !isTotal ? '- $amount' : amount,
+            isDeduction ? '- ${amount.trim()}' : amount.trim(),
             style: GoogleFonts.inter(
-              fontSize: isTotal ? 14 : 13,
-              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600,
-              color: isTotal
-                  ? (isDeduction ? AppColors.danger : AppColors.success)
-                  : isDeduction
-                      ? AppColors.danger
-                      : AppColors.slate900,
+              fontSize: 15, fontWeight: FontWeight.w700,
+              color: isDeduction ? AppColors.danger : AppColors.slate900,
             ),
           ),
         ],

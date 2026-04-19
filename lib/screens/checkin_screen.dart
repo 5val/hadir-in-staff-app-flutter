@@ -4,7 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
-import 'home_screen.dart';
+import 'main_screen.dart';
 
 class CheckinScreen extends StatefulWidget {
   const CheckinScreen({super.key});
@@ -198,7 +198,7 @@ class _CheckinScreenState extends State<CheckinScreen>
         setState(() => _showSuccess = false);
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(builder: (_) => const MainScreen()),
         );
       });
     }
@@ -590,7 +590,7 @@ class _CheckinScreenState extends State<CheckinScreen>
                 onDismiss: () {
                   setState(() => _showMascot = false);
                   Navigator.pushReplacement(context,
-                      MaterialPageRoute(builder: (_) => const HomeScreen()));
+                      MaterialPageRoute(builder: (_) => const MainScreen()));
                 },
               ),
             ),

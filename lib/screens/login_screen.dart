@@ -3,20 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/session_service.dart';
 import 'landing_screen.dart';
-import 'leave_request_screen.dart';
+import 'leave_choice_screen.dart';
 
-/// Kemana user diarahkan setelah login berhasil.
-enum LoginDestination {
-  /// Login pertama kali — masuk ke LandingScreen
-  landing,
-  /// Re-verifikasi dari landing — masuk ke LeaveRequestScreen (Cuti & Izin)
-  leaveRequest,
-}
+enum LoginDestination { landing, leaveRequest }
 
 class LoginScreen extends StatefulWidget {
   final LoginDestination destination;
-
   const LoginScreen({
     super.key,
     this.destination = LoginDestination.landing,
@@ -38,20 +32,14 @@ class _LoginScreenState extends State<LoginScreen>
   late Animation<Offset>   _slide;
   late Animation<double>   _fade;
 
-  // Apakah ini layar login awal (tidak bisa di-back)
   bool get _isInitialLogin => widget.destination == LoginDestination.landing;
-
-  // Label subtitle berdasarkan tujuan
-  String get _subtitle => _isInitialLogin
-      ? 'Masuk ke akun karyawan Hadir-In'
-      : 'Verifikasi ulang untuk melanjutkan pengajuan';
 
   @override
   void initState() {
     super.initState();
     _slideCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
-    _slide = Tween<Offset>(begin: const Offset(0, 0.15), end: Offset.zero)
+    _slide = Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
         .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOut));
     _fade = CurvedAnimation(parent: _slideCtrl, curve: Curves.easeIn);
     _slideCtrl.forward();
@@ -68,30 +56,27 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1)); // simulasi API call
+    await Future.delayed(const Duration(milliseconds: 900));
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    switch (widget.destination) {
-      case LoginDestination.landing:
-        // Login awal → masuk ke LandingScreen, hapus stack
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const LandingScreen()),
-        );
-        break;
-
-      case LoginDestination.leaveRequest:
-        // Re-verifikasi → masuk ke LeaveRequestScreen
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const LeaveRequestScreen(
-              user: SampleData.currentUser,
-            ),
-          ),
-        );
-        break;
+    if (_isInitialLogin) {
+      // Simpan sesi — tidak perlu login lagi sampai logout
+      await SessionService.saveSession(
+        username: _usernameCtrl.text.trim(),
+        employeeId: SampleData.currentUser.employeeId,
+      );
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const LandingScreen()),
+        (r) => false,
+      );
+    } else {
+      // Re-verifikasi untuk Cuti & Izin — tampilkan pilihan
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LeaveChoiceScreen()),
+      );
     }
   }
 
@@ -99,25 +84,25 @@ class _LoginScreenState extends State<LoginScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.slate50,
-      // Login awal: tidak ada back button (tidak bisa kembali)
-      // Re-verifikasi: ada back button (bisa kembali ke landing)
-      appBar: _isInitialLogin ? null : AppBar(
-        backgroundColor: AppColors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 18, color: AppColors.slate700),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Image.asset(AppAssets.logoFull, height: 28, fit: BoxFit.contain),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: AppColors.slate200),
-        ),
-      ),
+      appBar: _isInitialLogin
+          ? null
+          : AppBar(
+              backgroundColor: AppColors.white,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 18, color: AppColors.slate700),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Image.asset(AppAssets.logoFull, height: 28),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: AppColors.slate200),
+              ),
+            ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: SlideTransition(
             position: _slide,
             child: FadeTransition(
@@ -127,36 +112,32 @@ class _LoginScreenState extends State<LoginScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(height: _isInitialLogin ? 40 : 32),
+                    SizedBox(height: _isInitialLogin ? 48 : 32),
 
-                    // ── Logo (hanya di login awal) ─────────
-                    if (_isInitialLogin)
-                      Center(
-                        child: Image.asset(
-                          AppAssets.logoFull,
-                          height: 48,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
+                    // Logo (initial login only)
+                    if (_isInitialLogin) ...[
+                      Center(child: Image.asset(AppAssets.logoFull, height: 44)),
+                      const SizedBox(height: 32),
+                    ],
 
-                    SizedBox(height: _isInitialLogin ? 24 : 0),
-
-                    // ── Mascot + greeting ──────────────────
+                    // Mascot
                     Center(
                       child: Column(
                         children: [
                           Image.asset(
                             _isInitialLogin ? AppAssets.mascotWave : AppAssets.mascot,
-                            height: _isInitialLogin ? 130 : 80,
+                            height: _isInitialLogin ? 120 : 72,
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 16),
                           Text(
                             _isInitialLogin ? 'Selamat Datang! 👋' : 'Verifikasi Identitas 🔐',
                             style: AppText.headline2.copyWith(color: AppColors.brandNavy),
                           ),
-                          const SizedBox(height: 5),
+                          const SizedBox(height: 4),
                           Text(
-                            _subtitle,
+                            _isInitialLogin
+                                ? 'Masuk ke akun karyawan Hadir-In'
+                                : 'Masukkan kembali kredensial kamu',
                             style: AppText.body2,
                             textAlign: TextAlign.center,
                           ),
@@ -166,19 +147,20 @@ class _LoginScreenState extends State<LoginScreen>
 
                     const SizedBox(height: 32),
 
-                    // ── Re-verifikasi banner ───────────────
+                    // Re-verify info banner
                     if (!_isInitialLogin) ...[
                       SectionCard(
                         color: AppColors.brandCyan.withOpacity(0.07),
                         borderColor: AppColors.brandCyanDark.withOpacity(0.3),
+                        padding: const EdgeInsets.all(14),
                         child: Row(
                           children: [
-                            const Icon(Icons.lock_outline_rounded,
+                            const Icon(Icons.security_rounded,
                                 color: AppColors.brandCyanDark, size: 18),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                'Untuk mengajukan cuti & izin, diperlukan verifikasi ulang demi keamanan data karyawan.',
+                                'Diperlukan verifikasi ulang untuk mengakses Cuti & Izin.',
                                 style: AppText.body2,
                               ),
                             ),
@@ -188,7 +170,7 @@ class _LoginScreenState extends State<LoginScreen>
                       const SizedBox(height: 20),
                     ],
 
-                    // ── Username ───────────────────────────
+                    // Username
                     Text('Username / ID Karyawan', style: AppText.label),
                     const SizedBox(height: 6),
                     TextFormField(
@@ -196,16 +178,16 @@ class _LoginScreenState extends State<LoginScreen>
                       keyboardType: TextInputType.text,
                       style: const TextStyle(color: AppColors.slate900),
                       decoration: const InputDecoration(
-                        hintText: 'Masukkan username atau ID karyawan',
+                        hintText: 'Masukkan username atau ID',
                         prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                       validator: (v) =>
-                          (v == null || v.isEmpty) ? 'Username wajib diisi' : null,
+                          (v?.isEmpty ?? true) ? 'Username wajib diisi' : null,
                     ),
 
                     const SizedBox(height: 16),
 
-                    // ── Password ───────────────────────────
+                    // Password
                     Text('Password', style: AppText.label),
                     const SizedBox(height: 6),
                     TextFormField(
@@ -220,60 +202,53 @@ class _LoginScreenState extends State<LoginScreen>
                             _obscure
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
-                            color: AppColors.slate400,
-                            size: 20,
+                            color: AppColors.slate400, size: 20,
                           ),
-                          onPressed: () => setState(() => _obscure = !_obscure),
+                          onPressed: () =>
+                              setState(() => _obscure = !_obscure),
                         ),
                       ),
                       validator: (v) =>
-                          (v == null || v.isEmpty) ? 'Password wajib diisi' : null,
+                          (v?.isEmpty ?? true) ? 'Password wajib diisi' : null,
                     ),
-
-                    const SizedBox(height: 8),
 
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () {},
-                        child: Text(
-                          'Lupa password?',
-                          style: GoogleFonts.inter(
-                            color: AppColors.brandCyanDark,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
+                        child: Text('Lupa password?',
+                            style: GoogleFonts.inter(
+                              color: AppColors.brandCyanDark,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            )),
                       ),
                     ),
 
-                    const SizedBox(height: 24),
-
-                    // ── Submit ─────────────────────────────
                     GradientButton(
-                      label: _isLoading
-                          ? 'Memverifikasi...'
-                          : (_isInitialLogin ? 'Masuk' : 'Verifikasi & Lanjutkan'),
+                      label: _isInitialLogin ? 'Masuk' : 'Verifikasi & Lanjutkan',
                       color: AppColors.brandNavy,
                       icon: _isInitialLogin
                           ? Icons.login_rounded
                           : Icons.verified_user_rounded,
                       isLoading: _isLoading,
+                      height: 54,
                       onTap: _isLoading ? null : _login,
                     ),
 
                     const SizedBox(height: 16),
 
-                    // ── Info ───────────────────────────────
+                    // Info card
                     SectionCard(
+                      padding: const EdgeInsets.all(14),
                       child: Row(
                         children: [
                           const Icon(Icons.info_outline_rounded,
-                              color: AppColors.brandCyanDark, size: 18),
+                              color: AppColors.brandCyanDark, size: 16),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'Gunakan ID Karyawan dan password yang sama dengan sistem absensi Hadir-In.',
+                              'Gunakan ID Karyawan dan password sistem Hadir-In.',
                               style: AppText.body2,
                             ),
                           ),
