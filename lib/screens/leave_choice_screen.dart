@@ -31,11 +31,11 @@ class LeaveChoiceScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 6),
-            Text('APPLICATION PORTAL',
-                style: GoogleFonts.inter(
-                  fontSize: 10, fontWeight: FontWeight.w700,
-                  color: AppColors.brandNavy, letterSpacing: 1.2,
-                )),
+            // Text('APPLICATION PORTAL',
+            //     style: GoogleFonts.inter(
+            //       fontSize: 10, fontWeight: FontWeight.w700,
+            //       color: AppColors.brandNavy, letterSpacing: 1.2,
+            //     )),
             const SizedBox(height: 6),
             Text('Pilih Jenis Pengajuan',
                 style: AppText.headline2.copyWith(color: AppColors.slate900)),

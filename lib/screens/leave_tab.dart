@@ -57,11 +57,11 @@ class _LeaveTabState extends State<LeaveTab> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('APPLICATION PORTAL',
-                            style: GoogleFonts.inter(
-                              fontSize: 10, fontWeight: FontWeight.w700,
-                              color: AppColors.brandNavy, letterSpacing: 1.2,
-                            )),
+                        // Text('APPLICATION PORTAL',
+                        //     style: GoogleFonts.inter(
+                        //       fontSize: 10, fontWeight: FontWeight.w700,
+                        //       color: AppColors.brandNavy, letterSpacing: 1.2,
+                        //     )),
                         const SizedBox(height: 2),
                         Text(
                           isCuti ? 'Pengajuan Cuti' : 'Pengajuan Izin',
@@ -304,10 +304,18 @@ class _IzinFormState extends State<_IzinForm> {
   bool get _isSick    => _type == LeaveType.sick;
   bool get _isSeminar => _type == LeaveType.seminar;
 
+  // bool _isDateValid() {
+  //   if (_start == null) return true;
+  //   final today = _today();
+  //   return _isSick ? !_start!.isAfter(today) : !_start!.isBefore(today);
+  // }
+
   bool _isDateValid() {
     if (_start == null) return true;
     final today = _today();
-    return _isSick ? !_start!.isAfter(today) : !_start!.isBefore(today);
+
+    // Semua jenis izin harus <= hari ini
+    return !_start!.isAfter(today);
   }
 
   DateTime _today() => DateTime(
@@ -318,37 +326,72 @@ class _IzinFormState extends State<_IzinForm> {
       _reasonCtrl.text.trim().isNotEmpty &&
       _fileName != null && _isDateValid();
 
+  // Future<void> _pickDate(bool isStart) async {
+  //   final today     = DateTime.now();
+  //   final firstDate = _isSick
+  //       ? today.subtract(const Duration(days: 30))
+  //       : _today();
+  //   final lastDate  = _isSick
+  //       ? _today()
+  //       : today.add(const Duration(days: 180));
+
+  //   final initDate = isStart
+  //       ? (_start ?? firstDate)
+  //       : (_end ?? _start ?? firstDate);
+
+  //   final picked = await showDatePicker(
+  //     context: context,
+  //     initialDate:
+  //         initDate.isBefore(firstDate) ? firstDate :
+  //         initDate.isAfter(lastDate)   ? lastDate  : initDate,
+  //     firstDate: firstDate, lastDate: lastDate,
+  //     builder: (ctx, child) => _datePicker(ctx, child),
+  //   );
+  //   if (picked == null) return;
+  //   setState(() {
+  //     if (isStart) {
+  //       _start = picked;
+  //       if (_end != null && _end!.isBefore(picked)) _end = picked;
+  //     } else {
+  //       _end = picked;
+  //     }
+  //   });
+  // }
+
   Future<void> _pickDate(bool isStart) async {
-    final today     = DateTime.now();
-    final firstDate = _isSick
-        ? today.subtract(const Duration(days: 30))
-        : _today();
-    final lastDate  = _isSick
-        ? _today()
-        : today.add(const Duration(days: 180));
+  final today = _today();
 
-    final initDate = isStart
-        ? (_start ?? firstDate)
-        : (_end ?? _start ?? firstDate);
+  // Semua jenis izin hanya boleh sebelum / sampai hari ini
+  final firstDate = today.subtract(const Duration(days: 30)); // optional range
+  final lastDate  = today;
 
-    final picked = await showDatePicker(
-      context: context,
-      initialDate:
-          initDate.isBefore(firstDate) ? firstDate :
-          initDate.isAfter(lastDate)   ? lastDate  : initDate,
-      firstDate: firstDate, lastDate: lastDate,
-      builder: (ctx, child) => _datePicker(ctx, child),
-    );
-    if (picked == null) return;
-    setState(() {
-      if (isStart) {
-        _start = picked;
-        if (_end != null && _end!.isBefore(picked)) _end = picked;
-      } else {
-        _end = picked;
-      }
-    });
-  }
+  final initDate = isStart
+      ? (_start ?? lastDate)
+      : (_end ?? _start ?? lastDate);
+
+  final picked = await showDatePicker(
+    context: context,
+    initialDate: initDate.isBefore(firstDate)
+        ? firstDate
+        : initDate.isAfter(lastDate)
+            ? lastDate
+            : initDate,
+    firstDate: firstDate,
+    lastDate: lastDate,
+    builder: (ctx, child) => _datePicker(ctx, child),
+  );
+
+  if (picked == null) return;
+
+  setState(() {
+    if (isStart) {
+      _start = picked;
+      if (_end != null && _end!.isBefore(picked)) _end = picked;
+    } else {
+      _end = picked;
+    }
+  });
+}
 
   String _typeLabel(LeaveType t) {
     switch (t) {
@@ -389,7 +432,7 @@ class _IzinFormState extends State<_IzinForm> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        icon: const Text('✅', style: TextStyle(fontSize: 36)),
+        icon: const Text('✅', style: TextStyle(fontSize: 36), textAlign: TextAlign.center),
         title: const Text('Pengajuan Terkirim!', textAlign: TextAlign.center),
         content: Text('Pengajuan Izin ${_typeLabel(_type)} dikirim ke admin.',
             style: AppText.body2, textAlign: TextAlign.center),
