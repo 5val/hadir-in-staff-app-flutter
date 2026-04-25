@@ -1,34 +1,30 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'home_tab.dart';
-import 'history_screen.dart';
+import 'leave_tab.dart';
 import 'salary_screen.dart';
+import 'account_tab.dart';
 import 'checkin_screen.dart';
-import 'login_screen.dart';
 
-/// Bottom-nav wrapper — Home | History | [FAB Check-In] | Leave | Salary.
-/// Tab Leave selalu redirect ke re-verifikasi login.
+/// Bottom-nav wrapper — Home | Leave & Time Off | [FAB Check-In] | Salary | Account
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final int initialTab;
+  const MainScreen({super.key, this.initialTab = 0});
 
   @override
   State<MainScreen> createState() => _MainScreenState();
 }
 
 class _MainScreenState extends State<MainScreen> {
-  int _tab = 0;
+  late int _tab;
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = widget.initialTab;
+  }
 
   void _onTabTap(int i) {
-    if (i == 2) {
-      // Tab Leave → redirect ke re-verifikasi, bukan langsung masuk
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const LoginScreen(destination: LoginDestination.leaveRequest),
-        ),
-      );
-      return; // jangan update _tab ke 2 — tetap di tab sebelumnya
-    }
     setState(() => _tab = i);
   }
 
@@ -38,13 +34,12 @@ class _MainScreenState extends State<MainScreen> {
       backgroundColor: AppColors.slate50,
       body: IndexedStack(
         index: _tab,
-        children: const [
-          HomeTab(),
-          HistoryScreen(),
-          // index 2 = Leave tidak pernah dirender langsung dari sini
-          // tapi kita butuh widget placeholder agar IndexedStack tidak error
-          _LeavePlaceholder(),
-          SalaryScreen(),
+        children: [
+          HomeTab(onNavigateToAccount: () => _onTabTap(4)),
+          const LeaveTab(),
+          const CheckinScreen(),  // slot 2 reserved untuk FAB
+          const SalaryScreen(isFromAccount: false),
+          const AccountTab(),
         ],
       ),
       bottomNavigationBar: _buildBottomNav(),
@@ -70,18 +65,17 @@ class _MainScreenState extends State<MainScreen> {
               selected: _tab == 0, onTap: () => _onTabTap(0),
             ),
             _NavItem(
-              icon: Icons.history_rounded, label: 'History',
+              icon: Icons.event_note_rounded, label: 'Cuti & Izin',
               selected: _tab == 1, onTap: () => _onTabTap(1),
             ),
-            const SizedBox(width: 56), // spacer untuk FAB
+            const SizedBox(width: 56), // spacer FAB
             _NavItem(
-              icon: Icons.event_note_rounded, label: 'Leave',
-              selected: false, // tidak pernah "selected" — selalu redirect
-              onTap: () => _onTabTap(2),
+              icon: Icons.account_balance_wallet_rounded, label: 'Gaji',
+              selected: _tab == 3, onTap: () => _onTabTap(3),
             ),
             _NavItem(
-              icon: Icons.account_balance_wallet_rounded, label: 'Salary',
-              selected: _tab == 3, onTap: () => _onTabTap(3),
+              icon: Icons.person_rounded, label: 'Akun',
+              selected: _tab == 4, onTap: () => _onTabTap(4),
             ),
           ],
         ),
@@ -106,10 +100,11 @@ class _MainScreenState extends State<MainScreen> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(30),
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CheckinScreen()),
-          ),
+          // onTap: () => Navigator.push(
+          //   context,
+          //   MaterialPageRoute(builder: (_) => const CheckinScreen()),
+          // ),
+          onTap: () => _onTabTap(2),
           child: const Icon(Icons.fingerprint_rounded,
               color: Colors.white, size: 28),
         ),
@@ -118,8 +113,8 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-class _LeavePlaceholder extends StatelessWidget {
-  const _LeavePlaceholder();
+class _Placeholder extends StatelessWidget {
+  const _Placeholder();
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
 }

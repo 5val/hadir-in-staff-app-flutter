@@ -93,12 +93,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
             // ── AppBar ──────────────────────────────────
             Container(
               color: AppColors.white,
-              padding: const EdgeInsets.fromLTRB(20, 14, 16, 14),
+              padding: const EdgeInsets.fromLTRB(4, 14, 16, 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
+                      // Back button
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                            color: AppColors.brandNavy, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 40,
+                          minHeight: 40,
+                        ),
+                      ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -134,106 +145,109 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   const SizedBox(height: 12),
 
                   // ── Filter row ─────────────────────────
-                  Row(
-                    children: [
-                      // Status filter dropdown
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _filterStatus != null
-                                ? AppColors.brandNavy.withOpacity(0.07)
-                                : AppColors.slate100,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Row(
+                      children: [
+                        // Status filter dropdown
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
                               color: _filterStatus != null
-                                  ? AppColors.brandNavy.withOpacity(0.3)
-                                  : AppColors.slate200,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<AttendanceStatus?>(
-                              value: _filterStatus,
-                              isDense: true,
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                                  size: 16, color: AppColors.slate600),
-                              hint: Text('Semua Status',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      color: AppColors.slate600)),
-                              items: [
-                                _sItem(null, 'Semua Status'),
-                                _sItem(AttendanceStatus.present, '✅  Hadir'),
-                                _sItem(AttendanceStatus.late, '⏰  Terlambat'),
-                                _sItem(AttendanceStatus.absent, '❌  Absen'),
-                                _sItem(AttendanceStatus.leave, '🌴  Cuti'),
-                                _sItem(AttendanceStatus.holiday, '🏖️  Libur'),
-                              ],
-                              onChanged: (v) =>
-                                  setState(() => _filterStatus = v),
-                              selectedItemBuilder: (ctx) => [
-                                _sel('Semua Status'),
-                                _sel('Hadir'),
-                                _sel('Terlambat'),
-                                _sel('Absen'),
-                                _sel('Cuti'),
-                                _sel('Libur'),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Date range picker button
-                      GestureDetector(
-                        onTap: _pickDateRange,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: _dateRange != null
-                                ? AppColors.brandNavy.withOpacity(0.07)
-                                : AppColors.slate100,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _dateRange != null
-                                  ? AppColors.brandNavy.withOpacity(0.3)
-                                  : AppColors.slate200,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.calendar_month_outlined,
-                                size: 16,
-                                color: _dateRange != null
-                                    ? AppColors.brandNavy
-                                    : AppColors.slate600,
+                                  ? AppColors.brandNavy.withOpacity(0.07)
+                                  : AppColors.slate100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _filterStatus != null
+                                    ? AppColors.brandNavy.withOpacity(0.3)
+                                    : AppColors.slate200,
                               ),
-                              if (_dateRange != null) ...[
-                                const SizedBox(width: 5),
-                                Text(
-                                  '${fmt.format(_dateRange!.start)} – '
-                                  '${fmt.format(_dateRange!.end)}',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11, fontWeight: FontWeight.w600,
-                                    color: AppColors.brandNavy,
-                                  ),
-                                ),
-                              ] else ...[
-                                const SizedBox(width: 5),
-                                Text('Tanggal',
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<AttendanceStatus?>(
+                                value: _filterStatus,
+                                isDense: true,
+                                icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                                    size: 16, color: AppColors.slate600),
+                                hint: Text('Semua Status',
                                     style: GoogleFonts.inter(
                                         fontSize: 12,
                                         color: AppColors.slate600)),
-                              ],
-                            ],
+                                items: [
+                                  _sItem(null, 'Semua Status'),
+                                  _sItem(AttendanceStatus.present, '✅  Hadir'),
+                                  _sItem(AttendanceStatus.late, '⏰  Terlambat'),
+                                  _sItem(AttendanceStatus.absent, '❌  Absen'),
+                                  _sItem(AttendanceStatus.leave, '🌴  Cuti'),
+                                  _sItem(AttendanceStatus.holiday, '🏖️  Libur'),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _filterStatus = v),
+                                selectedItemBuilder: (ctx) => [
+                                  _sel('Semua Status'),
+                                  _sel('Hadir'),
+                                  _sel('Terlambat'),
+                                  _sel('Absen'),
+                                  _sel('Cuti'),
+                                  _sel('Libur'),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        // Date range picker button
+                        GestureDetector(
+                          onTap: _pickDateRange,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: _dateRange != null
+                                  ? AppColors.brandNavy.withOpacity(0.07)
+                                  : AppColors.slate100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _dateRange != null
+                                    ? AppColors.brandNavy.withOpacity(0.3)
+                                    : AppColors.slate200,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.calendar_month_outlined,
+                                  size: 16,
+                                  color: _dateRange != null
+                                      ? AppColors.brandNavy
+                                      : AppColors.slate600,
+                                ),
+                                if (_dateRange != null) ...[
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    '${fmt.format(_dateRange!.start)} – '
+                                    '${fmt.format(_dateRange!.end)}',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11, fontWeight: FontWeight.w600,
+                                      color: AppColors.brandNavy,
+                                    ),
+                                  ),
+                                ] else ...[
+                                  const SizedBox(width: 5),
+                                  Text('Tanggal',
+                                      style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          color: AppColors.slate600)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),

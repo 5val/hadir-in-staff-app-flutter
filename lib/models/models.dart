@@ -4,19 +4,66 @@
 
 import 'package:flutter/material.dart';
 
+class AppSession {
+  static UserProfile? _currentUser;
+
+  static UserProfile get currentUser =>
+      _currentUser ?? SampleData._users.first;
+
+  static bool get isSupervisor =>
+      currentUser.role == UserRole.supervisor;
+
+  static void setUser(String username, String password) {
+    try {
+      _currentUser = SampleData._users.firstWhere(
+        (u) => u.username == username && u.password == password,
+      );
+    } catch (_) {}
+  }
+  static void setUserById(String id) {
+    try {
+      _currentUser = SampleData._users.firstWhere(
+        (u) => u.id == id,
+      );
+    } catch (_) {}
+  }
+
+  static void clearUser() => _currentUser = null;
+
+  /// Returns UserProfile if credentials valid, else null.
+  static UserProfile? validateLogin(String username, String password) {
+    try {
+      return SampleData._users.firstWhere(
+        (u) =>
+            (u.employeeId.toLowerCase() == username.toLowerCase() ||
+             u.username.toLowerCase() == username.toLowerCase()) &&
+            u.password == password,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 // ── Position Master ──────────────────────────────────────────
 class PositionModel {
   final String id;
   final String name;
   final String divisionId;
   final int annualLeaveQuota;
-  final int earlyCheckoutToleranceMinutes; // menit toleransi pulang awal
-  final int minLeaveAdvanceDays; // minimal H-berapa pengajuan cuti
-  final int payrollPeriodDays; // 7=mingguan, 14=2 minggu, 30=bulanan
-  final bool payrollEndMonth; // true=akhir bulan, false=awal bulan (jika bulanan)
-  final int operationalHours; // jam operasional normal
-  final int extraHourAllowance; // maks jam lembur per hari
+  final int earlyCheckoutToleranceMinutes;
+  final int minLeaveAdvanceDays;
+  final int payrollPeriodDays;
+  final bool payrollEndMonth;
+  final int operationalHours;
+  final int extraHourAllowance;
   final PayrollType payrollType;
+  
+  // Tambahan properti baru untuk salary_screen
+  final int baseSalary;
+  final int dailyBonus;
+  final int healthAllowance;
+  final int transportAllowance;
 
   const PositionModel({
     required this.id,
@@ -30,6 +77,11 @@ class PositionModel {
     required this.extraHourAllowance,
     required this.payrollType,
     this.payrollEndMonth = true,
+    // Require properti baru
+    required this.baseSalary,
+    required this.dailyBonus,
+    required this.healthAllowance,
+    required this.transportAllowance,
   });
 }
 
@@ -75,6 +127,8 @@ class ShiftModel {
 class UserProfile {
   final String id;
   final String name;
+  final String username;
+  final String password;
   final String employeeId;
   final String positionId;
   final String divisionId;
@@ -87,6 +141,8 @@ class UserProfile {
   const UserProfile({
     required this.id,
     required this.name,
+    required this.username,
+    required this.password,
     required this.employeeId,
     required this.positionId,
     required this.divisionId,
@@ -99,7 +155,7 @@ class UserProfile {
 
   UserProfile copyWith({int? points}) =>
       UserProfile(
-        id: id, name: name, employeeId: employeeId,
+        id: id, name: name, username:username, password: password, employeeId: employeeId,
         positionId: positionId, divisionId: divisionId,
         email: email, role: role, currentShift: currentShift,
         position: position, points: points ?? this.points,
@@ -159,6 +215,7 @@ class LeaveRequest {
   final RequestStatus status;
   final String? reason;
   final String? adminNote;
+  final String? employeeName;
   final List<String> attachmentPaths;
   final List<AllowanceType> allowances;
   final DateTime submittedAt;
@@ -173,6 +230,7 @@ class LeaveRequest {
     this.adminNote,
     this.attachmentPaths = const [],
     this.allowances = const [],
+    this.employeeName,
     required this.submittedAt,
   });
 
@@ -266,6 +324,9 @@ class SampleData {
   static const DivisionModel divMarketing = DivisionModel(
     id: 'D001', name: 'Marketing',
   );
+  static const DivisionModel divIT = DivisionModel(
+    id: 'D002', name: 'IT',
+  );
 
   static const PositionModel posSalesExecutive = PositionModel(
     id: 'P001',
@@ -279,6 +340,30 @@ class SampleData {
     extraHourAllowance: 3,
     payrollType: PayrollType.monthly,
     payrollEndMonth: true,
+    // Value untuk properti baru
+    baseSalary: 5000000,
+    dailyBonus: 50000,
+    healthAllowance: 200000,
+    transportAllowance: 500000,
+  );
+
+  static const PositionModel posITSupervisor = PositionModel(
+    id: 'P002',
+    name: 'IT Supervisor',
+    divisionId: 'D002',
+    annualLeaveQuota: 15,
+    earlyCheckoutToleranceMinutes: 60,
+    minLeaveAdvanceDays: 3,
+    payrollPeriodDays: 30,
+    operationalHours: 8,
+    extraHourAllowance: 3,
+    payrollType: PayrollType.monthly,
+    payrollEndMonth: true,
+    // Value untuk properti baru
+    baseSalary: 10000000,
+    dailyBonus: 75000,
+    healthAllowance: 200000,
+    transportAllowance: 500000,
   );
 
   static const ShiftModel morningShift = ShiftModel(
@@ -289,10 +374,43 @@ class SampleData {
     breakDurationMinutes: 60,
   );
 
-  static const UserProfile currentUser = UserProfile(
+//   static const UserProfile currentUser = UserProfile(
+//     id: 'U001',
+//     name: 'Ahmad Rizki',
+//     employeeId: 'EMP-2024-001',
+//     positionId: 'P001',
+//     divisionId: 'D001',
+//     email: 'ahmad.rizki@staffsync.id',
+//     role: UserRole.staff,
+//     currentShift: morningShift,
+//     position: posSalesExecutive,
+//     points: 420,
+//   );
+
+  // ── Two demo login users ───────────────────────────────────
+  // User 1 — Karyawan biasa  : ID EMP001 / username rina   / pass pass123
+  // User 2 — Supervisor      : ID SUP001 / username budi   / pass pass123
+  static final List<UserProfile> _users = [
+    const UserProfile(
+      id: 'U001',
+      name: 'Rina Kartika',
+      username: 'rina',
+      password: '123456',
+      employeeId: 'EMP-2024-001',
+      positionId: 'P002',
+      divisionId: 'D002',
+      email: 'rina.kartika@hadirin.id',
+      role: UserRole.supervisor,
+      currentShift: morningShift,
+      position: posITSupervisor,
+      points: 420,
+   ),
+   const UserProfile(
     id: 'U001',
     name: 'Ahmad Rizki',
-    employeeId: 'EMP-2024-001',
+    username: 'ahmad',
+    password: '123456',
+    employeeId: 'EMP-2024-002',
     positionId: 'P001',
     divisionId: 'D001',
     email: 'ahmad.rizki@staffsync.id',
@@ -300,7 +418,13 @@ class SampleData {
     currentShift: morningShift,
     position: posSalesExecutive,
     points: 420,
-  );
+  )
+  ];
+
+  static List<UserProfile> get allUsers => _users;
+
+  /// Active user — set by AppSession
+  static UserProfile get currentUser => AppSession.currentUser;
 
   static final List<AttendanceRecord> recentAttendance = [
     AttendanceRecord(
@@ -386,6 +510,42 @@ class SampleData {
     ),
   ];
 
+  static final List<LeaveRequest> subordinateLeaveRequests = [
+    LeaveRequest(
+      id: 'L001',
+      employeeName: 'Ahmad Rizki',
+      type: LeaveType.annual,
+      startDate: DateTime.now().add(const Duration(days: 7)),
+      endDate: DateTime.now().add(const Duration(days: 9)),
+      status: RequestStatus.pending,
+      reason: 'Keperluan keluarga',
+      submittedAt: DateTime.now().subtract(const Duration(days: 2)),
+      allowances: [],
+    ),
+    LeaveRequest(
+      id: 'L002',
+      employeeName: 'Budi Santoso',
+      type: LeaveType.sick,
+      startDate: DateTime.now().subtract(const Duration(days: 4)),
+      endDate: DateTime.now().subtract(const Duration(days: 4)),
+      status: RequestStatus.pending,
+      reason: 'Demam',
+      submittedAt: DateTime.now().subtract(const Duration(days: 4)),
+      allowances: [AllowanceType.health],
+    ),
+    LeaveRequest(
+      id: 'L003',
+      employeeName: 'Dewi Lestari',
+      type: LeaveType.seminar,
+      startDate: DateTime.now().add(const Duration(days: 14)),
+      endDate: DateTime.now().add(const Duration(days: 14)),
+      status: RequestStatus.pending,
+      reason: 'Seminar Digital Marketing Indonesia 2024',
+      submittedAt: DateTime.now().subtract(const Duration(days: 1)),
+      allowances: [AllowanceType.accommodation, AllowanceType.transport],
+    ),
+  ];
+
   static final List<SalarySlip> salaryHistory = [
     SalarySlip(
       period: 'Januari 2024',
@@ -449,6 +609,29 @@ class SampleData {
       type: NotificationType.reminder,
       createdAt: DateTime.now().subtract(const Duration(days: 1)),
       isRead: true,
+    ),
+  ];
+
+  static final List<LeaveRequest> employeeApplications = [
+    LeaveRequest(
+      id: 'L004',
+      type: LeaveType.annual,
+      startDate: DateTime.now().add(const Duration(days: 10)),
+      endDate: DateTime.now().add(const Duration(days: 12)),
+      status: RequestStatus.pending,
+      reason: 'Acara pernikahan keluarga',
+      submittedAt: DateTime.now().subtract(const Duration(days: 1)),
+      allowances: [],
+    ),
+    LeaveRequest(
+      id: 'L005',
+      type: LeaveType.sick,
+      startDate: DateTime.now().subtract(const Duration(days: 1)),
+      endDate: DateTime.now().subtract(const Duration(days: 1)),
+      status: RequestStatus.pending,
+      reason: 'Sakit tifus',
+      submittedAt: DateTime.now().subtract(const Duration(days: 1)),
+      allowances: [AllowanceType.health],
     ),
   ];
 

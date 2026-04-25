@@ -4,8 +4,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
-import 'landing_screen.dart';
-import 'leave_choice_screen.dart';
+import 'main_screen.dart';
 
 enum LoginDestination { landing, leaveRequest }
 
@@ -21,22 +20,35 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _formKey      = GlobalKey<FormState>();
   final _usernameCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
   bool _obscure   = true;
   bool _isLoading = false;
 
-  late AnimationController _slideCtrl;
+  late AnimationController _slideCtrl, _logoCtrl, _cardsCtrl, _mascotCtrl;
   late Animation<Offset>   _slide;
   late Animation<double>   _fade;
+  late Animation<double>   _logoFade, _logoScale, _cardFade, _mascotBounce;
 
   bool get _isInitialLogin => widget.destination == LoginDestination.landing;
 
   @override
   void initState() {
     super.initState();
+
+    _logoCtrl   = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _cardsCtrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _mascotCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))
+      ..repeat(reverse: true);
+
+    _logoFade  = CurvedAnimation(parent: _logoCtrl, curve: Curves.easeIn);
+    _logoScale = Tween<double>(begin: 0.75, end: 1.0).animate(
+        CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut));
+    _mascotBounce = Tween<double>(begin: 0, end: -8).animate(
+        CurvedAnimation(parent: _mascotCtrl, curve: Curves.easeInOut));
+
     _slideCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
     _slide = Tween<Offset>(begin: const Offset(0, 0.12), end: Offset.zero)
@@ -48,6 +60,9 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void dispose() {
     _slideCtrl.dispose();
+    _logoCtrl.dispose();
+    _cardsCtrl.dispose();
+    _mascotCtrl.dispose();
     _usernameCtrl.dispose();
     _passwordCtrl.dispose();
     super.dispose();
@@ -61,22 +76,19 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = false);
 
     if (_isInitialLogin) {
-      // Simpan sesi — tidak perlu login lagi sampai logout
+      // Simpan sesi panjang — tidak perlu login lagi sampai logout manual
       await SessionService.saveSession(
         username: _usernameCtrl.text.trim(),
-        employeeId: SampleData.currentUser.employeeId,
+        password: _passwordCtrl.text.trim(),
       );
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const LandingScreen()),
+        MaterialPageRoute(builder: (_) => const MainScreen()),
         (r) => false,
       );
     } else {
-      // Re-verifikasi untuk Cuti & Izin — tampilkan pilihan
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LeaveChoiceScreen()),
-      );
+      // Re-verifikasi untuk Cuti & Izin — return true ke caller
+      Navigator.pop(context, true);
     }
   }
 
@@ -92,9 +104,9 @@ class _LoginScreenState extends State<LoginScreen>
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded,
                     size: 18, color: AppColors.slate700),
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(context, false),
               ),
-              title: Image.asset(AppAssets.logoFull, height: 28),
+              title: Text('Verifikasi Identitas', style: AppText.headline3),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(1),
                 child: Container(height: 1, color: AppColors.slate200),
@@ -112,26 +124,58 @@ class _LoginScreenState extends State<LoginScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(height: _isInitialLogin ? 48 : 32),
+                    SizedBox(height: _isInitialLogin ? 0 : 32),
 
                     // Logo (initial login only)
                     if (_isInitialLogin) ...[
-                      Center(child: Image.asset(AppAssets.logoFull, height: 44)),
-                      const SizedBox(height: 32),
+                      Center(
+                        child: Column(
+                          children: [
+                            FadeTransition(
+                              opacity: _logoFade,
+                              child: ScaleTransition(
+                                scale: _logoScale,
+                                child: Column(
+                                  children: [
+                                    Image.asset(AppAssets.logoFull, height: 52),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Sistem Kehadiran & HR Karyawan',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: AppColors.slate600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+
+                            AnimatedBuilder(
+                              animation: _mascotBounce,
+                              builder: (_, child) => Transform.translate(
+                                offset: Offset(0, _mascotBounce.value),
+                                child: child,
+                              ),
+                              child: Image.asset(AppAssets.mascotWave, height: 165),
+                            ),
+
+                            const SizedBox(height: 8),
+                          ],
+                        ),
+                      ),
                     ],
 
-                    // Mascot
+                    // Heading
                     Center(
                       child: Column(
                         children: [
-                          Image.asset(
-                            _isInitialLogin ? AppAssets.mascotWave : AppAssets.mascot,
-                            height: _isInitialLogin ? 120 : 72,
-                          ),
-                          const SizedBox(height: 16),
                           Text(
-                            _isInitialLogin ? 'Selamat Datang! 👋' : 'Verifikasi Identitas 🔐',
-                            style: AppText.headline2.copyWith(color: AppColors.brandNavy),
+                            _isInitialLogin
+                                ? 'Selamat Datang! 👋'
+                                : 'Verifikasi Identitas 🔐',
+                            style: AppText.headline2
+                                .copyWith(color: AppColors.brandNavy),
                           ),
                           const SizedBox(height: 4),
                           Text(
@@ -225,6 +269,8 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ),
 
+                    const SizedBox(height: 8),
+
                     GradientButton(
                       label: _isInitialLogin ? 'Masuk' : 'Verifikasi & Lanjutkan',
                       color: AppColors.brandNavy,
@@ -238,7 +284,6 @@ class _LoginScreenState extends State<LoginScreen>
 
                     const SizedBox(height: 16),
 
-                    // Info card
                     SectionCard(
                       padding: const EdgeInsets.all(14),
                       child: Row(

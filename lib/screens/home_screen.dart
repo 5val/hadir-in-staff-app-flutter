@@ -588,13 +588,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildQuickMenu() {
     final items = [
       _MenuItem(icon: Icons.receipt_long_rounded,    label: 'Slip Gaji',    color: AppColors.brandCyanDark,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SalaryScreen()))),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SalaryScreen(isFromAccount: false)))),
       _MenuItem(icon: Icons.event_available_rounded, label: 'Cuti',         color: AppColors.brandLimeDark,
           onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => const LeaveRequestScreen(user: SampleData.currentUser, initialTab: 0)))),
+              builder: (_) => LeaveRequestScreen(user: SampleData.currentUser, initialTab: 0)))),
       _MenuItem(icon: Icons.sick_rounded,            label: 'Izin / Sakit', color: AppColors.danger,
           onTap: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => const LeaveRequestScreen(user: SampleData.currentUser, initialTab: 1)))),
+              builder: (_) => LeaveRequestScreen(user: SampleData.currentUser, initialTab: 1)))),
       _MenuItem(icon: Icons.notifications_outlined,  label: 'Notifikasi',   color: AppColors.warning,
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationScreen()))),
     ];

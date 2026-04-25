@@ -61,7 +61,8 @@ class _CheckinScreenState extends State<CheckinScreen>
     super.dispose();
   }
 
-  bool get _isWorkDay => _now.weekday >= 1 && _now.weekday <= 5;
+  // bool get _isWorkDay => _now.weekday >= 1 && _now.weekday <= 5;
+  bool get _isWorkDay => true;
   bool get _canCheckin {
     if (!_isWorkDay) return false;
     final start = DateTime(_now.year, _now.month, _now.day,
@@ -219,11 +220,6 @@ class _CheckinScreenState extends State<CheckinScreen>
                   color: AppColors.white,
                   child: Row(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            size: 18, color: AppColors.slate700),
-                        onPressed: () => Navigator.pop(context),
-                      ),
                       Image.asset(AppAssets.logoIcon, height: 28),
                       const SizedBox(width: 8),
                       Text('Absensi', style: AppText.headline3),
@@ -278,85 +274,6 @@ class _CheckinScreenState extends State<CheckinScreen>
                         _buildCutoffBanner(),
 
                         const SizedBox(height: 14),
-
-                        // Shift info
-                        SectionCard(
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: AppColors.brandNavy.withOpacity(0.08),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.schedule_rounded,
-                                    color: AppColors.brandNavy, size: 18),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(shift.name, style: AppText.label),
-                                    Text('${shift.startTimeStr} — ${shift.endTimeStr}',
-                                        style: AppText.body1.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.slate900)),
-                                  ],
-                                ),
-                              ),
-                              if (!_isWorkDay)
-                                StatusBadge(label: 'Libur', color: AppColors.warning)
-                              else if (_isEarly)
-                                StatusBadge(label: 'Lebih Awal', color: AppColors.brandLimeDark)
-                              else if (_lateMinutes == 0)
-                                StatusBadge(label: 'Tepat Waktu', color: AppColors.brandLimeDark)
-                              else
-                                StatusBadge(label: 'Terlambat', color: AppColors.danger),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        // GPS toggle
-                        SectionCard(
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: (_useGps ? AppColors.brandCyanDark : AppColors.slate400)
-                                      .withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Icon(
-                                  _useGps ? Icons.gps_fixed_rounded : Icons.gps_off_rounded,
-                                  color: _useGps ? AppColors.brandCyanDark : AppColors.slate400,
-                                  size: 18,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Gunakan GPS', style: AppText.body1),
-                                    Text(_useGps ? 'Lokasi akan dicatat' : 'Tanpa lokasi',
-                                        style: AppText.body2),
-                                  ],
-                                ),
-                              ),
-                              Switch.adaptive(
-                                value: _useGps,
-                                onChanged: (v) => setState(() {
-                                  _useGps = v;
-                                  if (!v) _locationLabel = '';
-                                }),
-                              ),
-                            ],
-                          ),
-                        ),
 
                         if (_useGps) ...[
                           const SizedBox(height: 10),
@@ -517,6 +434,85 @@ class _CheckinScreenState extends State<CheckinScreen>
                               ],
                             ),
                           ),
+
+                        // Shift info
+                        SectionCard(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.brandNavy.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.schedule_rounded,
+                                    color: AppColors.brandNavy, size: 18),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(shift.name, style: AppText.label),
+                                    Text('${shift.startTimeStr} — ${shift.endTimeStr}',
+                                        style: AppText.body1.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.slate900)),
+                                  ],
+                                ),
+                              ),
+                              if (!_isWorkDay)
+                                StatusBadge(label: 'Libur', color: AppColors.warning)
+                              else if (_isEarly)
+                                StatusBadge(label: 'Lebih Awal', color: AppColors.brandLimeDark)
+                              else if (_lateMinutes == 0)
+                                StatusBadge(label: 'Tepat Waktu', color: AppColors.brandLimeDark)
+                              else
+                                StatusBadge(label: 'Terlambat', color: AppColors.danger),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // GPS toggle
+                        SectionCard(
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: (_useGps ? AppColors.brandCyanDark : AppColors.slate400)
+                                      .withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  _useGps ? Icons.gps_fixed_rounded : Icons.gps_off_rounded,
+                                  color: _useGps ? AppColors.brandCyanDark : AppColors.slate400,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Gunakan GPS', style: AppText.body1),
+                                    Text(_useGps ? 'Lokasi akan dicatat' : 'Tanpa lokasi',
+                                        style: AppText.body2),
+                                  ],
+                                ),
+                              ),
+                              Switch.adaptive(
+                                value: _useGps,
+                                onChanged: (v) => setState(() {
+                                  _useGps = v;
+                                  if (!v) _locationLabel = '';
+                                }),
+                              ),
+                            ],
+                          ),
+                        ),
 
                         const SizedBox(height: 40),
                       ],
