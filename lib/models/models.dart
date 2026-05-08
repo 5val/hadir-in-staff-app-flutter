@@ -130,6 +130,7 @@ class UserProfile {
   final String username;
   final String password;
   final String employeeId;
+  final String nik;          // ← Nomor Induk Karyawan, dipakai di slip PDF
   final String positionId;
   final String divisionId;
   final String email;
@@ -144,6 +145,7 @@ class UserProfile {
     required this.username,
     required this.password,
     required this.employeeId,
+    this.nik = '-',
     required this.positionId,
     required this.divisionId,
     required this.email,
@@ -155,7 +157,8 @@ class UserProfile {
 
   UserProfile copyWith({int? points}) =>
       UserProfile(
-        id: id, name: name, username:username, password: password, employeeId: employeeId,
+        id: id, name: name, username: username, password: password,
+        employeeId: employeeId, nik: nik,
         positionId: positionId, divisionId: divisionId,
         email: email, role: role, currentShift: currentShift,
         position: position, points: points ?? this.points,
@@ -244,11 +247,13 @@ enum AllowanceType { health, accommodation, transport, spp }
 // ── Salary Slip ───────────────────────────────────────────────
 class SalaryComponent {
   final String label;
+  final String note;
   final int amount;
   final bool isDeduction;
 
   const SalaryComponent({
     required this.label,
+    this.note = '',
     required this.amount,
     this.isDeduction = false,
   });
@@ -274,6 +279,12 @@ class SalarySlip {
     required this.lateDays,
     required this.overtimeHours,
   });
+
+  /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
+  int get workDays => workingDays;
+
+  /// Jumlah hari tidak hadir (bukan cuti/sakit yang sudah dihitung)
+  int get absentDays => workingDays - presentDays;
 
   int get totalIncome => components
       .where((c) => !c.isDeduction)
@@ -397,6 +408,7 @@ class SampleData {
       username: 'rina',
       password: '123456',
       employeeId: 'EMP-2024-001',
+      nik: '3578012505900002',
       positionId: 'P002',
       divisionId: 'D002',
       email: 'rina.kartika@hadirin.id',
@@ -411,6 +423,7 @@ class SampleData {
     username: 'ahmad',
     password: '123456',
     employeeId: 'EMP-2024-002',
+    nik: '3174081207950003',
     positionId: 'P001',
     divisionId: 'D001',
     email: 'ahmad.rizki@staffsync.id',
@@ -547,6 +560,258 @@ class SampleData {
   ];
 
   static final List<SalarySlip> salaryHistory = [
+    // ── Mei 2024 ──────────────────────────────────────────────
+    SalarySlip(
+      period: 'Mei 2024',
+      periodStart: DateTime(2024, 5, 1),
+      periodEnd: DateTime(2024, 5, 31),
+      workingDays: 23,
+      presentDays: 23,
+      lateDays: 0,
+      overtimeHours: 2,
+      components: const [
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '23 hari × Rp 30.000',
+          amount: 690000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran Penuh',
+          note: 'Hadir 23/23 hari kerja',
+          amount: 1150000,
+        ),
+        SalaryComponent(
+          label: 'Lembur (2 jam)',
+          note: '2 jam × Rp 75.000',
+          amount: 150000,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 350000,
+          isDeduction: true,
+        ),
+      ],
+    ),
+
+    // ── April 2024 ────────────────────────────────────────────
+    SalarySlip(
+      period: 'April 2024',
+      periodStart: DateTime(2024, 4, 1),
+      periodEnd: DateTime(2024, 4, 30),
+      workingDays: 22,
+      presentDays: 20,
+      lateDays: 2,
+      overtimeHours: 0,
+      components: const [
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '20 hari × Rp 30.000',
+          amount: 600000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran',
+          note: 'Hadir 20/22 hari (parsial)',
+          amount: 1000000,
+        ),
+        SalaryComponent(
+          label: 'Potongan Keterlambatan',
+          note: '2 hari terlambat × Rp 25.000',
+          amount: 50000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 350000,
+          isDeduction: true,
+        ),
+      ],
+    ),
+
+    // ── Maret 2024 ────────────────────────────────────────────
+    SalarySlip(
+      period: 'Maret 2024',
+      periodStart: DateTime(2024, 3, 1),
+      periodEnd: DateTime(2024, 3, 31),
+      workingDays: 21,
+      presentDays: 21,
+      lateDays: 0,
+      overtimeHours: 5,
+      components: const [
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '21 hari × Rp 30.000',
+          amount: 630000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran Penuh',
+          note: 'Hadir 21/21 hari kerja',
+          amount: 1050000,
+        ),
+        SalaryComponent(
+          label: 'Lembur (5 jam)',
+          note: '5 jam × Rp 75.000',
+          amount: 375000,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 350000,
+          isDeduction: true,
+        ),
+      ],
+    ),
+
+    // ── Februari 2024 ─────────────────────────────────────────
+    SalarySlip(
+      period: 'Februari 2024',
+      periodStart: DateTime(2024, 2, 1),
+      periodEnd: DateTime(2024, 2, 29),
+      workingDays: 20,
+      presentDays: 19,
+      lateDays: 1,
+      overtimeHours: 3,
+      components: const [
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '19 hari × Rp 30.000',
+          amount: 570000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran',
+          note: 'Hadir 19/20 hari (parsial)',
+          amount: 950000,
+        ),
+        SalaryComponent(
+          label: 'Lembur (3 jam)',
+          note: '3 jam × Rp 75.000',
+          amount: 225000,
+        ),
+        SalaryComponent(
+          label: 'Potongan Keterlambatan',
+          note: '1 hari terlambat × Rp 25.000',
+          amount: 25000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 350000,
+          isDeduction: true,
+        ),
+      ],
+    ),
+
+    // ── Januari 2024 ──────────────────────────────────────────
     SalarySlip(
       period: 'Januari 2024',
       periodStart: DateTime(2024, 1, 1),
@@ -556,16 +821,64 @@ class SampleData {
       lateDays: 1,
       overtimeHours: 4,
       components: const [
-        SalaryComponent(label: 'Gaji Pokok', amount: 5000000),
-        SalaryComponent(label: 'Tunjangan Transport', amount: 500000),
-        SalaryComponent(label: 'Tunjangan Makan', amount: 300000),
-        SalaryComponent(label: 'Tunjangan Kesehatan', amount: 200000),
-        SalaryComponent(label: 'Lembur (4 jam)', amount: 350000),
-        SalaryComponent(label: 'Potongan Keterlambatan', amount: 50000, isDeduction: true),
-        SalaryComponent(label: 'BPJS Kesehatan', amount: 120000, isDeduction: true),
-        SalaryComponent(label: 'BPJS Ketenagakerjaan', amount: 150000, isDeduction: true),
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '22 hari × Rp 30.000',
+          amount: 660000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran',
+          note: 'Hadir 22/23 hari (parsial)',
+          amount: 1100000,
+        ),
+        SalaryComponent(
+          label: 'Lembur (4 jam)',
+          note: '4 jam × Rp 75.000',
+          amount: 300000,
+        ),
+        SalaryComponent(
+          label: 'Potongan Keterlambatan',
+          note: '1 hari terlambat × Rp 25.000',
+          amount: 25000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 350000,
+          isDeduction: true,
+        ),
       ],
     ),
+
+    // ── Desember 2023 ─────────────────────────────────────────
     SalarySlip(
       period: 'Desember 2023',
       periodStart: DateTime(2023, 12, 1),
@@ -575,14 +888,59 @@ class SampleData {
       lateDays: 0,
       overtimeHours: 8,
       components: const [
-        SalaryComponent(label: 'Gaji Pokok', amount: 5000000),
-        SalaryComponent(label: 'Tunjangan Transport', amount: 500000),
-        SalaryComponent(label: 'Tunjangan Makan', amount: 300000),
-        SalaryComponent(label: 'Tunjangan Kesehatan', amount: 200000),
-        SalaryComponent(label: 'Lembur (8 jam)', amount: 700000),
-        SalaryComponent(label: 'Bonus Akhir Tahun', amount: 1000000),
-        SalaryComponent(label: 'BPJS Kesehatan', amount: 120000, isDeduction: true),
-        SalaryComponent(label: 'BPJS Ketenagakerjaan', amount: 150000, isDeduction: true),
+        SalaryComponent(
+          label: 'Gaji Pokok',
+          note: 'Jabatan IT Supervisor',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Transport',
+          note: 'Dibayarkan per bulan',
+          amount: 500000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Makan',
+          note: '21 hari × Rp 30.000',
+          amount: 630000,
+        ),
+        SalaryComponent(
+          label: 'Tunjangan Kesehatan',
+          note: 'Dibayarkan per bulan',
+          amount: 200000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Kehadiran Penuh',
+          note: 'Hadir 21/21 hari kerja',
+          amount: 1050000,
+        ),
+        SalaryComponent(
+          label: 'Lembur (8 jam)',
+          note: '8 jam × Rp 75.000',
+          amount: 600000,
+        ),
+        SalaryComponent(
+          label: 'Bonus Akhir Tahun',
+          note: 'THR / Bonus tahunan',
+          amount: 10000000,
+        ),
+        SalaryComponent(
+          label: 'BPJS Kesehatan',
+          note: '1% dari gaji pokok',
+          amount: 100000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'BPJS Ketenagakerjaan',
+          note: '2% dari gaji pokok',
+          amount: 200000,
+          isDeduction: true,
+        ),
+        SalaryComponent(
+          label: 'PPh 21',
+          note: 'Pajak penghasilan bulanan',
+          amount: 1200000,
+          isDeduction: true,
+        ),
       ],
     ),
   ];

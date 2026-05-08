@@ -8,6 +8,7 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import 'login_screen.dart';
 import 'all_leave_history_screen.dart';
+import 'all_subordinate_leave_history_screen.dart';
 
 /// Leave & Time Off tab — tampil langsung di MainScreen.
 /// Re-verifikasi sekali per sesi. Setelah verified:
@@ -181,7 +182,7 @@ class _LeaveTabState extends State<LeaveTab> {
           }),
           icon: Icons.beach_access_rounded,
           iconColor: AppColors.brandNavy,
-          title: 'Cuti Tahunan',
+          title: 'Ajukan Cuti',
           subtitle: 'Ajukan cuti dari jatah tahunan kamu',
           pills: const ['Maks 12 hari/tahun', 'Min H-3'],
           content: const _CutiForm(),
@@ -198,7 +199,7 @@ class _LeaveTabState extends State<LeaveTab> {
           }),
           icon: Icons.medical_services_rounded,
           iconColor: AppColors.brandCyanDark,
-          title: 'Pengajuan Izin',
+          title: 'Ajukan Izin',
           subtitle: 'Izin sakit, seminar, atau keperluan sekolah',
           pills: const ['Sakit', 'Seminar', 'Sekolah'],
           content: const _IzinForm(),
@@ -262,7 +263,7 @@ class _LeaveTabState extends State<LeaveTab> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Pengajuan Karyawan',
+                        Text('Pengajuan dari Karyawan',
                             style: GoogleFonts.inter(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -315,20 +316,50 @@ class _LeaveTabState extends State<LeaveTab> {
   Widget _buildEmployeeApplicationList() {
     final apps = SampleData.subordinateLeaveRequests;
     return Column(
-      children: apps.asMap().entries.map((e) {
-        final app  = e.value;
-        final isLast = e.key == apps.length - 1;
-        return Column(
-          children: [
-            _EmployeeAppTile(
-              app: app,
-              onApprove: () => _showActionDialog(true, app.employeeName!),
-              onReject:  () => _showActionDialog(false, app.employeeName!),
+      children: [
+        // ── "Lihat Riwayat Pengajuan" footer button ──────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AllSubordinateLeaveHistoryScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.history_rounded, size: 16),
+              label: const Text('Lihat Riwayat Pengajuan'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.brandNavy,
+                side: const BorderSide(color: AppColors.brandNavy, width: 1),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                textStyle: GoogleFonts.inter(
+                    fontSize: 13, fontWeight: FontWeight.w700),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
             ),
-            if (!isLast) const AppDivider(),
-          ],
-        );
-      }).toList(),
+          ),
+        ),
+        const AppDivider(),
+        // Pending application tiles with approve / reject actions
+        ...apps.asMap().entries.map((e) {
+          final app    = e.value;
+          final isLast = e.key == apps.length - 1;
+          return Column(
+            children: [
+              _EmployeeAppTile(
+                app: app,
+                onApprove: () => _showActionDialog(true, app.employeeName!),
+                onReject:  () => _showActionDialog(false, app.employeeName!),
+              ),
+              if (!isLast) const AppDivider(),
+            ],
+          );
+        }),
+      ],
     );
   }
 
@@ -482,7 +513,7 @@ class _LeaveTabState extends State<LeaveTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Riwayat Pengajuan',
+            Text('Riwayat Pengajuanmu',
                 style: AppText.headline3
                     .copyWith(color: AppColors.slate900)),
             TextButton(
@@ -775,9 +806,7 @@ class _EmployeeAppTile extends StatelessWidget {
             children: [
               // Detail button
               OutlinedButton.icon(
-                onPressed: () => WidgetsBinding.instance.addPostFrameCallback(() {
-                    _showDetail(context);
-                  } as FrameCallback),
+                onPressed: () => _showDetail(context),
                 icon: const Icon(Icons.info_outline_rounded, size: 14),
                 label: const Text('Detail'),
                 style: OutlinedButton.styleFrom(
@@ -1787,9 +1816,7 @@ class _RequestHistoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final f = DateFormat('dd MMM', 'id_ID');
     return GestureDetector(
-      onTap: () => WidgetsBinding.instance.addPostFrameCallback(() {
-          _showDetail(context);
-        } as FrameCallback),
+      onTap: () => _showDetail(context),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         child: Row(

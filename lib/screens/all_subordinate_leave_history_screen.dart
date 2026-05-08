@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -7,19 +5,23 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 
-class AllLeaveHistoryScreen extends StatefulWidget {
-  const AllLeaveHistoryScreen({super.key});
+/// Read-only history of all subordinate leave requests — visible to supervisors.
+/// Styled identically to AllLeaveHistoryScreen; no approve/reject actions.
+class AllSubordinateLeaveHistoryScreen extends StatefulWidget {
+  const AllSubordinateLeaveHistoryScreen({super.key});
 
   @override
-  State<AllLeaveHistoryScreen> createState() => _AllLeaveHistoryScreenState();
+  State<AllSubordinateLeaveHistoryScreen> createState() =>
+      _AllSubordinateLeaveHistoryScreenState();
 }
 
-class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
-  LeaveType? _filterType;
+class _AllSubordinateLeaveHistoryScreenState
+    extends State<AllSubordinateLeaveHistoryScreen> {
+  LeaveType?     _filterType;
   RequestStatus? _filterStatus;
 
   List<LeaveRequest> get _filtered {
-    var list = List<LeaveRequest>.from(SampleData.leaveRequests);
+    var list = List<LeaveRequest>.from(SampleData.subordinateLeaveRequests);
     if (_filterType   != null) list = list.where((r) => r.type   == _filterType).toList();
     if (_filterStatus != null) list = list.where((r) => r.status == _filterStatus).toList();
     list.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
@@ -34,10 +36,11 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
         backgroundColor: AppColors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.slate700),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 18, color: AppColors.slate700),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Riwayat Pengajuanmu', style: AppText.headline3),
+        title: Text('Riwayat Pengajuan Karyawan', style: AppText.headline3),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: AppColors.slate200),
@@ -45,39 +48,39 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
       ),
       body: Column(
         children: [
-          // Filter bar
+          // ── Filter bar ────────────────────────────────────
           Container(
             color: AppColors.white,
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Row(
               children: [
-                // Type filter
                 Expanded(
                   child: DropdownButtonFormField<LeaveType?>(
                     value: _filterType,
                     decoration: const InputDecoration(
                       labelText: 'Jenis',
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       isDense: true,
                     ),
                     items: const [
-                      DropdownMenuItem(value: null, child: Text('Semua Jenis')),
-                      DropdownMenuItem(value: LeaveType.annual, child: Text('Cuti')),
-                      DropdownMenuItem(value: LeaveType.sick,   child: Text('Sakit')),
-                      DropdownMenuItem(value: LeaveType.seminar,child: Text('Seminar')),
-                      DropdownMenuItem(value: LeaveType.school, child: Text('Sekolah')),
+                      DropdownMenuItem(value: null,              child: Text('Semua Jenis')),
+                      DropdownMenuItem(value: LeaveType.annual,  child: Text('Cuti')),
+                      DropdownMenuItem(value: LeaveType.sick,    child: Text('Sakit')),
+                      DropdownMenuItem(value: LeaveType.seminar, child: Text('Seminar')),
+                      DropdownMenuItem(value: LeaveType.school,  child: Text('Sekolah')),
                     ],
                     onChanged: (v) => setState(() => _filterType = v),
                   ),
                 ),
                 const SizedBox(width: 10),
-                // Status filter
                 Expanded(
                   child: DropdownButtonFormField<RequestStatus?>(
                     value: _filterStatus,
                     decoration: const InputDecoration(
                       labelText: 'Status',
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       isDense: true,
                     ),
                     items: const [
@@ -92,8 +95,10 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
                 if (_filterType != null || _filterStatus != null) ...[
                   const SizedBox(width: 8),
                   IconButton(
-                    icon: const Icon(Icons.clear_rounded, color: AppColors.danger, size: 20),
-                    onPressed: () => setState(() { _filterType = null; _filterStatus = null; }),
+                    icon: const Icon(Icons.clear_rounded,
+                        color: AppColors.danger, size: 20),
+                    onPressed: () =>
+                        setState(() { _filterType = null; _filterStatus = null; }),
                     tooltip: 'Reset filter',
                   ),
                 ],
@@ -102,24 +107,24 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
           ),
           Container(height: 1, color: AppColors.slate200),
 
-          // Summary chips
+          // ── Summary chips ─────────────────────────────────
           Container(
             color: AppColors.white,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Row(
               children: [
-                _SummaryChip(label: 'Total', count: _filtered.length, color: AppColors.brandNavy),
+                _SummaryChip(label: 'Total',     count: _filtered.length,                                                                    color: AppColors.brandNavy),
                 const SizedBox(width: 8),
                 _SummaryChip(label: 'Disetujui', count: _filtered.where((r) => r.status == RequestStatus.approved).length, color: AppColors.brandLimeDark),
                 const SizedBox(width: 8),
-                _SummaryChip(label: 'Menunggu', count: _filtered.where((r) => r.status == RequestStatus.pending).length, color: AppColors.warning),
+                _SummaryChip(label: 'Menunggu',  count: _filtered.where((r) => r.status == RequestStatus.pending).length,  color: AppColors.warning),
                 const SizedBox(width: 8),
-                _SummaryChip(label: 'Ditolak', count: _filtered.where((r) => r.status == RequestStatus.rejected).length, color: AppColors.danger),
+                _SummaryChip(label: 'Ditolak',   count: _filtered.where((r) => r.status == RequestStatus.rejected).length, color: AppColors.danger),
               ],
             ),
           ),
 
-          // List
+          // ── List ──────────────────────────────────────────
           Expanded(
             child: _filtered.isEmpty
                 ? Center(
@@ -128,9 +133,12 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
                       children: [
                         const Text('📭', style: TextStyle(fontSize: 48)),
                         const SizedBox(height: 12),
-                        Text('Tidak ada pengajuan', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+                        Text('Tidak ada pengajuan',
+                            style: AppText.headline3
+                                .copyWith(color: AppColors.slate900)),
                         const SizedBox(height: 4),
-                        Text('Coba ubah filter pencarian', style: AppText.body2),
+                        Text('Coba ubah filter pencarian',
+                            style: AppText.body2),
                       ],
                     ),
                   )
@@ -138,7 +146,8 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
                     padding: const EdgeInsets.all(16),
                     itemCount: _filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, i) => _RequestCard(request: _filtered[i]),
+                    itemBuilder: (_, i) =>
+                        _SubordinateRequestCard(request: _filtered[i]),
                   ),
           ),
         ],
@@ -149,8 +158,11 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
 
 // ── Summary Chip ──────────────────────────────────────────────
 class _SummaryChip extends StatelessWidget {
-  final String label; final int count; final Color color;
-  const _SummaryChip({required this.label, required this.count, required this.color});
+  final String label;
+  final int    count;
+  final Color  color;
+  const _SummaryChip(
+      {required this.label, required this.count, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -164,19 +176,22 @@ class _SummaryChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$count', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w800, color: color)),
+          Text('$count',
+              style: GoogleFonts.inter(
+                  fontSize: 13, fontWeight: FontWeight.w800, color: color)),
           const SizedBox(width: 4),
-          Text(label, style: GoogleFonts.inter(fontSize: 10, color: color)),
+          Text(label,
+              style: GoogleFonts.inter(fontSize: 10, color: color)),
         ],
       ),
     );
   }
 }
 
-// ── Request Card ──────────────────────────────────────────────
-class _RequestCard extends StatelessWidget {
+// ── Subordinate Request Card ──────────────────────────────────
+class _SubordinateRequestCard extends StatelessWidget {
   final LeaveRequest request;
-  const _RequestCard({required this.request});
+  const _SubordinateRequestCard({required this.request});
 
   Color get _statusColor {
     switch (request.status) {
@@ -214,18 +229,23 @@ class _RequestCard extends StatelessWidget {
     }
   }
 
+  String get _initials {
+    final name = request.employeeName ?? '?';
+    return name.split(' ').map((w) => w.isNotEmpty ? w[0] : '').take(2).join();
+  }
+
   @override
   Widget build(BuildContext context) {
     final fDate  = DateFormat('dd MMM yyyy', 'id_ID');
     final fShort = DateFormat('dd MMM',      'id_ID');
 
     return GestureDetector(
-      // FIX: directly call _showDetail instead of the broken addPostFrameCallback cast
       onTap: () => _showDetail(context),
       child: SectionCard(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
+            // Left icon
             Container(
               width: 44, height: 44,
               decoration: BoxDecoration(
@@ -239,17 +259,50 @@ class _RequestCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Type label + status badge
                   Row(
                     children: [
                       Text(_typeLabel,
                           style: GoogleFonts.inter(
-                            fontSize: 14, fontWeight: FontWeight.w700,
-                            color: AppColors.slate900,
-                          )),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.slate900)),
                       const Spacer(),
                       StatusBadge(label: _statusLabel, color: _statusColor),
                     ],
                   ),
+                  const SizedBox(height: 3),
+                  // Employee name
+                  if (request.employeeName != null)
+                    Row(
+                      children: [
+                        // Mini avatar
+                        Container(
+                          width: 18, height: 18,
+                          decoration: BoxDecoration(
+                            color: AppColors.brandNavy.withOpacity(0.12),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Text(
+                              _initials,
+                              style: GoogleFonts.inter(
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.brandNavy),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          request.employeeName!,
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.brandNavy),
+                        ),
+                      ],
+                    ),
                   const SizedBox(height: 4),
                   Text(
                     '${fShort.format(request.startDate)} – ${fDate.format(request.endDate)}  ·  ${request.dayCount} hari',
@@ -270,7 +323,8 @@ class _RequestCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.slate400, size: 16),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.slate400, size: 16),
           ],
         ),
       ),
@@ -289,27 +343,41 @@ class _RequestCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(child: Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.slate300, borderRadius: BorderRadius.circular(2)))),
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.slate300,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
             const SizedBox(height: 16),
             Row(
               children: [
-                Text('Detail Pengajuan', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+                Text('Detail Pengajuan',
+                    style: AppText.headline3
+                        .copyWith(color: AppColors.slate900)),
                 const Spacer(),
                 StatusBadge(label: _statusLabel, color: _statusColor),
               ],
             ),
             const SizedBox(height: 16),
+            if (request.employeeName != null) ...[
+              _Row('Karyawan',  request.employeeName!),
+              const AppDivider(),
+            ],
             _Row('Jenis Pengajuan', _typeLabel),
             const AppDivider(),
-            _Row('Tanggal Mulai', f.format(request.startDate)),
+            _Row('Tanggal Mulai',   f.format(request.startDate)),
             const AppDivider(),
             _Row('Tanggal Selesai', f.format(request.endDate)),
             const AppDivider(),
             _Row('Durasi', '${request.dayCount} hari'),
             const AppDivider(),
-            _Row('Alasan', request.reason ?? "-"),
+            _Row('Alasan',  request.reason ?? '-'),
             const AppDivider(),
-            _Row('Diajukan', DateFormat('dd MMM yyyy, HH:mm').format(request.submittedAt)),
+            _Row('Diajukan',
+                DateFormat('dd MMM yyyy, HH:mm').format(request.submittedAt)),
           ],
         ),
       ),
@@ -320,14 +388,22 @@ class _RequestCard extends StatelessWidget {
 class _Row extends StatelessWidget {
   final String label, value;
   const _Row(this.label, this.value);
+
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
-          SizedBox(width: 120, child: Text(label, style: AppText.body2)),
-          Expanded(child: Text(value, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.slate900))),
+          SizedBox(
+              width: 130,
+              child: Text(label, style: AppText.body2)),
+          Expanded(
+              child: Text(value,
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.slate900))),
         ],
       ),
     );

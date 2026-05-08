@@ -1,12 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/attendance_provider.dart';   // ← shared state
+import '../screens/camera_checkin_screen.dart';  // ← halaman kamera
 import 'home_tab.dart';
 import 'leave_tab.dart';
 import 'salary_screen.dart';
 import 'account_tab.dart';
-import 'checkin_screen.dart';
 
-/// Bottom-nav wrapper — Home | Leave & Time Off | [FAB Check-In] | Salary | Account
+/// Bottom-nav wrapper — Home | Leave & Time Off | [FAB] | Salary | Account
+///
+/// FAB behaviour berdasarkan [AttendanceProvider._status]:
+///  • notCheckedIn  → buka kamera (check-in)
+///  • checkedIn     → buka kamera (check-out) — tombol istirahat ada di HomeTab
+///  • onBreak       → alert "Selesai Istirahat?" (tanpa kamera)
+///  • breakEnded    → buka kamera (check-out)
+///  • checkedOut    → FAB disabled / info sudah selesai
 class MainScreen extends StatefulWidget {
   final int initialTab;
   const MainScreen({super.key, this.initialTab = 0});
@@ -18,33 +27,166 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   late int _tab;
 
+  /// AttendanceProvider diinisialisasi di sini agar bisa dibagikan ke
+  /// seluruh widget tree melalui [InheritedAttendance].
+  final AttendanceProvider _attendance = AttendanceProvider();
+
   @override
   void initState() {
     super.initState();
     _tab = widget.initialTab;
-  }
-
-  void _onTabTap(int i) {
-    setState(() => _tab = i);
+    // Rebuild FAB ketika status berubah
+    _attendance.addListener(() => setState(() {}));
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.slate50,
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          HomeTab(onNavigateToAccount: () => _onTabTap(4)),
-          const LeaveTab(),
-          const CheckinScreen(),  // slot 2 reserved untuk FAB
-          const SalaryScreen(isFromAccount: false),
-          const AccountTab(),
+  void dispose() {
+    _attendance.dispose();
+    super.dispose();
+  }
+
+  void _onTabTap(int i) => setState(() => _tab = i);
+
+  // ── FAB tap handler ──────────────────────────────────────────
+  Future<void> _onFabTap() async {
+    final status = _attendance.status;
+
+    // Sudah check-out → tidak ada aksi
+    if (status == AttendanceProviderStatus.checkedOut) {
+      _showInfoSnackbar('Kamu sudah check-out hari ini. Sampai besok! 🌙');
+      return;
+    }
+
+    // Sedang istirahat → alert selesai istirahat (tanpa kamera)
+    if (status == AttendanceProviderStatus.onBreak) {
+      await _showEndBreakDialog();
+      return;
+    }
+
+    // Tentukan tipe kamera
+    final actionType = (status == AttendanceProviderStatus.notCheckedIn)
+        ? CameraActionType.checkIn
+        : CameraActionType.checkOut;
+
+    // Buka halaman kamera
+    final result = await Navigator.push<CameraResult>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => CameraCheckinScreen(actionType: actionType),
+      ),
+    );
+
+    if (!mounted || result == null || !result.confirmed) return;
+
+    // Update state sesuai aksi
+    if (result.actionType == CameraActionType.checkIn) {
+      _attendance.doCheckIn();
+      _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
+    } else {
+      _attendance.doCheckOut();
+      _showSuccessSnackbar('Check-out berhasil! Istirahat yang baik 🌙');
+    }
+  }
+
+  // ── Dialog selesai istirahat ─────────────────────────────────
+  Future<void> _showEndBreakDialog() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+        contentPadding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+        title: Row(
+          children: [
+            const Text('☕', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 10),
+            Text('Selesai Istirahat?',
+                style: GoogleFonts.inter(
+                    fontSize: 17, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        content: Text(
+          'Apakah kamu sudah siap untuk kembali bekerja?',
+          style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Belum',
+                style: GoogleFonts.inter(color: AppColors.slate700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.brandNavy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Ya, Kembali Bekerja',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNav(),
-      floatingActionButton: _buildFab(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+    );
+    if (!mounted || ok != true) return;
+    _attendance.endBreak();
+    _showSuccessSnackbar('Selamat bekerja kembali! 💪');
+  }
+
+  void _showSuccessSnackbar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg,
+          style: GoogleFonts.inter(
+              fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white)),
+      backgroundColor: AppColors.brandNavy,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(seconds: 3),
+    ));
+  }
+
+  void _showInfoSnackbar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg,
+          style: GoogleFonts.inter(fontSize: 13, color: Colors.white)),
+      backgroundColor: AppColors.slate600,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  // ── Build ─────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    // Bagikan attendance state ke subtree
+    return InheritedAttendance(
+      provider: _attendance,
+      child: Scaffold(
+        backgroundColor: AppColors.slate50,
+        body: IndexedStack(
+          index: _tab,
+          children: [
+            HomeTab(
+              onNavigateToAccount: () => _onTabTap(4),
+              attendance: _attendance,
+            ),
+            const LeaveTab(),
+            // slot 2 kosong — FAB menangani kamera secara push, bukan IndexedStack
+            const SizedBox.shrink(),
+            const SalaryScreen(isFromAccount: false),
+            const AccountTab(),
+          ],
+        ),
+        bottomNavigationBar: _buildBottomNav(),
+        floatingActionButton: _buildFab(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      ),
     );
   }
 
@@ -84,41 +226,66 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Widget _buildFab() {
-    return Container(
-      width: 60, height: 60,
-      decoration: BoxDecoration(
-        color: AppColors.brandNavy,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brandNavy.withOpacity(0.35),
-            blurRadius: 14, offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(30),
-          // onTap: () => Navigator.push(
-          //   context,
-          //   MaterialPageRoute(builder: (_) => const CheckinScreen()),
-          // ),
-          onTap: () => _onTabTap(2),
-          child: const Icon(Icons.fingerprint_rounded,
-              color: Colors.white, size: 28),
+    final status = _attendance.status;
+    final isDone = status == AttendanceProviderStatus.checkedOut;
+    final isBreak = status == AttendanceProviderStatus.onBreak;
+
+    // Warna FAB
+    Color fabColor;
+    IconData fabIcon;
+    if (isDone) {
+      fabColor = AppColors.slate400;
+      fabIcon  = Icons.check_circle_rounded;
+    } else if (isBreak) {
+      fabColor = const Color(0xFFE67E22); // orange
+      fabIcon  = Icons.free_breakfast_rounded;
+    } else {
+      fabColor = AppColors.brandNavy;
+      fabIcon  = Icons.fingerprint_rounded;
+    }
+
+    return GestureDetector(
+      onTap: _onFabTap,
+      child: Container(
+        width: 60, height: 60,
+        decoration: BoxDecoration(
+          color: fabColor,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: fabColor.withOpacity(0.38),
+              blurRadius: 14, offset: const Offset(0, 6),
+            ),
+          ],
         ),
+        child: Icon(fabIcon, color: Colors.white, size: 28),
       ),
     );
   }
 }
 
-class _Placeholder extends StatelessWidget {
-  const _Placeholder();
+// ── InheritedWidget untuk share AttendanceProvider ───────────────
+class InheritedAttendance extends InheritedWidget {
+  final AttendanceProvider provider;
+
+  const InheritedAttendance({
+    super.key,
+    required this.provider,
+    required super.child,
+  });
+
+  static AttendanceProvider of(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<InheritedAttendance>()!
+        .provider;
+  }
+
   @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
+  bool updateShouldNotify(InheritedAttendance old) =>
+      provider != old.provider;
 }
 
+// ── Nav Item ─────────────────────────────────────────────────────
 class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
