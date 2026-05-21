@@ -22,8 +22,18 @@ class AttendanceRules {
 
   // ── Batas checkout ──────────────────────────────────────────────
   /// Check-out hanya tersedia setelah jam ini (12:00 siang)
-  static const int checkoutCutoffHour   = 12;
+  static const int checkoutCutoffHour   = 15;
   static const int checkoutCutoffMinute = 0;
+
+  // ── Jam pulang normal & toleransi pulang awal ────────────────────
+  /// Jam pulang normal (17:00 / jam 5 sore)
+  static const int normalCheckoutHour   = 17;
+  static const int normalCheckoutMinute = 0;
+
+  /// Toleransi pulang awal dalam jam.
+  /// Misal: 1 → karyawan boleh pulang mulai jam 16:00 tanpa peringatan.
+  /// Set ke 0 untuk menonaktifkan toleransi.
+  static const int earlyCheckoutToleranceHours = 1;
 
   // ── Helper (berbasis DateTime.now()) ────────────────────────────
 
@@ -50,6 +60,33 @@ class AttendanceRules {
         breakEndHour, breakEndMinute);
     return now.isAfter(end);
   }
+
+  /// Jam mulai toleransi pulang awal (normalCheckoutHour - earlyCheckoutToleranceHours)
+  static int get earlyCheckoutStartHour =>
+      normalCheckoutHour - earlyCheckoutToleranceHours;
+
+  /// True jika sekarang sudah >= jam toleransi pulang awal
+  /// (misal toleransi 1 jam → true mulai jam 16:00)
+  static bool get isWithinEarlyCheckoutWindow {
+    final now   = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day,
+        earlyCheckoutStartHour, normalCheckoutMinute);
+    return now.isAfter(start) || now.isAtSameMomentAs(start);
+  }
+
+  /// True jika sekarang sudah >= jam pulang normal (17:00)
+  static bool get isAfterNormalCheckout {
+    final now    = DateTime.now();
+    final normal = DateTime(now.year, now.month, now.day,
+        normalCheckoutHour, normalCheckoutMinute);
+    return now.isAfter(normal) || now.isAtSameMomentAs(normal);
+  }
+
+  /// True jika check-out bisa dilakukan tanpa popup peringatan:
+  /// sudah >= jam pulang normal ATAU masih dalam toleransi pulang awal.
+  static bool get canCheckoutWithoutWarning =>
+      isAfterNormalCheckout ||
+      (earlyCheckoutToleranceHours > 0 && isWithinEarlyCheckoutWindow);
 
   /// Tombol istirahat aktif HANYA saat jam 12:00–13:00
   static bool get canStartBreak => isBreakTime;

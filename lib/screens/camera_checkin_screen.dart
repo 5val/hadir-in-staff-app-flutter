@@ -326,8 +326,63 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
 
   // ── Konfirmasi → kirim hasil ────────────────────────────────────
   void _confirm() {
+    // Khusus checkout: cek apakah perlu peringatan pulang awal
+    if (widget.actionType == CameraActionType.checkOut &&
+        !AttendanceRules.canCheckoutWithoutWarning) {
+      _showEarlyCheckoutWarningDialog();
+      return;
+    }
     Navigator.pop(context,
         CameraResult(confirmed: true, actionType: widget.actionType));
+  }
+
+  // ── Dialog peringatan pulang awal ───────────────────────────────
+  void _showEarlyCheckoutWarningDialog() {
+    final normalHour = AttendanceRules.normalCheckoutHour
+        .toString().padLeft(2, '0');
+    final normalMinute = AttendanceRules.normalCheckoutMinute
+        .toString().padLeft(2, '0');
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          const Text('⚠️', style: TextStyle(fontSize: 22)),
+          const SizedBox(width: 10),
+          Text('Belum Jam Pulang!',
+              style: GoogleFonts.inter(
+                  fontSize: 16, fontWeight: FontWeight.w800)),
+        ]),
+        content: Text(
+          'Jam pulang normal adalah pukul $normalHour:$normalMinute. '
+          'Apakah Anda yakin ingin check-out sekarang?',
+          style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal',
+                style: GoogleFonts.inter(color: AppColors.slate700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFB01E1E),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(context); // tutup dialog
+              Navigator.pop(context,
+                  CameraResult(confirmed: true, actionType: widget.actionType));
+            },
+            child: Text('Ya, Check-Out Sekarang',
+                style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _retake() {
