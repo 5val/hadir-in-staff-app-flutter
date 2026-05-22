@@ -130,18 +130,18 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
     return Scaffold(
       backgroundColor: AppColors.slate50,
       appBar: AppBar(
-        backgroundColor: AppColors.white,
+        backgroundColor: AppColors.brandNavy,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 18, color: AppColors.slate700),
+              size: 18, color: AppColors.white),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
           children: [
-            Image.asset(AppAssets.logoIcon, height: 24),
-            const SizedBox(width: 8),
-            Text('Waktu Istirahat', style: AppText.headline3),
+            // Image.asset(AppAssets.logoIcon, height: 24),
+            // const SizedBox(width: 8),
+            Text('Waktu Istirahat', style: AppText.headline3.copyWith(color: AppColors.white)),
           ],
         ),
         bottom: PreferredSize(

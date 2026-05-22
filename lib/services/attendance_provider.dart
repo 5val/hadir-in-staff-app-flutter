@@ -22,7 +22,7 @@ class AttendanceRules {
 
   // ── Batas checkout ──────────────────────────────────────────────
   /// Check-out hanya tersedia setelah jam ini (12:00 siang)
-  static const int checkoutCutoffHour   = 15;
+  static const int checkoutCutoffHour   = 12;
   static const int checkoutCutoffMinute = 0;
 
   // ── Jam pulang normal & toleransi pulang awal ────────────────────

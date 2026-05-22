@@ -33,14 +33,14 @@ class _AllSubordinateLeaveHistoryScreenState
     return Scaffold(
       backgroundColor: AppColors.slate50,
       appBar: AppBar(
-        backgroundColor: AppColors.white,
+        backgroundColor: AppColors.brandNavy,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              size: 18, color: AppColors.slate700),
+              size: 18, color: AppColors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Riwayat Pengajuan Karyawan', style: AppText.headline3),
+        title: Text('Riwayat Pengajuan Karyawan', style: AppText.headline3.copyWith(color: AppColors.white)),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: AppColors.slate200),
@@ -51,7 +51,7 @@ class _AllSubordinateLeaveHistoryScreenState
           // ── Filter bar ────────────────────────────────────
           Container(
             color: AppColors.white,
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Row(
               children: [
                 Expanded(

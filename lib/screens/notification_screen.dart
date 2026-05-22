@@ -187,11 +187,11 @@ class _NotificationScreenState extends State<NotificationScreen>
     return Scaffold(
       backgroundColor: AppColors.slate50,
       appBar: AppBar(
-        backgroundColor: AppColors.white,
+        backgroundColor: AppColors.brandNavy,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: AppColors.slate900, size: 20),
+              color: AppColors.white, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
@@ -199,10 +199,10 @@ class _NotificationScreenState extends State<NotificationScreen>
           children: [
             Text('Notifikasi',
                 style: AppText.headline3
-                    .copyWith(fontSize: 18, color: AppColors.slate900)),
+                    .copyWith(fontSize: 18, color: AppColors.white)),
             if (_unreadCount > 0)
               Text('$_unreadCount belum dibaca',
-                  style: AppText.caption.copyWith(color: AppColors.brandNavy)),
+                  style: AppText.caption.copyWith(color: AppColors.white)),
           ],
         ),
         actions: [
@@ -211,7 +211,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               onPressed: _markAllRead,
               child: Text('Baca Semua',
                   style: AppText.caption.copyWith(
-                      color: AppColors.brandNavy, fontWeight: FontWeight.w600)),
+                      color: AppColors.slate200, fontWeight: FontWeight.w600)),
             ),
         ],
       ),
@@ -220,7 +220,7 @@ class _NotificationScreenState extends State<NotificationScreen>
           // ── Filter chips ──────────────────────────────────────────
           Container(
             color: AppColors.white,
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(

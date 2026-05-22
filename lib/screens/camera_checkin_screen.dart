@@ -55,6 +55,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
 
   /// Check-in hanya diizinkan sebelum jam 12:00
   bool get _checkinAllowed => !AttendanceRules.canCheckout;
+  // bool get _checkinAllowed => true;
 
   // ── Lokasi (simulasi) ───────────────────────────────────────────
   bool   _checkingLocation = false;
@@ -953,7 +954,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                                     const Icon(Icons.camera_alt_rounded,
                                         color: AppColors.slate300, size: 36),
                                     const SizedBox(height: 6),
-                                    Text('Foto selfie tersimpan',
+                                    Text('Foto tersimpan',
                                         style: GoogleFonts.inter(
                                             fontSize: 11,
                                             color: AppColors.slate400)),
@@ -963,29 +964,29 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                             ),
                           ),
                         ),
-                        Positioned(
-                          top: 8, right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.55),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.camera_alt_rounded,
-                                    color: Colors.white, size: 10),
-                                const SizedBox(width: 4),
-                                Text('Foto Selfie',
-                                    style: GoogleFonts.inter(
-                                        fontSize: 9, fontWeight: FontWeight.w700,
-                                        color: Colors.white)),
-                              ],
-                            ),
-                          ),
-                        ),
+                        // Positioned(
+                        //   top: 8, right: 8,
+                        //   child: Container(
+                        //     padding: const EdgeInsets.symmetric(
+                        //         horizontal: 8, vertical: 4),
+                        //     decoration: BoxDecoration(
+                        //       color: Colors.black.withOpacity(0.55),
+                        //       borderRadius: BorderRadius.circular(20),
+                        //     ),
+                        //     // child: Row(
+                        //     //   mainAxisSize: MainAxisSize.min,
+                        //     //   children: [
+                        //     //     const Icon(Icons.camera_alt_rounded,
+                        //     //         color: Colors.white, size: 10),
+                        //     //     // const SizedBox(width: 4),
+                        //     //     // Text('Foto Selfie',
+                        //     //     //     style: GoogleFonts.inter(
+                        //     //     //         fontSize: 9, fontWeight: FontWeight.w700,
+                        //     //     //         color: Colors.white)),
+                        //     //   ],
+                        //     // ),
+                        //   ),
+                        // ),
                       ],
                     ),
                     const SizedBox(height: 14),

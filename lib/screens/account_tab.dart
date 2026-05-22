@@ -59,7 +59,7 @@ class _AccountTabState extends State<AccountTab> {
           children: [
             // AppBar
             Container(
-              color: AppColors.white,
+              color: AppColors.brandNavy,
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
               child: Row(
                 children: [
@@ -69,11 +69,11 @@ class _AccountTabState extends State<AccountTab> {
                       Text('HADIR-IN',
                           style: GoogleFonts.inter(
                             fontSize: 10, fontWeight: FontWeight.w700,
-                            color: AppColors.brandNavy, letterSpacing: 1.2,
+                            color: AppColors.white, letterSpacing: 1.2,
                           )),
                       Text('Profile',
                           style: AppText.headline2
-                              .copyWith(color: AppColors.slate900)),
+                              .copyWith(color: AppColors.white)),
                     ],
                   ),
                 ],
@@ -260,17 +260,17 @@ class _AccountTabState extends State<AccountTab> {
                   const SizedBox(height: 16),
 
                   // App version
-                  Center(
-                    child: Text('Hadir-In v2.0.0 · Build 2026',
-                        style: AppText.caption),
-                  ),
-                  const SizedBox(height: 12),
+                  // Center(
+                  //   child: Text('Hadir-In v2.0.0 · Build 2026',
+                  //       style: AppText.caption),
+                  // ),
+                  // const SizedBox(height: 12),
 
                   // Logout
                   GradientButton(
-                    label: 'Keluar dari Akun',
+                    label: 'Logout',
                     color: AppColors.danger,
-                    icon: Icons.logout_rounded,
+                    // icon: Icons.logout_rounded,
                     outlined: true,
                     textColor: AppColors.danger,
                     onTap: _logout,

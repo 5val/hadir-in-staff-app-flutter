@@ -48,7 +48,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
           children: [
             // ── AppBar ──────────────────────────────────
             Container(
-              color: AppColors.white,
+              color: AppColors.brandNavy,
               padding: widget.isFromAccount
                   ? const EdgeInsets.fromLTRB(4, 16, 20, 16)
                   : const EdgeInsets.fromLTRB(20, 16, 20, 16),
@@ -57,7 +57,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   if (widget.isFromAccount)
                     IconButton(
                       icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: AppColors.brandNavy, size: 20),
+                          color: AppColors.white, size: 20),
                       onPressed: () => Navigator.pop(context),
                     ),
                   Column(
@@ -67,12 +67,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.brandNavy,
+                            color: AppColors.white,
                             letterSpacing: 1.2,
                           )),
                       Text('Gaji Saya',
                           style: AppText.headline2
-                              .copyWith(color: AppColors.slate900)),
+                              .copyWith(color: AppColors.white)),
                     ],
                   ),
                 ],
@@ -103,10 +103,10 @@ class _SalaryScreenState extends State<SalaryScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Pilih Periode Gaji', style: AppText.label),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(12),
@@ -183,7 +183,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
   Widget _buildSalaryCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.brandNavy,
         borderRadius: BorderRadius.circular(20),
@@ -309,28 +309,28 @@ class _SalaryScreenState extends State<SalaryScreen> {
       (
         Icons.account_balance_wallet_rounded,
         'Gaji Pokok',
-        _fmtCurrencyShort(user.position.baseSalary),
+        _fmtCurrency(user.position.baseSalary),
         'Berdasarkan jabatan ${user.position.name}',
         AppColors.brandNavy
       ),
       (
         Icons.star_rounded,
         'Bonus Harian',
-        _fmtCurrencyShort(user.position.dailyBonus),
+        _fmtCurrency(user.position.dailyBonus),
         'Per hari kerja hadir tepat waktu',
         AppColors.brandLimeDark
       ),
       (
         Icons.favorite_rounded,
         'Tunjangan Kesehatan',
-        _fmtCurrencyShort(user.position.healthAllowance),
+        _fmtCurrency(user.position.healthAllowance),
         'Dibayarkan per bulan',
         AppColors.danger
       ),
       (
         Icons.directions_car_rounded,
         'Tunjangan Transport',
-        _fmtCurrencyShort(user.position.transportAllowance),
+        _fmtCurrency(user.position.transportAllowance),
         'Dibayarkan per bulan',
         const Color(0xFF374151)
       ),
@@ -672,7 +672,7 @@ class SalaryDetailScreen extends StatelessWidget {
                 pw.Divider(
                     color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
                 summaryRow(
-                    'Gaji Bersih (Take Home Pay)', _fmt(slip.netSalary),
+                    'Gaji Bersih', _fmt(slip.netSalary),
                     isTotal: true),
               ],
             ),
@@ -711,13 +711,13 @@ class SalaryDetailScreen extends StatelessWidget {
           children: [
             // ── AppBar ──────────────────────────────────────
             Container(
-              color: AppColors.white,
+              color: AppColors.brandNavy,
               padding: const EdgeInsets.fromLTRB(4, 16, 20, 16),
               child: Row(
                 children: [
                   IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                        color: AppColors.brandNavy, size: 20),
+                        color: AppColors.white, size: 20),
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
@@ -728,12 +728,12 @@ class SalaryDetailScreen extends StatelessWidget {
                             style: GoogleFonts.inter(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.brandNavy,
+                              color: AppColors.white,
                               letterSpacing: 1.2,
                             )),
                         Text('Detail Salary',
                             style: AppText.headline2
-                                .copyWith(color: AppColors.slate900)),
+                                .copyWith(color: AppColors.white)),
                       ],
                     ),
                   ),
@@ -744,7 +744,7 @@ class SalaryDetailScreen extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 9),
                       decoration: BoxDecoration(
-                        color: AppColors.brandNavy,
+                        color: AppColors.brandNavyDark,
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: [
                           BoxShadow(
@@ -757,8 +757,8 @@ class SalaryDetailScreen extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.download_rounded,
-                              color: Colors.white, size: 16),
+                        //   const Icon(Icons.download_rounded,
+                        //       color: Colors.white, size: 16),
                           const SizedBox(width: 5),
                           Text('Download PDF',
                               style: GoogleFonts.inter(
@@ -1002,7 +1002,7 @@ class SalaryDetailScreen extends StatelessWidget {
           columnWidths: const {
             0: FlexColumnWidth(3),
             1: FlexColumnWidth(4),
-            2: FlexColumnWidth(3),
+            2: FlexColumnWidth(4),
           },
           children: [
             // ── Header Row ──────────────────────────────
@@ -1105,7 +1105,7 @@ class SalaryDetailScreen extends StatelessWidget {
               isDeduction: true),
           _divider(),
           _summaryRow(
-              'Gaji Bersih (Take Home Pay)', _fmt(slip.netSalary),
+              'Gaji Bersih', _fmt(slip.netSalary),
               isTotal: true),
         ],
       ),
@@ -1131,7 +1131,7 @@ class SalaryDetailScreen extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: isTotal ? 13 : 12,
               fontWeight: isTotal ? FontWeight.w700 : FontWeight.w400,
-              color: isTotal ? Colors.white : Colors.white.withOpacity(0.7),
+              color: Colors.white,
             )),
         Text(amount,
             style: GoogleFonts.inter(
@@ -1139,9 +1139,7 @@ class SalaryDetailScreen extends StatelessWidget {
               fontWeight: FontWeight.w800,
               color: isDeduction
                   ? const Color(0xFFFCA5A5)
-                  : isTotal
-                      ? AppColors.brandLime
-                      : Colors.white,
+                  : Colors.white,
             )),
       ],
     );

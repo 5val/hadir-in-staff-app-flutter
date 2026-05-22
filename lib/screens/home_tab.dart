@@ -278,19 +278,19 @@ class _HomeTabState extends State<HomeTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildHeaderInfo(),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
                         _buildLocationStatus(),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
                         if (_status == AttendanceProviderStatus.checkedIn ||
                             _status == AttendanceProviderStatus.onBreak ||
                             _status == AttendanceProviderStatus.breakEnded) ...[
                           _buildCurrentActivityCard(),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 8),
                         ],
                         _buildAttendanceSection(),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 14),
                         if (_isWorkDay) _buildTimeline(),
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 14),
                         _buildAttendanceHistory(),
                       ],
                     ),
@@ -315,7 +315,7 @@ class _HomeTabState extends State<HomeTab> {
   // ── AppBar ─────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return Container(
-      color: AppColors.white,
+      color: AppColors.brandNavy,
       padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
       child: Row(
         children: [
@@ -324,9 +324,9 @@ class _HomeTabState extends State<HomeTab> {
             child: Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                color: AppColors.brandNavy, shape: BoxShape.circle,
+                color: AppColors.brandNavyDark, shape: BoxShape.circle,
                 border: Border.all(
-                    color: AppColors.brandNavy.withOpacity(0.2), width: 2),
+                    color: AppColors.brandNavyDark.withOpacity(0.2), width: 2),
               ),
               child: Center(
                 child: Text(
@@ -346,11 +346,11 @@ class _HomeTabState extends State<HomeTab> {
                 Text('Hadir-In',
                     style: GoogleFonts.inter(
                         fontSize: 15, fontWeight: FontWeight.w800,
-                        color: AppColors.brandNavy)),
+                        color: AppColors.white)),
                 Text(user.name.toUpperCase(),
                     style: GoogleFonts.inter(
                         fontSize: 9, fontWeight: FontWeight.w600,
-                        color: AppColors.slate400, letterSpacing: 0.8)),
+                        color: AppColors.slate200, letterSpacing: 0.8)),
               ],
             ),
           ),
@@ -358,7 +358,7 @@ class _HomeTabState extends State<HomeTab> {
             children: [
               IconButton(
                 icon: const Icon(Icons.notifications_outlined,
-                    color: AppColors.slate600, size: 22),
+                    color: AppColors.white, size: 22),
                 onPressed: () => Navigator.push(context,
                     MaterialPageRoute(
                         builder: (_) => const NotificationScreen())),
@@ -710,18 +710,15 @@ class _HomeTabState extends State<HomeTab> {
                             color: checkoutActive
                                 ? Colors.white : AppColors.slate700)),
                     const SizedBox(height: 4),
-                    Text(
-                      checkoutActive
-                          ? 'Tap untuk merekam kepulangan'
-                          : !_canCheckout
-                              ? 'Tersedia setelah pukul ${AttendanceRules.checkoutCutoffHour.toString().padLeft(2,'0')}:00'
-                              : 'Aktifkan GPS untuk check-out',
-                      style: GoogleFonts.inter(
+                    if (checkoutActive && !_canCheckout)
+                      Text('Tersedia setelah pukul ${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00',
+                        style: GoogleFonts.inter(
                           fontSize: 12,
                           color: checkoutActive
                               ? Colors.white.withOpacity(0.75)
-                              : AppColors.slate400),
-                    ),
+                              : AppColors.slate400,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -894,7 +891,7 @@ class _HomeTabState extends State<HomeTab> {
     final canGpsAction = _locationOn && !_fakeLocation && _locationChecked;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: AppColors.slate200,
         borderRadius: BorderRadius.circular(20),
@@ -911,7 +908,7 @@ class _HomeTabState extends State<HomeTab> {
             child: const Icon(Icons.block_rounded,
                 color: AppColors.slate400, size: 40),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
           Text('Check-In Tidak Tersedia',
               style: GoogleFonts.inter(
                   fontSize: 18, fontWeight: FontWeight.w800,
@@ -924,7 +921,7 @@ class _HomeTabState extends State<HomeTab> {
                 fontSize: 13, color: AppColors.slate700,
                 height: 1.5),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 6),
           // ── Arahkan ke checkout jika belum checkin tapi sudah lewat jam 12 ──
           // Tunjukkan info bahwa seharusnya mereka melakukan checkout
           Container(
@@ -973,14 +970,14 @@ class _HomeTabState extends State<HomeTab> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.logout_rounded,
-                            color: canGpsAction
-                                ? Colors.white
-                                : AppColors.slate700,
-                            size: 18),
-                        const SizedBox(width: 8),
+                        // Icon(Icons.logout_rounded,
+                        //     color: canGpsAction
+                        //         ? Colors.white
+                        //         : AppColors.slate700,
+                        //     size: 18),
+                        // const SizedBox(width: 8),
                         Text(
-                          'Lakukan Check-Out',
+                          'Check-Out',
                           style: GoogleFonts.inter(
                               fontSize: 14, fontWeight: FontWeight.w700,
                               color: canGpsAction
@@ -998,15 +995,15 @@ class _HomeTabState extends State<HomeTab> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: AppColors.warning.withOpacity(0.12),
+              color: AppColors.textSecondary.withOpacity(0.12),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+              border: Border.all(color: AppColors.textSecondary.withOpacity(0.3)),
             ),
             child: Text(
-              '🕐  Hubungi HRD jika ada kendala',
+              'Hubungi HRD jika ada kendala',
               style: GoogleFonts.inter(
                   fontSize: 12, fontWeight: FontWeight.w600,
-                  color: AppColors.warning),
+                  color: AppColors.textSecondary),
             ),
           ),
         ],
@@ -1020,7 +1017,7 @@ class _HomeTabState extends State<HomeTab> {
       onTap: canAction ? _openCameraForCheckIn : null,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 32),
+        padding: const EdgeInsets.symmetric(vertical: 18),
         decoration: BoxDecoration(
           color: canAction ? AppColors.brandNavy : AppColors.slate300,
           borderRadius: BorderRadius.circular(20),
@@ -1042,14 +1039,14 @@ class _HomeTabState extends State<HomeTab> {
                 style: GoogleFonts.inter(
                     fontSize: 20, fontWeight: FontWeight.w800,
                     color: Colors.white)),
-            const SizedBox(height: 4),
-            Text(
-              canAction
-                  ? 'Sudah di sini? Tap untuk check-in 👇'
-                  : 'Aktifkan GPS untuk mulai check-in',
-              style: GoogleFonts.inter(
-                  fontSize: 13, color: Colors.white.withOpacity(0.75)),
-            ),
+            // const SizedBox(height: 4),
+            // Text(
+            //   canAction
+            //       ? 'Sudah di sini? Tap untuk check-in 👇'
+            //       : 'Aktifkan GPS untuk mulai check-in',
+            //   style: GoogleFonts.inter(
+            //       fontSize: 13, color: Colors.white.withOpacity(0.75)),
+            // ),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

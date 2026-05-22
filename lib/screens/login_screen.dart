@@ -99,14 +99,14 @@ class _LoginScreenState extends State<LoginScreen>
       appBar: _isInitialLogin
           ? null
           : AppBar(
-              backgroundColor: AppColors.white,
+              backgroundColor: AppColors.brandNavy,
               elevation: 0,
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                    size: 18, color: AppColors.slate700),
+                    size: 18, color: AppColors.white),
                 onPressed: () => Navigator.pop(context, false),
               ),
-              title: Text('Verifikasi Identitas', style: AppText.headline3),
+              title: Text('Verifikasi Identitas', style: AppText.headline3.copyWith(color: AppColors.white)),
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(1),
                 child: Container(height: 1, color: AppColors.slate200),
@@ -170,49 +170,42 @@ class _LoginScreenState extends State<LoginScreen>
                     Center(
                       child: Column(
                         children: [
-                          Text(
-                            _isInitialLogin
-                                ? 'Selamat Datang! 👋'
-                                : 'Verifikasi Identitas 🔐',
-                            style: AppText.headline2
-                                .copyWith(color: AppColors.brandNavy),
-                          ),
+                          if (_isInitialLogin) Text('Selamat Datang!',
+                                  style: AppText.headline2.copyWith(color: AppColors.brandNavy)),
                           const SizedBox(height: 4),
-                          Text(
-                            _isInitialLogin
-                                ? 'Masuk ke akun karyawan Hadir-In'
-                                : 'Masukkan kembali kredensial kamu',
+                          if (_isInitialLogin) Text('Masuk ke akun karyawan Hadir-In',
                             style: AppText.body2,
                             textAlign: TextAlign.center,
                           ),
+                          
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 32),
+                    if (_isInitialLogin) const SizedBox(height: 32),
 
                     // Re-verify info banner
-                    if (!_isInitialLogin) ...[
-                      SectionCard(
-                        color: AppColors.brandCyan.withOpacity(0.07),
-                        borderColor: AppColors.brandCyanDark.withOpacity(0.3),
-                        padding: const EdgeInsets.all(14),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.security_rounded,
-                                color: AppColors.brandCyanDark, size: 18),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                'Diperlukan verifikasi ulang untuk mengakses Cuti & Izin.',
-                                style: AppText.body2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                    ],
+                    // if (!_isInitialLogin) ...[
+                    //   SectionCard(
+                    //     color: AppColors.brandCyan.withOpacity(0.07),
+                    //     borderColor: AppColors.brandCyanDark.withOpacity(0.3),
+                    //     padding: const EdgeInsets.all(14),
+                    //     child: Row(
+                    //       children: [
+                    //         const Icon(Icons.security_rounded,
+                    //             color: AppColors.brandCyanDark, size: 18),
+                    //         const SizedBox(width: 10),
+                    //         Expanded(
+                    //           child: Text(
+                    //             'Diperlukan verifikasi ulang untuk mengakses Cuti & Izin.',
+                    //             style: AppText.body2,
+                    //           ),
+                    //         ),
+                    //       ],
+                    //     ),
+                    //   ),
+                    //   const SizedBox(height: 20),
+                    // ],
 
                     // Username
                     Text('Username / ID Karyawan', style: AppText.label),
@@ -272,34 +265,34 @@ class _LoginScreenState extends State<LoginScreen>
                     const SizedBox(height: 8),
 
                     GradientButton(
-                      label: _isInitialLogin ? 'Masuk' : 'Verifikasi & Lanjutkan',
+                      label: _isInitialLogin ? 'Login' : 'Verifikasi & Lanjutkan',
                       color: AppColors.brandNavy,
-                      icon: _isInitialLogin
-                          ? Icons.login_rounded
-                          : Icons.verified_user_rounded,
+                      // icon: _isInitialLogin
+                      //     ? Icons.login_rounded
+                      //     : Icons.verified_user_rounded,
                       isLoading: _isLoading,
                       height: 54,
                       onTap: _isLoading ? null : _login,
                     ),
 
-                    const SizedBox(height: 16),
+                    // const SizedBox(height: 16),
 
-                    SectionCard(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info_outline_rounded,
-                              color: AppColors.brandCyanDark, size: 16),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Gunakan ID Karyawan dan password sistem Hadir-In.',
-                              style: AppText.body2,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    // SectionCard(
+                    //   padding: const EdgeInsets.all(14),
+                    //   child: Row(
+                    //     children: [
+                    //       const Icon(Icons.info_outline_rounded,
+                    //           color: AppColors.brandCyanDark, size: 16),
+                    //       const SizedBox(width: 10),
+                    //       Expanded(
+                    //         child: Text(
+                    //           'Gunakan ID Karyawan dan password sistem Hadir-In.',
+                    //           style: AppText.body2,
+                    //         ),
+                    //       ),
+                    //     ],
+                    //   ),
+                    // ),
 
                     const SizedBox(height: 40),
                   ],

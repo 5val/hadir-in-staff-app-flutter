@@ -71,7 +71,7 @@ class _LeaveTabState extends State<LeaveTab> {
   // ── Header ───────────────────────────────────────────────
   Widget _buildHeader() {
     return Container(
-      color: AppColors.white,
+      color: AppColors.brandNavy,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       child: Row(
         children: [
@@ -82,12 +82,12 @@ class _LeaveTabState extends State<LeaveTab> {
                   style: GoogleFonts.inter(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.brandNavy,
+                    color: AppColors.white,
                     letterSpacing: 1.2,
                   )),
               Text('Cuti & Izin',
                   style: AppText.headline2
-                      .copyWith(color: AppColors.slate900)),
+                      .copyWith(color: AppColors.white)),
             ],
           ),
           const Spacer(),
@@ -137,11 +137,11 @@ class _LeaveTabState extends State<LeaveTab> {
                   color: AppColors.brandNavy, size: 38),
             ),
             const SizedBox(height: 20),
-            Text('Verifikasi Diperlukan',
-                style:
-                    AppText.headline2.copyWith(color: AppColors.slate900),
-                textAlign: TextAlign.center),
-            const SizedBox(height: 8),
+            // Text('Verifikasi Diperlukan',
+            //     style:
+            //         AppText.headline2.copyWith(color: AppColors.slate900),
+            //     textAlign: TextAlign.center),
+            // const SizedBox(height: 8),
             Text(
               'Untuk keamanan, masukkan kembali kredensial kamu sebelum mengakses Cuti & Izin.',
               style: AppText.body2,
@@ -151,7 +151,7 @@ class _LeaveTabState extends State<LeaveTab> {
             GradientButton(
               label: 'Verifikasi Sekarang',
               color: AppColors.brandNavy,
-              icon: Icons.verified_user_rounded,
+              // icon: Icons.verified_user_rounded,
               isLoading: _isVerifying,
               height: 52,
               onTap: _isVerifying ? null : _doVerify,
