@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/attendance_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 // ---------------------------------------------------------------------------
 // Pastikan di pubspec.yaml:
@@ -27,7 +29,17 @@ enum CameraActionType { checkIn, checkOut }
 class CameraResult {
   final bool confirmed;
   final CameraActionType actionType;
-  CameraResult({required this.confirmed, required this.actionType});
+  /// Path foto yang diambil (null jika kamera tidak tersedia/gagal)
+  final String? imagePath;
+  /// Alamat lokasi saat check-in/out
+  final String? address;
+
+  CameraResult({
+    required this.confirmed,
+    required this.actionType,
+    this.imagePath,
+    this.address,
+  });
 }
 
 class CameraCheckinScreen extends StatefulWidget {
@@ -52,6 +64,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   // ── Checkout guard ──────────────────────────────────────────────
   /// Berlaku hanya untuk actionType == checkOut
   bool get _checkoutAllowed => AttendanceRules.canCheckout;
+  // bool get _checkoutAllowed => true;
 
   /// Check-in hanya diizinkan sebelum jam 12:00
   bool get _checkinAllowed => !AttendanceRules.canCheckout;
@@ -333,8 +346,12 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       _showEarlyCheckoutWarningDialog();
       return;
     }
-    Navigator.pop(context,
-        CameraResult(confirmed: true, actionType: widget.actionType));
+    Navigator.pop(context, CameraResult(
+      confirmed:  true,
+      actionType: widget.actionType,
+      imagePath:  _capturedFile?.path,
+      address:    _currentAddress.isNotEmpty ? _currentAddress : null,
+    ));
   }
 
   // ── Dialog peringatan pulang awal ───────────────────────────────
@@ -374,8 +391,12 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
             ),
             onPressed: () {
               Navigator.pop(context); // tutup dialog
-              Navigator.pop(context,
-                  CameraResult(confirmed: true, actionType: widget.actionType));
+              Navigator.pop(context, CameraResult(
+                confirmed:  true,
+                actionType: widget.actionType,
+                imagePath:  _capturedFile?.path,
+                address:    _currentAddress.isNotEmpty ? _currentAddress : null,
+              ));
             },
             child: Text('Ya, Check-Out Sekarang',
                 style: GoogleFonts.inter(
@@ -506,8 +527,10 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
     // ── Live preview ────────────────────────────────────────
     return Positioned.fill(
       child: _capturedFile != null
-          // Tampilkan foto yang sudah diambil (preview sebelum confirm)
-          ? Image.network(_capturedFile!.path, fit: BoxFit.cover)
+          // Tampilkan foto yang sudah diambil: bedakan Web dan Mobile
+          ? (kIsWeb 
+              ? Image.network(_capturedFile!.path, fit: BoxFit.cover)
+              : Image.file(File(_capturedFile!.path), fit: BoxFit.cover))
           // Live camera preview
           : OverflowBox(
               alignment: Alignment.center,
@@ -910,6 +933,29 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
     );
   }
 
+  Widget _errorContainer() {
+    return Container(
+      height: 160,
+      decoration: BoxDecoration(
+        color: AppColors.slate100,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.camera_alt_rounded,
+                color: AppColors.slate300, size: 36),
+            const SizedBox(height: 6),
+            Text('Foto tersimpan',
+                style: GoogleFonts.inter(
+                    fontSize: 11, color: AppColors.slate400)),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Confirm / Retake overlay ────────────────────────────────────
   Widget _buildConfirmOverlay() {
     final inRange = _locationInRange;
@@ -936,33 +982,21 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            _capturedFile!.path,
-                            width: double.infinity,
-                            height: 160,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              height: 160,
-                              decoration: BoxDecoration(
-                                color: AppColors.slate100,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.camera_alt_rounded,
-                                        color: AppColors.slate300, size: 36),
-                                    const SizedBox(height: 6),
-                                    Text('Foto tersimpan',
-                                        style: GoogleFonts.inter(
-                                            fontSize: 11,
-                                            color: AppColors.slate400)),
-                                  ],
+                          child: kIsWeb
+                              ? Image.network(
+                                  _capturedFile!.path,
+                                  width: double.infinity,
+                                  height: 160,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => _errorContainer(),
+                                )
+                              : Image.file(
+                                  File(_capturedFile!.path),
+                                  width: double.infinity,
+                                  height: 160,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => _errorContainer(),
                                 ),
-                              ),
-                            ),
-                          ),
                         ),
                         // Positioned(
                         //   top: 8, right: 8,

@@ -6,15 +6,12 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
-import 'login_screen.dart';
 import 'all_leave_history_screen.dart';
 import 'all_subordinate_leave_history_screen.dart';
 
 /// Leave & Time Off tab — tampil langsung di MainScreen.
-/// Re-verifikasi sekali per sesi. Setelah verified:
-///   - Supervisor: dropdown "Employee Applications" di atas
-///   - Dropdown Cuti & dropdown Izin (accordion/expandable)
-///   - History pengajuan 7 hari terakhir
+/// Tanpa re-verifikasi. Tab selector untuk: Pengajuan Karyawan (supervisor),
+/// Ajukan Cuti, Ajukan Izin, dan Riwayat Pengajuan.
 class LeaveTab extends StatefulWidget {
   const LeaveTab({super.key});
 
@@ -23,32 +20,59 @@ class LeaveTab extends StatefulWidget {
 }
 
 class _LeaveTabState extends State<LeaveTab> {
-  bool _isVerified  = false;
-  bool _isVerifying = false;
-
-  // Accordion states
-  bool _cutiExpanded = false;
-  bool _izinExpanded = false;
-  bool _empExpanded  = false; // supervisor only
+  // Tab index:
+  //   supervisor: 0=Karyawan, 1=Ajukan Cuti, 2=Ajukan Izin, 3=Riwayat
+  //   non-supervisor: 0=Ajukan Cuti, 1=Ajukan Izin, 2=Riwayat
+  int _selectedTab = 0;
 
   final bool _isSupervisor =
       SampleData.currentUser.role == UserRole.supervisor;
 
-  // ── Re-verification ─────────────────────────────────────
-  Future<void> _doVerify() async {
-    setState(() => _isVerifying = true);
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const LoginScreen(destination: LoginDestination.leaveRequest),
+  List<_TabDef> get _tabs => _isSupervisor
+      ? const [
+          _TabDef(Icons.supervisor_account_rounded, 'Karyawan'),
+          _TabDef(Icons.beach_access_rounded,       'Cuti'),
+          _TabDef(Icons.medical_services_rounded,   'Izin'),
+          _TabDef(Icons.history_rounded,             'Riwayat'),
+        ]
+      : const [
+          _TabDef(Icons.beach_access_rounded,     'Cuti'),
+          _TabDef(Icons.medical_services_rounded, 'Izin'),
+          _TabDef(Icons.history_rounded,           'Riwayat'),
+        ];
+
+  void _showActionDialog(bool approve, String name) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: Icon(
+          approve ? Icons.check_circle_rounded : Icons.cancel_rounded,
+          color: approve ? AppColors.brandLimeDark : AppColors.danger,
+          size: 40,
+        ),
+        title: Text(approve ? 'Setujui Pengajuan?' : 'Tolak Pengajuan?'),
+        content: Text(
+          '${approve ? "Setujui" : "Tolak"} pengajuan dari $name?',
+          style: AppText.body2,
+          textAlign: TextAlign.center,
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  approve ? AppColors.brandLimeDark : AppColors.danger,
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: Text(approve ? 'Setujui' : 'Tolak'),
+          ),
+        ],
       ),
     );
-    if (!mounted) return;
-    setState(() {
-      _isVerifying = false;
-      if (result == true) _isVerified = true;
-    });
   }
 
   @override
@@ -59,9 +83,8 @@ class _LeaveTabState extends State<LeaveTab> {
         child: Column(
           children: [
             _buildHeader(),
-            Expanded(
-              child: _isVerified ? _buildContent() : _buildVerifyGate(),
-            ),
+            _buildTabBar(),
+            Expanded(child: _buildTabContent()),
           ],
         ),
       ),
@@ -86,442 +109,317 @@ class _LeaveTabState extends State<LeaveTab> {
                     letterSpacing: 1.2,
                   )),
               Text('Cuti & Izin',
-                  style: AppText.headline2
-                      .copyWith(color: AppColors.white)),
+                  style: AppText.headline2.copyWith(color: AppColors.white)),
             ],
           ),
-          const Spacer(),
-          if (_isVerified)
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.brandLime.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.verified_user_rounded,
-                      size: 12, color: AppColors.brandLimeDark),
-                  const SizedBox(width: 4),
-                  Text('Terverifikasi',
-                      style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.brandLimeDark,
-                      )),
-                ],
-              ),
-            ),
         ],
       ),
     );
   }
 
-  // ── Verify Gate ──────────────────────────────────────────
-  Widget _buildVerifyGate() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppColors.brandNavy.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.lock_outline_rounded,
-                  color: AppColors.brandNavy, size: 38),
-            ),
-            const SizedBox(height: 20),
-            // Text('Verifikasi Diperlukan',
-            //     style:
-            //         AppText.headline2.copyWith(color: AppColors.slate900),
-            //     textAlign: TextAlign.center),
-            // const SizedBox(height: 8),
-            Text(
-              'Untuk keamanan, masukkan kembali kredensial kamu sebelum mengakses Cuti & Izin.',
-              style: AppText.body2,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 28),
-            GradientButton(
-              label: 'Verifikasi Sekarang',
-              color: AppColors.brandNavy,
-              // icon: Icons.verified_user_rounded,
-              isLoading: _isVerifying,
-              height: 52,
-              onTap: _isVerifying ? null : _doVerify,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // ── Tab Bar ──────────────────────────────────────────────
+  Widget _buildTabBar() {
+    return Container(
+      color: AppColors.brandNavy,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Row(
+        children: _tabs.asMap().entries.map((e) {
+          final idx      = e.key;
+          final tab      = e.value;
+          final selected = idx == _selectedTab;
 
-  // ── Content (after verified) ─────────────────────────────
-  Widget _buildContent() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      children: [
-        // Supervisor: Employee Applications accordion
-        if (_isSupervisor) ...[
-          _buildSupervisorAccordion(),
-          const SizedBox(height: 12),
-        ],
+          // Show pending badge on "Karyawan" tab for supervisor
+          final pendingCount = (_isSupervisor && idx == 0)
+              ? SampleData.subordinateLeaveRequests
+                  .where((r) => r.status == RequestStatus.pending)
+                  .length
+              : 0;
 
-        // Cuti accordion
-        _buildAccordion(
-          expanded: _cutiExpanded,
-          onToggle: () => setState(() {
-            _cutiExpanded = !_cutiExpanded;
-            if (_cutiExpanded) _izinExpanded = false;
-          }),
-          icon: Icons.beach_access_rounded,
-          iconColor: AppColors.brandNavy,
-          title: 'Ajukan Cuti',
-          subtitle: 'Ajukan cuti dari jatah tahunan kamu',
-          pills: const ['Maks 12 hari/tahun', 'Min H-3'],
-          content: const _CutiForm(),
-        ),
-
-        const SizedBox(height: 12),
-
-        // Izin accordion
-        _buildAccordion(
-          expanded: _izinExpanded,
-          onToggle: () => setState(() {
-            _izinExpanded = !_izinExpanded;
-            if (_izinExpanded) _cutiExpanded = false;
-          }),
-          icon: Icons.medical_services_rounded,
-          iconColor: AppColors.brandCyanDark,
-          title: 'Ajukan Izin',
-          subtitle: 'Izin sakit, seminar, atau keperluan sekolah',
-          pills: const ['Sakit', 'Seminar', 'Sekolah'],
-          content: const _IzinForm(),
-        ),
-
-        const SizedBox(height: 24),
-
-        // History
-        _buildHistory(),
-      ],
-    );
-  }
-
-  // ── Supervisor Accordion ─────────────────────────────────
-  Widget _buildSupervisorAccordion() {
-    final pendingCount = SampleData.subordinateLeaveRequests
-        .where((r) => r.status == RequestStatus.pending)
-        .length;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _empExpanded
-              ? AppColors.warning.withOpacity(0.5)
-              : AppColors.slate200,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brandNavy.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          GestureDetector(
-            onTap: () =>
-                setState(() => _empExpanded = !_empExpanded),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.warning.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                        Icons.supervisor_account_rounded,
-                        color: AppColors.warning,
-                        size: 22),
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedTab = idx),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                margin: EdgeInsets.only(right: idx < _tabs.length - 1 ? 6 : 0),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.white.withOpacity(0.15)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: selected
+                        ? AppColors.white.withOpacity(0.4)
+                        : AppColors.white.withOpacity(0.12),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        Text('Pengajuan dari Karyawan',
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.slate900,
-                            )),
-                        Text('Lihat & kelola pengajuan tim kamu',
-                            style: AppText.body2),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColors.warning.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            '$pendingCount menunggu',
-                            style: GoogleFonts.inter(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.warning,
+                        Icon(tab.icon,
+                            size: 18,
+                            color: selected
+                                ? AppColors.white
+                                : AppColors.white.withOpacity(0.55)),
+                        if (pendingCount > 0)
+                          Positioned(
+                            top: -4,
+                            right: -6,
+                            child: Container(
+                              width: 14,
+                              height: 14,
+                              decoration: const BoxDecoration(
+                                color: AppColors.brandOrange,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$pendingCount',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
-                  ),
-                  AnimatedRotation(
-                    turns: _empExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(
-                        Icons.keyboard_arrow_down_rounded,
-                        color: AppColors.slate400,
-                        size: 22),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      tab.label,
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: selected
+                            ? AppColors.white
+                            : AppColors.white.withOpacity(0.55),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          if (_empExpanded) ...[
-            const AppDivider(),
-            _buildEmployeeApplicationList(),
-          ],
-        ],
+          );
+        }).toList(),
       ),
     );
   }
 
-  // ── Employee Application List ────────────────────────────
-  Widget _buildEmployeeApplicationList() {
+  // ── Tab Content ──────────────────────────────────────────
+  Widget _buildTabContent() {
+    if (_isSupervisor) {
+      switch (_selectedTab) {
+        case 0: return _buildEmployeeTab();
+        case 1: return _buildCutiTab();
+        case 2: return _buildIzinTab();
+        case 3: return _buildRiwayatTab();
+      }
+    } else {
+      switch (_selectedTab) {
+        case 0: return _buildCutiTab();
+        case 1: return _buildIzinTab();
+        case 2: return _buildRiwayatTab();
+      }
+    }
+    return const SizedBox();
+  }
+
+  // ── Employee Tab (supervisor) ────────────────────────────
+  Widget _buildEmployeeTab() {
     final apps = SampleData.subordinateLeaveRequests;
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
-        // ── "Lihat Riwayat Pengajuan" footer button ──────
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-          child: SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
+        // Header row with "Lihat Riwayat" button
+        Row(
+          children: [
+            Text('Pengajuan Karyawan',
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
+            const Spacer(),
+            TextButton.icon(
               onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => const AllSubordinateLeaveHistoryScreen(),
+                    builder: (_) => const AllSubordinateLeaveHistoryScreen()),
+              ),
+              icon: const Icon(Icons.history_rounded, size: 14,
+                  color: AppColors.brandNavy),
+              label: Text('Semua Riwayat',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.brandNavy)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (apps.isEmpty)
+          SectionCard(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    const Text('✅', style: TextStyle(fontSize: 40)),
+                    const SizedBox(height: 8),
+                    Text('Tidak ada pengajuan masuk',
+                        style: AppText.body2),
+                  ],
                 ),
               ),
-              icon: const Icon(Icons.history_rounded, size: 16),
-              label: const Text('Lihat Riwayat Pengajuan'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.brandNavy,
-                side: const BorderSide(color: AppColors.brandNavy, width: 1),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                textStyle: GoogleFonts.inter(
-                    fontSize: 13, fontWeight: FontWeight.w700),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
             ),
-          ),
-        ),
-        const AppDivider(),
-        // Pending application tiles with approve / reject actions
-        ...apps.asMap().entries.map((e) {
-          final app    = e.value;
-          final isLast = e.key == apps.length - 1;
-          return Column(
-            children: [
-              _EmployeeAppTile(
-                app: app,
-                onApprove: () => _showActionDialog(true, app.employeeName!),
-                onReject:  () => _showActionDialog(false, app.employeeName!),
+          )
+        else
+          ...apps.asMap().entries.map((e) {
+            final app    = e.value;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: SectionCard(
+                padding: EdgeInsets.zero,
+                child: _EmployeeAppTile(
+                  app: app,
+                  onApprove: () =>
+                      _showActionDialog(true, app.employeeName!),
+                  onReject: () =>
+                      _showActionDialog(false, app.employeeName!),
+                ),
               ),
-              if (!isLast) const AppDivider(),
-            ],
-          );
-        }),
+            );
+          }),
       ],
     );
   }
 
-  void _showActionDialog(bool approve, String name) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        icon: Icon(
-          approve
-              ? Icons.check_circle_rounded
-              : Icons.cancel_rounded,
-          color: approve ? AppColors.brandLimeDark : AppColors.danger,
-          size: 40,
-        ),
-        title: Text(approve ? 'Setujui Pengajuan?' : 'Tolak Pengajuan?'),
-        content: Text(
-          '${approve ? "Setujui" : "Tolak"} pengajuan dari $name?',
-          style: AppText.body2,
-          textAlign: TextAlign.center,
-        ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: approve
-                  ? AppColors.brandLimeDark
-                  : AppColors.danger,
-            ),
-            onPressed: () => Navigator.pop(context),
-            child: Text(approve ? 'Setujui' : 'Tolak'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Generic Accordion ────────────────────────────────────
-  Widget _buildAccordion({
-    required bool expanded,
-    required VoidCallback onToggle,
-    required IconData icon,
-    required Color iconColor,
-    required String title,
-    required String subtitle,
-    required List<String> pills,
-    required Widget content,
-  }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: expanded
-              ? iconColor.withOpacity(0.4)
-              : AppColors.slate200,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brandNavy.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          GestureDetector(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: iconColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
+  // ── Cuti Tab ─────────────────────────────────────────────
+  Widget _buildCutiTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        SectionCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  border: Border(
+                      bottom: BorderSide(color: AppColors.slate100)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.brandNavy.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.beach_access_rounded,
+                          color: AppColors.brandNavy, size: 20),
                     ),
-                    child: Icon(icon, color: iconColor, size: 22),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
+                    const SizedBox(width: 12),
+                    Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(title,
+                        Text('Ajukan Cuti Tahunan',
                             style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.slate900,
-                            )),
-                        Text(subtitle, style: AppText.body2),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 5,
-                          children: pills
-                              .map((p) => Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 7, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.slate100,
-                                      borderRadius:
-                                          BorderRadius.circular(20),
-                                    ),
-                                    child: Text(p,
-                                        style: GoogleFonts.inter(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w500,
-                                            color: AppColors.slate600)),
-                                  ))
-                              .toList(),
-                        ),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.slate900)),
+                        Text('Dari jatah cuti tahunan kamu',
+                            style: AppText.body2),
                       ],
                     ),
-                  ),
-                  AnimatedRotation(
-                    turns: expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: AppColors.slate400, size: 22),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+              const _CutiForm(),
+            ],
           ),
-          if (expanded) ...[
-            const AppDivider(),
-            content,
-          ],
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  // ── History ──────────────────────────────────────────────
-  Widget _buildHistory() {
-    final requests = SampleData.leaveRequests
-        .where((r) => r.submittedAt.isAfter(
-            DateTime.now().subtract(const Duration(days: 7))))
-        .toList();
+  // ── Izin Tab ─────────────────────────────────────────────
+  Widget _buildIzinTab() {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        SectionCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  border: Border(
+                      bottom: BorderSide(color: AppColors.slate100)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.brandCyanDark.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.medical_services_rounded,
+                          color: AppColors.brandCyanDark, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Ajukan Izin',
+                            style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.slate900)),
+                        Text('Sakit, seminar, atau keperluan lainnya',
+                            style: AppText.body2),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const _IzinForm(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  // ── Riwayat Tab ──────────────────────────────────────────
+  Widget _buildRiwayatTab() {
+    final requests = SampleData.leaveRequests
+        .where((r) => r.submittedAt
+            .isAfter(DateTime.now().subtract(const Duration(days: 7))))
+        .toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Riwayat Pengajuanmu',
-                style: AppText.headline3
-                    .copyWith(color: AppColors.slate900)),
+                style:
+                    AppText.headline3.copyWith(color: AppColors.slate900)),
             TextButton(
               onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) =>
-                          const AllLeaveHistoryScreen())),
+                      builder: (_) => const AllLeaveHistoryScreen())),
               child: Text('Lihat Semua',
                   style: GoogleFonts.inter(
                     fontSize: 11,
@@ -547,7 +445,7 @@ class _LeaveTabState extends State<LeaveTab> {
             padding: EdgeInsets.zero,
             child: Column(
               children: requests.asMap().entries.map((e) {
-                final req  = e.value;
+                final req    = e.value;
                 final isLast = e.key == requests.length - 1;
                 return Column(
                   children: [
@@ -561,6 +459,13 @@ class _LeaveTabState extends State<LeaveTab> {
       ],
     );
   }
+}
+
+// ── Tab Definition ────────────────────────────────────────────
+class _TabDef {
+  final IconData icon;
+  final String   label;
+  const _TabDef(this.icon, this.label);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -577,7 +482,6 @@ class _EmployeeAppTile extends StatelessWidget {
     required this.onReject,
   });
 
-  // helpers ─────────────────────────────────────────────────
   String get _initials =>
       app.employeeName!.split(' ').map((w) => w[0]).take(2).join();
 
@@ -586,7 +490,8 @@ class _EmployeeAppTile extends StatelessWidget {
       case LeaveType.annual:  return 'Cuti Tahunan';
       case LeaveType.sick:    return 'Izin Sakit';
       case LeaveType.seminar: return 'Izin Seminar';
-      case LeaveType.school:  return 'Izin Sekolah';
+      case LeaveType.school:  return 'Izin Lainnya';
+      default:                return 'Izin Lainnya';
     }
   }
 
@@ -595,7 +500,7 @@ class _EmployeeAppTile extends StatelessWidget {
       case LeaveType.annual:  return Icons.beach_access_rounded;
       case LeaveType.sick:    return Icons.local_hospital_rounded;
       case LeaveType.seminar: return Icons.school_rounded;
-      case LeaveType.school:  return Icons.menu_book_rounded;
+      default:                return Icons.event_note_rounded;
     }
   }
 
@@ -603,7 +508,7 @@ class _EmployeeAppTile extends StatelessWidget {
     switch (app.status) {
       case RequestStatus.approved: return AppColors.brandLimeDark;
       case RequestStatus.rejected: return AppColors.danger;
-      case RequestStatus.pending:  return AppColors.warning;
+      case RequestStatus.pending:  return AppColors.brandOrange;
     }
   }
 
@@ -612,6 +517,15 @@ class _EmployeeAppTile extends StatelessWidget {
       case RequestStatus.approved: return 'DISETUJUI';
       case RequestStatus.rejected: return 'DITOLAK';
       case RequestStatus.pending:  return 'MENUNGGU';
+    }
+  }
+
+  String _allowanceLabel(AllowanceType a) {
+    switch (a) {
+      case AllowanceType.health:        return '+ Tunjangan Kesehatan';
+      case AllowanceType.accommodation: return '+ Tunjangan Akomodasi';
+      case AllowanceType.transport:     return '+ Tunjangan Transport';
+      case AllowanceType.spp:           return '+ Tunjangan SPP';
     }
   }
 
@@ -627,7 +541,6 @@ class _EmployeeAppTile extends StatelessWidget {
           // ── Top row: Avatar + name + status badge ────────
           Row(
             children: [
-              // Avatar
               Container(
                 width: 42,
                 height: 42,
@@ -653,8 +566,6 @@ class _EmployeeAppTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Name + type
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -684,16 +595,13 @@ class _EmployeeAppTile extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // Status badge
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
                   color: _statusColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: _statusColor.withOpacity(0.25)),
+                  border: Border.all(color: _statusColor.withOpacity(0.25)),
                 ),
                 child: Text(
                   _statusLabel,
@@ -708,10 +616,8 @@ class _EmployeeAppTile extends StatelessWidget {
 
           const SizedBox(height: 10),
 
-          // ── Date range + duration ────────────────────────
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: AppColors.slate50,
               borderRadius: BorderRadius.circular(8),
@@ -748,7 +654,6 @@ class _EmployeeAppTile extends StatelessWidget {
             ),
           ),
 
-          // ── Reason preview ───────────────────────────────
           if (app.reason != null && app.reason!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
@@ -769,14 +674,12 @@ class _EmployeeAppTile extends StatelessWidget {
             ),
           ],
 
-          // ── Allowance chips ──────────────────────────────
           if (app.allowances.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 5,
               runSpacing: 5,
               children: app.allowances.map((a) {
-                final label = _allowanceLabel(a);
                 return Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 7, vertical: 3),
@@ -784,11 +687,10 @@ class _EmployeeAppTile extends StatelessWidget {
                     color: AppColors.brandCyanDark.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color:
-                            AppColors.brandCyanDark.withOpacity(0.2)),
+                        color: AppColors.brandCyanDark.withOpacity(0.2)),
                   ),
                   child: Text(
-                    label,
+                    _allowanceLabel(a),
                     style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
@@ -801,18 +703,15 @@ class _EmployeeAppTile extends StatelessWidget {
 
           const SizedBox(height: 12),
 
-          // ── Action buttons ───────────────────────────────
           Row(
             children: [
-              // Detail button
               OutlinedButton.icon(
                 onPressed: () => _showDetail(context),
                 icon: const Icon(Icons.info_outline_rounded, size: 14),
                 label: const Text('Detail'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.brandNavy,
-                  side: const BorderSide(
-                      color: AppColors.brandNavy, width: 1),
+                  side: const BorderSide(color: AppColors.brandNavy, width: 1),
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 12),
                   textStyle: GoogleFonts.inter(
@@ -823,10 +722,7 @@ class _EmployeeAppTile extends StatelessWidget {
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
-
               const Spacer(),
-
-              // Reject button
               if (app.status == RequestStatus.pending) ...[
                 _ActionBtn(
                   label: 'Tolak',
@@ -848,15 +744,6 @@ class _EmployeeAppTile extends StatelessWidget {
     );
   }
 
-  String _allowanceLabel(AllowanceType a) {
-    switch (a) {
-      case AllowanceType.health:        return '+ Tunjangan Kesehatan';
-      case AllowanceType.accommodation: return '+ Tunjangan Akomodasi';
-      case AllowanceType.transport:     return '+ Tunjangan Transport';
-      case AllowanceType.spp:           return '+ Tunjangan SPP';
-    }
-  }
-
   void _showDetail(BuildContext context) {
     final f  = DateFormat('dd MMMM yyyy', 'id_ID');
     final ft = DateFormat('dd MMM yyyy, HH:mm');
@@ -865,15 +752,13 @@ class _EmployeeAppTile extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // drag handle
             Center(
               child: Container(
                 width: 36,
@@ -884,8 +769,6 @@ class _EmployeeAppTile extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-
-            // Header row
             Row(
               children: [
                 Container(
@@ -904,7 +787,11 @@ class _EmployeeAppTile extends StatelessWidget {
                   ),
                   child: Center(
                     child: Text(
-                      _initials,
+                      app.employeeName!
+                          .split(' ')
+                          .map((w) => w[0])
+                          .take(2)
+                          .join(),
                       style: GoogleFonts.inter(
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
@@ -951,11 +838,9 @@ class _EmployeeAppTile extends StatelessWidget {
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
             const AppDivider(),
             const SizedBox(height: 16),
-
             Text('Detail Pengajuan',
                 style: AppText.label.copyWith(color: AppColors.slate700)),
             const SizedBox(height: 12),
@@ -963,15 +848,12 @@ class _EmployeeAppTile extends StatelessWidget {
             _DetailRow('Tanggal Mulai', f.format(app.startDate)),
             _DetailRow('Tanggal Selesai', f.format(app.endDate)),
             _DetailRow('Durasi', '${app.dayCount} hari'),
-            if (app.reason != null)
-              _DetailRow('Alasan', app.reason!),
+            if (app.reason != null) _DetailRow('Alasan', app.reason!),
             _DetailRow('Diajukan', ft.format(app.submittedAt)),
-
             if (app.allowances.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text('Tunjangan Diminta',
-                  style: AppText.label
-                      .copyWith(color: AppColors.slate700)),
+                  style: AppText.label.copyWith(color: AppColors.slate700)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 6,
@@ -981,12 +863,11 @@ class _EmployeeAppTile extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: AppColors.brandCyanDark
-                                .withOpacity(0.08),
+                            color: AppColors.brandCyanDark.withOpacity(0.08),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: AppColors.brandCyanDark
-                                    .withOpacity(0.2)),
+                                color:
+                                    AppColors.brandCyanDark.withOpacity(0.2)),
                           ),
                           child: Text(
                             _allowanceLabel(a),
@@ -999,7 +880,6 @@ class _EmployeeAppTile extends StatelessWidget {
                     .toList(),
               ),
             ],
-
             const SizedBox(height: 24),
           ],
         ),
@@ -1044,14 +924,14 @@ class _CutiFormState extends State<_CutiForm> {
     if (_start == null || _end == null) return false;
     if (_reasonCtrl.text.trim().isEmpty) return false;
     if (_days > _remaining) return false;
-    final minDate = DateTime.now()
-        .add(Duration(days: user.position.minLeaveAdvanceDays));
+    final minDate =
+        DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
     return !_start!.isBefore(minDate);
   }
 
   Future<void> _pickDate(bool isStart) async {
-    final minDate = DateTime.now()
-        .add(Duration(days: user.position.minLeaveAdvanceDays));
+    final minDate =
+        DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
     final picked = await showDatePicker(
       context: context,
       initialDate:
@@ -1092,8 +972,7 @@ class _CutiFormState extends State<_CutiForm> {
           child: const Icon(Icons.check_rounded,
               color: Colors.white, size: 24),
         ),
-        title: const Text('Pengajuan Berhasil!',
-            textAlign: TextAlign.center),
+        title: const Text('Pengajuan Berhasil!', textAlign: TextAlign.center),
         content: Text('Pengajuan cuti telah dikirim ke admin.',
             style: AppText.body2, textAlign: TextAlign.center),
         actionsAlignment: MainAxisAlignment.center,
@@ -1184,8 +1063,7 @@ class _CutiFormState extends State<_CutiForm> {
           GradientButton(
             label: 'Kirim Pengajuan Cuti',
             color: _canSubmit ? AppColors.brandNavy : AppColors.slate300,
-            textColor:
-                _canSubmit ? Colors.white : AppColors.slate700,
+            textColor: _canSubmit ? Colors.white : AppColors.slate700,
             isLoading: _submitting,
             height: 48,
             onTap: _canSubmit && !_submitting ? _submit : null,
@@ -1198,6 +1076,7 @@ class _CutiFormState extends State<_CutiForm> {
 
 // ═══════════════════════════════════════════════════════════
 // IZIN FORM  (with end-date + conditional photo upload)
+// Sekolah → Others (maks 1 foto)
 // ═══════════════════════════════════════════════════════════
 class _IzinForm extends StatefulWidget {
   const _IzinForm();
@@ -1209,62 +1088,51 @@ class _IzinFormState extends State<_IzinForm> {
   String?   _type;
   DateTime? _startDate;
   DateTime? _endDate;
-  final _noteCtrl   = TextEditingController();
-  bool _submitting  = false;
+  final _noteCtrl  = TextEditingController();
+  bool _submitting = false;
 
-  /// Daftar slot foto; key = label tunjangan, value = mock path (null = belum upload)
-  List<_PhotoSlot> _photoSlots = [];
+  // Photo slot: max 1 for Others, specific for Sakit/Seminar
+  _PhotoSlot? _photoSlot;
 
-  // ── Lookup tables ────────────────────────────────────────
   static const _types = [
-    ('Sakit',              Icons.local_hospital_rounded),
-    ('Seminar',            Icons.school_rounded),
-    ('Sekolah',  Icons.menu_book_rounded),
+    ('Sakit',   Icons.local_hospital_rounded),
+    ('Seminar', Icons.school_rounded),
+    ('Lainnya', Icons.event_note_rounded),
   ];
 
-  /// Photo slot definitions per jenis izin
-  static const Map<String, List<(String, IconData)>> _slotDefs = {
-    'Sakit': [
-      ('Surat Dokter / Resep', Icons.medical_information_rounded),
-    ],
-    'Seminar': [
-      ('Bukti Transportasi',        Icons.directions_car_rounded),
-      ('Bukti Konsumsi/Akomodasi',  Icons.restaurant_rounded),
-    ],
-    'Keperluan Sekolah': [
-      ('Bukti Pembayaran SPP', Icons.receipt_long_rounded),
-    ],
-    'Lainnya': [],
-  };
+  // Returns null if no photo required for this type
+  (String, IconData)? _slotDefFor(String type) {
+    switch (type) {
+      case 'Sakit':   return ('Surat Dokter / Resep',    Icons.medical_information_rounded);
+      case 'Seminar': return ('Bukti Transportasi/Konsumsi', Icons.receipt_long_rounded);
+      case 'Lainnya': return ('Foto Pendukung', Icons.image_rounded);
+      default:        return null;
+    }
+  }
 
-  // ── Helpers ──────────────────────────────────────────────
   List<AllowanceType> get _allowances {
     switch (_type) {
-      case 'Sakit':             return [AllowanceType.health];
-      case 'Seminar':           return [AllowanceType.transport, AllowanceType.accommodation];
-      case 'Keperluan Sekolah': return [AllowanceType.spp];
-      default:                  return [];
+      case 'Sakit':   return [AllowanceType.health];
+      case 'Seminar': return [AllowanceType.transport, AllowanceType.accommodation];
+      default:        return [];
     }
   }
 
   void _onTypeChanged(String type) {
-    final defs = _slotDefs[type] ?? [];
+    final def = _slotDefFor(type);
     setState(() {
-      _type       = type;
-      _photoSlots = defs
-          .map((d) => _PhotoSlot(label: d.$1, icon: d.$2))
-          .toList();
+      _type      = type;
+      _photoSlot = def != null ? _PhotoSlot(label: def.$1, icon: def.$2) : null;
     });
   }
-
-  bool get _photosComplete =>
-      _photoSlots.every((s) => s.uploaded);
 
   bool get _canSubmit {
     if (_type == null) return false;
     if (_startDate == null || _endDate == null) return false;
     if (_noteCtrl.text.trim().isEmpty) return false;
-    if (_photoSlots.isNotEmpty && !_photosComplete) return false;
+    // For Sakit and Seminar, photo is required
+    if ((_type == 'Sakit' || _type == 'Seminar') &&
+        (_photoSlot == null || !_photoSlot!.uploaded)) return false;
     return true;
   }
 
@@ -1278,7 +1146,7 @@ class _IzinFormState extends State<_IzinForm> {
       _type       = null;
       _startDate  = null;
       _endDate    = null;
-      _photoSlots = [];
+      _photoSlot  = null;
       _noteCtrl.clear();
     });
     showDialog(
@@ -1287,13 +1155,12 @@ class _IzinFormState extends State<_IzinForm> {
         icon: Container(
           width: 48,
           height: 48,
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
               color: AppColors.brandCyanDark, shape: BoxShape.circle),
           child: const Icon(Icons.check_rounded,
               color: Colors.white, size: 24),
         ),
-        title: const Text('Pengajuan Terkirim!',
-            textAlign: TextAlign.center),
+        title: const Text('Pengajuan Terkirim!', textAlign: TextAlign.center),
         content: Text('Pengajuan izin kamu sedang diproses.',
             style: AppText.body2, textAlign: TextAlign.center),
         actionsAlignment: MainAxisAlignment.center,
@@ -1385,13 +1252,12 @@ class _IzinFormState extends State<_IzinForm> {
                       initialDate: _startDate ?? DateTime.now(),
                       firstDate: DateTime.now()
                           .subtract(const Duration(days: 7)),
-                      lastDate: DateTime.now()
-                          .add(const Duration(days: 30)),
+                      lastDate:
+                          DateTime.now().add(const Duration(days: 30)),
                     );
                     if (picked != null) {
                       setState(() {
                         _startDate = picked;
-                        // reset end date if it's before new start
                         if (_endDate != null &&
                             _endDate!.isBefore(picked)) {
                           _endDate = picked;
@@ -1411,11 +1277,11 @@ class _IzinFormState extends State<_IzinForm> {
                       context: context,
                       initialDate:
                           _endDate ?? _startDate ?? DateTime.now(),
-                      firstDate:
-                          _startDate ?? DateTime.now()
+                      firstDate: _startDate ??
+                          DateTime.now()
                               .subtract(const Duration(days: 7)),
-                      lastDate: DateTime.now()
-                          .add(const Duration(days: 30)),
+                      lastDate:
+                          DateTime.now().add(const Duration(days: 30)),
                     );
                     if (picked != null) {
                       setState(() => _endDate = picked);
@@ -1426,7 +1292,6 @@ class _IzinFormState extends State<_IzinForm> {
             ],
           ),
 
-          // Duration indicator
           if (_startDate != null && _endDate != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -1452,21 +1317,18 @@ class _IzinFormState extends State<_IzinForm> {
             ),
           ),
 
-          // ── Photo upload (conditional) ─────────────────
-          if (_photoSlots.isNotEmpty) ...[
+          // ── Photo upload (max 1) ───────────────────────
+          if (_photoSlot != null) ...[
             const SizedBox(height: 16),
-            _buildPhotoUploadSection(),
+            _buildPhotoSection(),
           ],
 
           const SizedBox(height: 16),
 
           GradientButton(
             label: 'Kirim Pengajuan Izin',
-            color: _canSubmit
-                ? AppColors.brandCyanDark
-                : AppColors.slate300,
-            textColor:
-                _canSubmit ? Colors.white : AppColors.slate700,
+            color: _canSubmit ? AppColors.brandCyanDark : AppColors.slate300,
+            textColor: _canSubmit ? Colors.white : AppColors.slate700,
             isLoading: _submitting,
             height: 48,
             onTap: _canSubmit && !_submitting ? _submit : null,
@@ -1476,74 +1338,71 @@ class _IzinFormState extends State<_IzinForm> {
     );
   }
 
-  // ── Photo Upload Section ─────────────────────────────────
-  Widget _buildPhotoUploadSection() {
-    final uploadedCount = _photoSlots.where((s) => s.uploaded).length;
-    final totalCount    = _photoSlots.length;
+  Widget _buildPhotoSection() {
+    final slot    = _photoSlot!;
+    final required = _type == 'Sakit' || _type == 'Seminar';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Text('Lampiran Dokumen', style: AppText.label),
+            Text('Lampiran Foto', style: AppText.label),
             const SizedBox(width: 6),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: _photosComplete
-                    ? AppColors.brandLimeDark.withOpacity(0.12)
-                    : AppColors.warning.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
+            if (required)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('Wajib',
+                    style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.danger)),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.slate200,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('Opsional',
+                    style: GoogleFonts.inter(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate600)),
               ),
-              child: Text(
-                '$uploadedCount/$totalCount',
-                style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: _photosComplete
-                        ? AppColors.brandLimeDark
-                        : AppColors.warning),
-              ),
-            ),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          'Upload foto pendukung untuk kelengkapan tunjangan.',
+          'Maks. 1 foto pendukung.',
           style: AppText.body2.copyWith(fontSize: 11),
         ),
         const SizedBox(height: 10),
 
-        // Slots
-        ..._photoSlots.asMap().entries.map((e) {
-          final idx  = e.key;
-          final slot = e.value;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _PhotoUploadSlot(
-              slot: slot,
-              index: idx + 1,
-              onUpload: () {
-                // Simulate picking a file
-                setState(() {
-                  _photoSlots[idx] =
-                      _PhotoSlot.uploaded(slot.label, slot.icon);
-                });
-              },
-              onRemove: () {
-                setState(() {
-                  _photoSlots[idx] =
-                      _PhotoSlot(label: slot.label, icon: slot.icon);
-                });
-              },
-            ),
-          );
-        }),
+        _PhotoUploadSlot(
+          slot: slot,
+          index: 1,
+          onUpload: () {
+            setState(() {
+              _photoSlot = _PhotoSlot.uploaded(slot.label, slot.icon);
+            });
+          },
+          onRemove: () {
+            setState(() {
+              _photoSlot = _PhotoSlot(label: slot.label, icon: slot.icon);
+            });
+          },
+        ),
 
-        // Allowance note
         if (_allowances.isNotEmpty) ...[
+          const SizedBox(height: 10),
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -1586,9 +1445,9 @@ class _IzinFormState extends State<_IzinForm> {
 
 // ── Photo Slot Model ─────────────────────────────────────────
 class _PhotoSlot {
-  final String  label;
+  final String   label;
   final IconData icon;
-  final String? filePath; // null = not uploaded
+  final String?  filePath;
 
   const _PhotoSlot({required this.label, required this.icon})
       : filePath = null;
@@ -1601,8 +1460,8 @@ class _PhotoSlot {
 
 // ── Photo Upload Slot Widget ──────────────────────────────────
 class _PhotoUploadSlot extends StatelessWidget {
-  final _PhotoSlot  slot;
-  final int         index;
+  final _PhotoSlot   slot;
+  final int          index;
   final VoidCallback onUpload;
   final VoidCallback onRemove;
 
@@ -1619,7 +1478,8 @@ class _PhotoUploadSlot extends StatelessWidget {
       onTap: slot.uploaded ? null : onUpload,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: slot.uploaded
               ? AppColors.brandLimeDark.withOpacity(0.06)
@@ -1629,14 +1489,10 @@ class _PhotoUploadSlot extends StatelessWidget {
             color: slot.uploaded
                 ? AppColors.brandLimeDark.withOpacity(0.4)
                 : AppColors.slate200,
-            style: slot.uploaded
-                ? BorderStyle.solid
-                : BorderStyle.solid,
           ),
         ),
         child: Row(
           children: [
-            // Icon badge
             Container(
               width: 36,
               height: 36,
@@ -1657,14 +1513,12 @@ class _PhotoUploadSlot extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-
-            // Label
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Foto ${index}: ${slot.label}',
+                    slot.label,
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -1689,8 +1543,6 @@ class _PhotoUploadSlot extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Action button
             if (slot.uploaded)
               GestureDetector(
                 onTap: onRemove,
@@ -1737,8 +1589,8 @@ class _PhotoUploadSlot extends StatelessWidget {
 // DATE PICKER FIELD
 // ═══════════════════════════════════════════════════════════
 class _DatePickerField extends StatelessWidget {
-  final String  label;
-  final String? value;
+  final String   label;
+  final String?  value;
   final VoidCallback onTap;
 
   const _DatePickerField({
@@ -1800,7 +1652,7 @@ class _RequestHistoryTile extends StatelessWidget {
     switch (request.status) {
       case RequestStatus.approved: return AppColors.brandLimeDark;
       case RequestStatus.rejected: return AppColors.danger;
-      case RequestStatus.pending:  return AppColors.warning;
+      case RequestStatus.pending:  return AppColors.brandOrange;
     }
   }
 
@@ -1858,8 +1710,7 @@ class _RequestHistoryTile extends StatelessWidget {
               ),
             ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: _statusColor.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(20),
@@ -1886,8 +1737,7 @@ class _RequestHistoryTile extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(20))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -1914,10 +1764,8 @@ class _RequestHistoryTile extends StatelessWidget {
             _DetailRow('Tanggal Selesai', f.format(request.endDate)),
             _DetailRow('Durasi', '${request.dayCount} hari'),
             _DetailRow('Status', _statusLabel),
-            _DetailRow(
-                'Diajukan',
-                DateFormat('dd MMM yyyy, HH:mm')
-                    .format(request.submittedAt)),
+            _DetailRow('Diajukan',
+                DateFormat('dd MMM yyyy, HH:mm').format(request.submittedAt)),
             const SizedBox(height: 20),
           ],
         ),
@@ -1977,8 +1825,7 @@ class _ActionBtn extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: filled ? color : color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),

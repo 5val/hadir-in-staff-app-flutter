@@ -6,8 +6,10 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
 import 'login_screen.dart';
+import 'account_info_screen.dart';
 import 'history_screen.dart';
 import 'salary_screen.dart';
+import 'auth_wrapper.dart';
 
 /// Account / Profile Tab — full sections per design spec
 class AccountTab extends StatefulWidget {
@@ -19,13 +21,28 @@ class AccountTab extends StatefulWidget {
 class _AccountTabState extends State<AccountTab> {
   final user = SampleData.currentUser;
   bool _notifEnabled = true;
+  String _soundNotifMode = 'Sound';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSoundNotif();
+  }
+
+  Future<void> _loadSoundNotif() async {
+    final mode = await SessionService.getSoundNotifMode();
+    setState(() {
+      _soundNotifMode = mode;
+    });
+  }
 
   Future<void> _logout() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Keluar dari Akun?'),
-        content: Text('Kamu perlu login ulang lain kali.', style: AppText.body2),
+        content:
+            Text('Kamu perlu login ulang lain kali.', style: AppText.body2),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -68,8 +85,10 @@ class _AccountTabState extends State<AccountTab> {
                     children: [
                       Text('HADIR-IN',
                           style: GoogleFonts.inter(
-                            fontSize: 10, fontWeight: FontWeight.w700,
-                            color: AppColors.white, letterSpacing: 1.2,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.white,
+                            letterSpacing: 1.2,
                           )),
                       Text('Profile',
                           style: AppText.headline2
@@ -98,15 +117,21 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.badge_outlined,
                         label: 'Informasi Akun',
                         subtitle: 'ID, email, divisi, shift',
-                        onTap: () => WidgetsBinding.instance.addPostFrameCallback(() {
-                            _showAccountInfo();
-                          } as FrameCallback),
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AccountInfoScreen()),
+                          );
+                          setState(() {});
+                        },
                       ),
                       _MenuItem(
                         icon: Icons.history_rounded,
                         label: 'Riwayat Kehadiran',
                         subtitle: 'Lihat rekap kehadiran lengkap',
-                        onTap: () => Navigator.push(context,
+                        onTap: () => Navigator.push(
+                            context,
                             MaterialPageRoute(
                                 builder: (_) => const HistoryScreen())),
                       ),
@@ -114,28 +139,12 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.receipt_long_rounded,
                         label: 'Riwayat Gaji',
                         subtitle: 'Slip gaji bulan-bulan lalu',
-                        onTap: () => Navigator.push(context,
+                        showDivider: false,
+                        onTap: () => Navigator.push(
+                            context,
                             MaterialPageRoute(
-                                builder: (_) => const SalaryScreen(isFromAccount: true))),
-                      ),
-                      _MenuItem(
-                        icon: Icons.verified_user_rounded,
-                        label: 'Verifikasi Akun',
-                        subtitle: 'Status verifikasi identitas',
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColors.brandLime.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text('VERIFIED',
-                              style: GoogleFonts.inter(
-                                fontSize: 9, fontWeight: FontWeight.w700,
-                                color: AppColors.brandLimeDark,
-                              )),
-                        ),
-                        onTap: () {},
+                                builder: (_) =>
+                                    const SalaryScreen(isFromAccount: true))),
                       ),
                     ],
                   ),
@@ -157,6 +166,16 @@ class _AccountTabState extends State<AccountTab> {
                         ),
                         onTap: () =>
                             setState(() => _notifEnabled = !_notifEnabled),
+                      ),
+                      _MenuItem(
+                        icon: Icons.volume_up_outlined,
+                        label: 'Notifikasi Suara',
+                        subtitle: _soundNotifMode == 'Sound'
+                            ? 'Sound (Bersuara)'
+                            : _soundNotifMode == 'Vibration'
+                                ? 'Vibration (Getar)'
+                                : 'Silent (Hening)',
+                        onTap: _showSoundNotificationSettings,
                       ),
                       _MenuItem(
                         icon: Icons.color_lens_outlined,
@@ -182,26 +201,26 @@ class _AccountTabState extends State<AccountTab> {
                   const SizedBox(height: 16),
 
                   // ── Support ───────────────────────────
-                  _buildSection(
-                    title: 'Dukungan',
-                    icon: Icons.support_agent_rounded,
-                    items: [
-                      _MenuItem(
-                        icon: Icons.help_outline_rounded,
-                        label: 'Pusat Bantuan',
-                        subtitle: 'FAQ dan panduan penggunaan',
-                        onTap: () => _showComingSoon('Pusat Bantuan'),
-                      ),
-                      _MenuItem(
-                        icon: Icons.support_rounded,
-                        label: 'Bantuan HR',
-                        subtitle: 'Hubungi tim HR langsung',
-                        showDivider: false,
-                        onTap: () => _showComingSoon('Bantuan HR'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
+                  // _buildSection(
+                  //   title: 'Dukungan',
+                  //   icon: Icons.support_agent_rounded,
+                  //   items: [
+                  //     _MenuItem(
+                  //       icon: Icons.phone_enabled_rounded,
+                  //       label: 'Kontak Atasan',
+                  //       subtitle: 'Hubungi Atasan Anda',
+                  //       onTap: () => _showComingSoon('Kontak Atasan'),
+                  //     ),
+                  //     _MenuItem(
+                  //       icon: Icons.support_rounded,
+                  //       label: 'Bantuan HR',
+                  //       subtitle: 'Hubungi tim HR langsung',
+                  //       showDivider: false,
+                  //       onTap: () => _showComingSoon('Bantuan HR'),
+                  //     ),
+                  //   ],
+                  // ),
+                  // const SizedBox(height: 16),
 
                   // ── Security ──────────────────────────
                   _buildSection(
@@ -210,16 +229,26 @@ class _AccountTabState extends State<AccountTab> {
                     items: [
                       _MenuItem(
                         icon: Icons.lock_outline_rounded,
-                        label: 'Ubah Password',
-                        subtitle: 'Ganti password akun kamu',
-                        onTap: () => _showChangePassword(),
+                        label: 'Ubah Passcode',
+                        subtitle: 'Ganti passcode pengaman sesi Anda',
+                        onTap: () => _showChangePasscode(),
                       ),
                       _MenuItem(
                         icon: Icons.pin_outlined,
-                        label: 'Ubah PIN',
-                        subtitle: 'PIN untuk verifikasi cepat',
+                        label: 'Kunci Aplikasi',
+                        subtitle: 'Simulasikan sesi habis / aplikasi terkunci',
                         showDivider: false,
-                        onTap: () => _showComingSoon('Ubah PIN'),
+                        onTap: () async {
+                          await SessionService.lockSession();
+                          if (mounted) {
+                            Navigator.pushAndRemoveUntil(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => const AuthWrapper()),
+                              (r) => false,
+                            );
+                          }
+                        },
                       ),
                     ],
                   ),
@@ -295,7 +324,8 @@ class _AccountTabState extends State<AccountTab> {
               Stack(
                 children: [
                   Container(
-                    width: 72, height: 72,
+                    width: 72,
+                    height: 72,
                     decoration: const BoxDecoration(
                       color: AppColors.brandNavy,
                       shape: BoxShape.circle,
@@ -304,23 +334,26 @@ class _AccountTabState extends State<AccountTab> {
                       child: Text(
                         user.name.split(' ').map((w) => w[0]).take(2).join(),
                         style: GoogleFonts.inter(
-                          color: Colors.white, fontSize: 24,
+                          color: Colors.white,
+                          fontSize: 24,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
                   ),
                   Positioned(
-                    right: 0, bottom: 0,
+                    right: 0,
+                    bottom: 0,
                     child: GestureDetector(
                       onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Ganti foto profil!'),
-                            duration: const Duration(seconds: 2),
-                          ),
+                        SnackBar(
+                          content: Text('Ganti foto profil!'),
+                          duration: const Duration(seconds: 2),
                         ),
+                      ),
                       child: Container(
-                        width: 26, height: 26,
+                        width: 26,
+                        height: 26,
                         decoration: BoxDecoration(
                           color: AppColors.brandLimeDark,
                           shape: BoxShape.circle,
@@ -354,11 +387,68 @@ class _AccountTabState extends State<AccountTab> {
               IconButton(
                 icon: const Icon(Icons.chevron_right_rounded,
                     color: AppColors.slate400),
-                onPressed: () => WidgetsBinding.instance.addPostFrameCallback(() {
-                    _showAccountInfo();
-                  } as FrameCallback),
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const AccountInfoScreen()),
+                  );
+                  setState(() {});
+                },
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text(
+                        'Akun Anda telah terverifikasi dengan NIK dan Wajah.')),
+              );
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.brandLime.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: AppColors.brandLimeDark.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.verified_user_rounded,
+                      color: AppColors.brandLimeDark, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Verifikasi Akun',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.slate900,
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.brandLime,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'VERIFIED',
+                      style: GoogleFonts.inter(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 12),
           const AppDivider(),
@@ -405,8 +495,10 @@ class _AccountTabState extends State<AccountTab> {
             const SizedBox(width: 6),
             Text(title,
                 style: GoogleFonts.inter(
-                  fontSize: 12, fontWeight: FontWeight.w700,
-                  color: AppColors.brandNavy, letterSpacing: 0.5,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.brandNavy,
+                  letterSpacing: 0.5,
                 )),
           ],
         ),
@@ -426,7 +518,8 @@ class _AccountTabState extends State<AccountTab> {
                       child: Row(
                         children: [
                           Container(
-                            width: 36, height: 36,
+                            width: 36,
+                            height: 36,
                             decoration: BoxDecoration(
                               color: AppColors.slate100,
                               borderRadius: BorderRadius.circular(10),
@@ -441,18 +534,22 @@ class _AccountTabState extends State<AccountTab> {
                               children: [
                                 Text(item.label,
                                     style: GoogleFonts.inter(
-                                      fontSize: 14, fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
                                       color: AppColors.slate900,
                                     )),
                                 if (item.subtitle != null)
                                   Text(item.subtitle!,
-                                      style: AppText.body2.copyWith(fontSize: 11)),
+                                      style:
+                                          AppText.body2.copyWith(fontSize: 11)),
                               ],
                             ),
                           ),
-                          if (item.trailing != null) item.trailing!
-                          else const Icon(Icons.chevron_right_rounded,
-                              color: AppColors.slate400, size: 20),
+                          if (item.trailing != null)
+                            item.trailing!
+                          else
+                            const Icon(Icons.chevron_right_rounded,
+                                color: AppColors.slate400, size: 20),
                         ],
                       ),
                     ),
@@ -477,6 +574,83 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
+  void _showSoundNotificationSettings() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.slate300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Notifikasi Suara',
+                style: AppText.headline3.copyWith(color: AppColors.slate900),
+              ),
+              const SizedBox(height: 16),
+              RadioListTile<String>(
+                activeColor: AppColors.brandNavy,
+                title: Text('Sound (Bersuara)', style: AppText.body1),
+                value: 'Sound',
+                groupValue: _soundNotifMode,
+                onChanged: (val) {
+                  if (val != null) {
+                    setModalState(() => _soundNotifMode = val);
+                    setState(() => _soundNotifMode = val);
+                    SessionService.saveSoundNotifMode(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              RadioListTile<String>(
+                activeColor: AppColors.brandNavy,
+                title: Text('Vibration (Getar)', style: AppText.body1),
+                value: 'Vibration',
+                groupValue: _soundNotifMode,
+                onChanged: (val) {
+                  if (val != null) {
+                    setModalState(() => _soundNotifMode = val);
+                    setState(() => _soundNotifMode = val);
+                    SessionService.saveSoundNotifMode(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              RadioListTile<String>(
+                activeColor: AppColors.brandNavy,
+                title: Text('Silent (Hening)', style: AppText.body1),
+                value: 'Silent',
+                groupValue: _soundNotifMode,
+                onChanged: (val) {
+                  if (val != null) {
+                    setModalState(() => _soundNotifMode = val);
+                    setState(() => _soundNotifMode = val);
+                    SessionService.saveSoundNotifMode(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _showAccountInfo() {
     showModalBottomSheet(
       context: context,
@@ -490,7 +664,8 @@ class _AccountTabState extends State<AccountTab> {
           children: [
             Center(
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                   color: AppColors.slate300,
                   borderRadius: BorderRadius.circular(2),
@@ -519,10 +694,12 @@ class _AccountTabState extends State<AccountTab> {
     );
   }
 
-  void _showChangePassword() {
+  void _showChangePasscode() {
     final oldCtrl = TextEditingController();
     final newCtrl = TextEditingController();
     final confCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -530,44 +707,79 @@ class _AccountTabState extends State<AccountTab> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: EdgeInsets.only(
-          left: 24, right: 24, bottom: MediaQuery.of(_).viewInsets.bottom + 32,
+          left: 24,
+          right: 24,
+          bottom: MediaQuery.of(_).viewInsets.bottom + 32,
           top: 16,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36, height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.slate300,
-                  borderRadius: BorderRadius.circular(2),
+        child: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.slate300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text('Ubah Password',
-                style: AppText.headline3.copyWith(color: AppColors.slate900)),
-            const SizedBox(height: 16),
-            _PasswordField(label: 'Password Lama', controller: oldCtrl),
-            const SizedBox(height: 12),
-            _PasswordField(label: 'Password Baru', controller: newCtrl),
-            const SizedBox(height: 12),
-            _PasswordField(label: 'Konfirmasi Password Baru', controller: confCtrl),
-            const SizedBox(height: 20),
-            GradientButton(
-              label: 'Simpan Password Baru',
-              color: AppColors.brandNavy,
-              height: 50,
-              onTap: () {
-                Navigator.pop(_);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Password berhasil diubah!')),
-                );
-              },
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text('Ubah Passcode',
+                  style: AppText.headline3.copyWith(color: AppColors.slate900)),
+              const SizedBox(height: 16),
+              _PasscodeField(label: 'Passcode Lama', controller: oldCtrl),
+              const SizedBox(height: 12),
+              _PasscodeField(label: 'Passcode Baru', controller: newCtrl),
+              const SizedBox(height: 12),
+              _PasscodeField(
+                  label: 'Konfirmasi Passcode Baru', controller: confCtrl),
+              const SizedBox(height: 20),
+              GradientButton(
+                label: 'Simpan Passcode Baru',
+                color: AppColors.brandNavy,
+                height: 50,
+                onTap: () async {
+                  if (!formKey.currentState!.validate()) return;
+                  final currentPasscode = await SessionService.getPasscode();
+                  if (oldCtrl.text != currentPasscode) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Passcode lama tidak cocok!'),
+                          backgroundColor: AppColors.danger),
+                    );
+                    return;
+                  }
+                  if (newCtrl.text.length < 6) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Passcode baru harus 6 digit angka!'),
+                          backgroundColor: AppColors.danger),
+                    );
+                    return;
+                  }
+                  if (newCtrl.text != confCtrl.text) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content:
+                              Text('Konfirmasi passcode baru tidak cocok!'),
+                          backgroundColor: AppColors.danger),
+                    );
+                    return;
+                  }
+                  await SessionService.savePasscode(newCtrl.text);
+                  Navigator.pop(_);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Passcode berhasil diubah!')),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -586,7 +798,8 @@ class _AccountTabState extends State<AccountTab> {
           children: [
             Center(
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
                   color: AppColors.slate300,
                   borderRadius: BorderRadius.circular(2),
@@ -598,16 +811,31 @@ class _AccountTabState extends State<AccountTab> {
                 style: AppText.headline3.copyWith(color: AppColors.slate900)),
             const SizedBox(height: 16),
             ...const [
-              ('📍', 'Deteksi Lokasi Akurat',
-                  'Verifikasi lokasi GPS dan anti-fake location untuk kehadiran yang jujur'),
-              ('⏱️', 'Pencatatan Real-Time',
-                  'Check-in, check-out, dan break tercatat secara langsung'),
-              ('📊', 'Transparansi Gaji',
-                  'Lihat slip gaji dan komponen penggajian secara detail'),
-              ('🔐', 'Keamanan Berlapis',
-                  'Verifikasi ulang untuk akses fitur sensitif'),
-              ('📱', 'Akses Kapan Saja',
-                  'Login sekali, gunakan terus sampai kamu logout sendiri'),
+              (
+                '📍',
+                'Deteksi Lokasi Akurat',
+                'Verifikasi lokasi GPS dan anti-fake location untuk kehadiran yang jujur'
+              ),
+              (
+                '⏱️',
+                'Pencatatan Real-Time',
+                'Check-in, check-out, dan break tercatat secara langsung'
+              ),
+              (
+                '📊',
+                'Transparansi Gaji',
+                'Lihat slip gaji dan komponen penggajian secara detail'
+              ),
+              (
+                '🔐',
+                'Keamanan Berlapis',
+                'Verifikasi ulang untuk akses fitur sensitif'
+              ),
+              (
+                '📱',
+                'Akses Kapan Saja',
+                'Login sekali, gunakan terus sampai kamu logout sendiri'
+              ),
             ].map((f) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
@@ -620,10 +848,12 @@ class _AccountTabState extends State<AccountTab> {
                           children: [
                             Text(f.$2,
                                 style: GoogleFonts.inter(
-                                  fontSize: 13, fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
                                   color: AppColors.slate900,
                                 )),
-                            Text(f.$3, style: AppText.body2.copyWith(fontSize: 11)),
+                            Text(f.$3,
+                                style: AppText.body2.copyWith(fontSize: 11)),
                           ],
                         ),
                       ),
@@ -660,7 +890,9 @@ class _StatChip extends StatelessWidget {
   final String label, value;
   final IconData icon;
   const _StatChip({
-    required this.label, required this.value, required this.icon,
+    required this.label,
+    required this.value,
+    required this.icon,
   });
 
   @override
@@ -671,12 +903,12 @@ class _StatChip extends StatelessWidget {
         const SizedBox(height: 4),
         Text(value,
             style: GoogleFonts.inter(
-              fontSize: 12, fontWeight: FontWeight.w700,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
               color: AppColors.slate900,
             )),
         Text(label,
-            style: GoogleFonts.inter(
-                fontSize: 9, color: AppColors.slate700)),
+            style: GoogleFonts.inter(fontSize: 9, color: AppColors.slate700)),
       ],
     );
   }
@@ -703,7 +935,8 @@ class _InfoRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(value,
                     style: GoogleFonts.inter(
-                        fontSize: 14, fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.slate900)),
               ],
             ),
@@ -740,8 +973,56 @@ class _PasswordFieldState extends State<_PasswordField> {
             prefixIcon: const Icon(Icons.lock_outline_rounded),
             suffixIcon: IconButton(
               icon: Icon(
-                _obs ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                color: AppColors.slate400, size: 18,
+                _obs
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: AppColors.slate400,
+                size: 18,
+              ),
+              onPressed: () => setState(() => _obs = !_obs),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PasscodeField extends StatefulWidget {
+  final String label;
+  final TextEditingController controller;
+  const _PasscodeField({required this.label, required this.controller});
+
+  @override
+  State<_PasscodeField> createState() => _PasscodeFieldState();
+}
+
+class _PasscodeFieldState extends State<_PasscodeField> {
+  bool _obs = true;
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(widget.label, style: AppText.label),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: widget.controller,
+          obscureText: _obs,
+          maxLength: 6,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: AppColors.slate900),
+          decoration: InputDecoration(
+            hintText: widget.label,
+            counterText: "",
+            prefixIcon: const Icon(Icons.lock_outline_rounded),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obs
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: AppColors.slate400,
+                size: 18,
               ),
               onPressed: () => setState(() => _obs = !_obs),
             ),

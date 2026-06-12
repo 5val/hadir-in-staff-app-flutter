@@ -22,9 +22,12 @@ class SalaryScreen extends StatefulWidget {
 class _SalaryScreenState extends State<SalaryScreen> {
   final user = SampleData.currentUser;
   final slips = SampleData.salaryHistory;
-  int _idx = 0;
 
-  SalarySlip get _slip => slips[_idx];
+  // Filter: 1 = 1 bulan terakhir, 2 = 2 bulan terakhir, 3 = 3 bulan terakhir
+  int _filterMonths = 1;
+
+  List<SalarySlip> get _filteredSlips =>
+      slips.take(_filterMonths).toList();
 
   String _fmtCurrency(int amount) =>
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0)
@@ -83,10 +86,13 @@ class _SalaryScreenState extends State<SalaryScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
                 children: [
-                  _buildMonthSelector(),
+                  _buildFilterChips(),
                   const SizedBox(height: 16),
-                  _buildSalaryCard(),
-                  const SizedBox(height: 20),
+                  ..._filteredSlips.map((slip) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildSalaryCard(slip),
+                      )),
+                  const SizedBox(height: 8),
                   _buildSalarySetting(),
                 ],
               ),
@@ -97,214 +103,233 @@ class _SalaryScreenState extends State<SalaryScreen> {
     );
   }
 
-  // ── Month Selector ──────────────────────────────────────────
-  Widget _buildMonthSelector() {
+  // ── Filter Chips ────────────────────────────────────────────
+  Widget _buildFilterChips() {
+    final options = [
+      (1, '1 Bulan Terakhir'),
+      (2, '2 Bulan Terakhir'),
+      (3, '3 Bulan Terakhir'),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Pilih Periode Gaji', style: AppText.label),
-        const SizedBox(height: 4),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.slate200),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.brandNavy.withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              value: _idx,
-              isExpanded: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  color: AppColors.brandNavy, size: 22),
-              items: List.generate(slips.length, (i) {
-                return DropdownMenuItem<int>(
-                  value: i,
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          color: i == _idx
-                              ? AppColors.brandNavy
-                              : AppColors.slate300,
-                          shape: BoxShape.circle,
-                        ),
+        Text('Filter Periode', style: AppText.label),
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: options.map((opt) {
+              final isSelected = _filterMonths == opt.$1;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => setState(() => _filterMonths = opt.$1),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.brandNavy
+                          : AppColors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: isSelected
+                            ? AppColors.brandNavy
+                            : AppColors.slate200,
+                        width: 1.5,
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        slips[i].period,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight:
-                              i == _idx ? FontWeight.w700 : FontWeight.w500,
-                          color: i == _idx
-                              ? AppColors.brandNavy
-                              : AppColors.slate700,
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: AppColors.brandNavy.withOpacity(0.25),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              )
+                            ]
+                          : [],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isSelected) ...[
+                          const Icon(Icons.check_rounded,
+                              size: 13, color: AppColors.brandLime),
+                          const SizedBox(width: 5),
+                        ],
+                        Text(
+                          opt.$2,
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isSelected
+                                ? AppColors.white
+                                : AppColors.slate600,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-              selectedItemBuilder: (_) => List.generate(slips.length, (i) {
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    slips[i].period,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.brandNavy,
+                      ],
                     ),
                   ),
-                );
-              }),
-              onChanged: (val) {
-                if (val != null) setState(() => _idx = val);
-              },
-            ),
+                ),
+              );
+            }).toList(),
           ),
         ),
       ],
     );
   }
 
-  // ── Salary Card ─────────────────────────────────────────────
-  Widget _buildSalaryCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.brandNavy,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brandNavy.withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+  // ── Salary Card (clickable, no Lihat Detail button) ──────────
+  Widget _buildSalaryCard(SalarySlip slip) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SalaryDetailScreen(
+              slip: slip,
+              user: user,
+            ),
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(_slip.period,
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withOpacity(0.9),
-                    )),
-              ),
-              // ── Tombol Lihat Detail → navigate ke SalaryDetailScreen ──
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SalaryDetailScreen(
-                        slip: _slip,
-                        user: user,
-                      ),
-                    ),
-                  );
-                },
-                child: Container(
+        );
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.brandNavy,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.brandNavy.withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppColors.brandLime.withOpacity(0.2),
+                    color: Colors.white.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Row(
-                    children: [
-                      Text('Lihat Detail',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.brandLime,
-                          )),
-                      const SizedBox(width: 3),
-                      const Icon(Icons.arrow_forward_ios_rounded,
-                          size: 10, color: AppColors.brandLime),
-                    ],
-                  ),
+                  child: Text(slip.period,
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withOpacity(0.9),
+                      )),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(14),
+                // Tap hint — subtle, no dedicated button
+                // Row(
+                //   children: [
+                //     Text('Ketuk untuk detail',
+                //         style: GoogleFonts.inter(
+                //           fontSize: 10,
+                //           color: Colors.white.withOpacity(0.5),
+                //         )),
+                //     const SizedBox(width: 4),
+                //     Icon(Icons.touch_app_rounded,
+                //         size: 13, color: Colors.white.withOpacity(0.45)),
+                //   ],
+                // ),
+              ],
             ),
-            child: const Icon(Icons.account_balance_wallet_outlined,
-                color: Colors.white, size: 26),
-          ),
-          const SizedBox(height: 14),
-          Text('Total Gaji Bersih (Take Home Pay)',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: Colors.white.withOpacity(0.75),
-              )),
-          const SizedBox(height: 6),
-          Text(
-            _fmtCurrency(_slip.netSalary),
-            style: GoogleFonts.inter(
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(
-                    color: AppColors.brandLime, shape: BoxShape.circle),
+            const SizedBox(height: 20),
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(14),
               ),
-              const SizedBox(width: 6),
-              Text(
-                'Ditransfer ${DateFormat("dd MMM yyyy").format(_slip.periodEnd)}',
+              child: const Icon(Icons.account_balance_wallet_outlined,
+                  color: Colors.white, size: 26),
+            ),
+            const SizedBox(height: 14),
+            Text('Total Gaji Bersih (Take Home Pay)',
                 style: GoogleFonts.inter(
                   fontSize: 12,
-                  color: Colors.white.withOpacity(0.8),
-                ),
+                  color: Colors.white.withOpacity(0.75),
+                )),
+            const SizedBox(height: 6),
+            Text(
+              _fmtCurrency(slip.netSalary),
+              style: GoogleFonts.inter(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                letterSpacing: -0.5,
               ),
-            ],
-          ),
-        ],
+            ),
+            const SizedBox(height: 16),
+            // ── Mini summary row ──────────────────────────
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _miniStat('Pendapatan',
+                      _fmtCurrencyShort(slip.totalIncome), Colors.white),
+                  Container(
+                      width: 1,
+                      height: 28,
+                      color: Colors.white.withOpacity(0.15)),
+                  _miniStat('Potongan',
+                      _fmtCurrencyShort(slip.totalDeduction),
+                      const Color(0xFFFCA5A5)),
+                  Container(
+                      width: 1,
+                      height: 28,
+                      color: Colors.white.withOpacity(0.15)),
+                  _miniStat(
+                      'Ditransfer',
+                      DateFormat('dd MMM').format(slip.periodEnd),
+                      AppColors.brandLime),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _miniStat(String label, String value, Color valueColor) {
+    return Column(
+      children: [
+        Text(value,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: valueColor,
+            )),
+        const SizedBox(height: 2),
+        Text(label,
+            style: GoogleFonts.inter(
+                fontSize: 9, color: Colors.white.withOpacity(0.55))),
+      ],
     );
   }
 
   // ── Salary Setting ──────────────────────────────────────────
   Widget _buildSalarySetting() {
+    // Salary disbursement date — assumed stored on user.position or a fixed value.
+    // Using day 25 as example; adjust source field as needed.
+    final disbursementDay = user.position.salaryDisbursementDay ?? 25;
+
     final settings = [
       (
         Icons.account_balance_wallet_rounded,
@@ -344,14 +369,74 @@ class _SalaryScreenState extends State<SalaryScreen> {
             const Icon(Icons.settings_rounded,
                 color: AppColors.brandNavy, size: 18),
             const SizedBox(width: 8),
-            Text('Pengaturan Gaji Saya',
+            Text('Detail Gaji Saya',
                 style: AppText.headline3.copyWith(color: AppColors.slate900)),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          'Konfigurasi gaji berdasarkan jabatan dan penggajian yang berlaku',
+          'Detail gaji berdasarkan jabatan dan penggajian yang berlaku',
           style: AppText.body2,
+        ),
+        const SizedBox(height: 10),
+        // ── Disbursement date info banner ──────────────
+        Container(
+          width: double.infinity,
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.brandNavy.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppColors.brandNavy.withOpacity(0.15)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.brandNavy.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.event_available_rounded,
+                    color: AppColors.brandNavy, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Jadwal Pencairan Gaji',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.brandNavy,
+                        )),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Gaji dicairkan setiap tanggal $disbursementDay setiap bulannya',
+                      style: GoogleFonts.inter(
+                          fontSize: 11, color: AppColors.slate600),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.brandNavy,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('Setiap Tanggal $disbursementDay',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    )),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         GridView.count(
@@ -454,7 +539,6 @@ class SalaryDetailScreen extends StatelessWidget {
     pw.TextStyle regular(double sz, {PdfColor color = slate700}) =>
         pw.TextStyle(fontSize: sz, color: color);
 
-    // Table header cell
     pw.Widget th(String text, {pw.TextAlign align = pw.TextAlign.left}) =>
         pw.Container(
           padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -464,7 +548,6 @@ class SalaryDetailScreen extends StatelessWidget {
               style: bold(9, color: PdfColors.white)),
         );
 
-    // Table data cell
     pw.Widget td(
       String text, {
       pw.TextAlign align = pw.TextAlign.left,
@@ -480,7 +563,6 @@ class SalaryDetailScreen extends StatelessWidget {
               style: isBold ? bold(9, color: color) : regular(9, color: color)),
         );
 
-    // Summary row inside dark card
     pw.Widget summaryRow(
       String label,
       String value, {
@@ -512,7 +594,6 @@ class SalaryDetailScreen extends StatelessWidget {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         build: (ctx) => [
-          // ── Header banner
           pw.Container(
             padding: const pw.EdgeInsets.all(20),
             decoration: pw.BoxDecoration(
@@ -551,8 +632,6 @@ class SalaryDetailScreen extends StatelessWidget {
             ),
           ),
           pw.SizedBox(height: 14),
-
-          // ── Kehadiran info row
           pw.Container(
             padding: const pw.EdgeInsets.all(12),
             decoration: pw.BoxDecoration(
@@ -582,8 +661,20 @@ class SalaryDetailScreen extends StatelessWidget {
                   pw.Text('Tidak Hadir', style: regular(8, color: slate500)),
                 ]),
                 pw.Column(children: [
+                  pw.Text('${slip.leaveDays ?? 0} hari',
+                      style: bold(11, color: PdfColor.fromInt(0xFF7C3AED))),
+                  pw.SizedBox(height: 2),
+                  pw.Text('Cuti', style: regular(8, color: slate500)),
+                ]),
+                pw.Column(children: [
+                  pw.Text('${slip.permissionDays ?? 0} hari',
+                      style: bold(11, color: PdfColor.fromInt(0xFF0891B2))),
+                  pw.SizedBox(height: 2),
+                  pw.Text('Izin', style: regular(8, color: slate500)),
+                ]),
+                pw.Column(children: [
                   pw.Text(
-                    '${DateFormat("dd/MM").format(slip.periodStart)} – ${DateFormat("dd/MM/yy").format(slip.periodEnd)}',
+                    '${DateFormat("dd/MM").format(slip.periodStart)} - ${DateFormat("dd/MM/yy").format(slip.periodEnd)}',
                     style: bold(10, color: slate700),
                   ),
                   pw.SizedBox(height: 2),
@@ -592,9 +683,27 @@ class SalaryDetailScreen extends StatelessWidget {
               ],
             ),
           ),
+          pw.SizedBox(height: 10),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(16),
+            decoration: pw.BoxDecoration(
+              color: navyColor,
+              borderRadius: pw.BorderRadius.circular(10),
+            ),
+            child: pw.Column(
+              children: [
+                summaryRow('Total Pendapatan', _fmt(slip.totalIncome)),
+                pw.Divider(
+                    color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
+                summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
+                    isDeduction: true),
+                pw.Divider(
+                    color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
+                summaryRow('Gaji Bersih', _fmt(slip.netSalary), isTotal: true),
+              ],
+            ),
+          ),
           pw.SizedBox(height: 18),
-
-          // ── Pendapatan table
           pw.Text('Rincian Pendapatan', style: bold(11)),
           pw.SizedBox(height: 6),
           pw.Table(
@@ -611,10 +720,8 @@ class SalaryDetailScreen extends StatelessWidget {
                 th('Jumlah', align: pw.TextAlign.right),
               ]),
               ...income.asMap().entries.map((e) => pw.TableRow(children: [
-                    td(e.value.label,
-                        isBold: true, isAlt: e.key.isOdd),
-                    td(e.value.note,
-                        color: slate500, isAlt: e.key.isOdd),
+                    td(e.value.label, isBold: true, isAlt: e.key.isOdd),
+                    td(e.value.note, color: slate500, isAlt: e.key.isOdd),
                     td(_fmt(e.value.amount),
                         align: pw.TextAlign.right,
                         isBold: true,
@@ -623,8 +730,6 @@ class SalaryDetailScreen extends StatelessWidget {
             ],
           ),
           pw.SizedBox(height: 16),
-
-          // ── Potongan table
           pw.Text('Rincian Potongan', style: bold(11)),
           pw.SizedBox(height: 6),
           pw.Table(
@@ -641,10 +746,8 @@ class SalaryDetailScreen extends StatelessWidget {
                 th('Jumlah', align: pw.TextAlign.right),
               ]),
               ...deductions.asMap().entries.map((e) => pw.TableRow(children: [
-                    td(e.value.label,
-                        isBold: true, isAlt: e.key.isOdd),
-                    td(e.value.note,
-                        color: slate500, isAlt: e.key.isOdd),
+                    td(e.value.label, isBold: true, isAlt: e.key.isOdd),
+                    td(e.value.note, color: slate500, isAlt: e.key.isOdd),
                     td('- ${_fmt(e.value.amount)}',
                         align: pw.TextAlign.right,
                         color: dangerColor,
@@ -653,33 +756,7 @@ class SalaryDetailScreen extends StatelessWidget {
                   ])),
             ],
           ),
-          pw.SizedBox(height: 18),
-
-          // ── Summary card
-          pw.Container(
-            padding: const pw.EdgeInsets.all(16),
-            decoration: pw.BoxDecoration(
-              color: navyColor,
-              borderRadius: pw.BorderRadius.circular(10),
-            ),
-            child: pw.Column(
-              children: [
-                summaryRow('Total Pendapatan', _fmt(slip.totalIncome)),
-                pw.Divider(
-                    color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
-                    isDeduction: true),
-                pw.Divider(
-                    color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow(
-                    'Gaji Bersih', _fmt(slip.netSalary),
-                    isTotal: true),
-              ],
-            ),
-          ),
           pw.SizedBox(height: 14),
-
-          // ── Footer
           pw.Center(
             child: pw.Text(
               'Dicetak pada ${DateFormat("dd MMMM yyyy, HH:mm").format(DateTime.now())} — Dokumen ini digenerate otomatis oleh sistem.',
@@ -737,14 +814,13 @@ class SalaryDetailScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // ── Download PDF Button ──────────────────
                   GestureDetector(
                     onTap: () => _downloadPdf(context),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 9),
                       decoration: BoxDecoration(
-                        color: AppColors.brandNavyDark,
+                        color: AppColors.brandLimeDark,
                         borderRadius: BorderRadius.circular(10),
                         boxShadow: [
                           BoxShadow(
@@ -757,8 +833,6 @@ class SalaryDetailScreen extends StatelessWidget {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                        //   const Icon(Icons.download_rounded,
-                        //       color: Colors.white, size: 16),
                           const SizedBox(width: 5),
                           Text('Download PDF',
                               style: GoogleFonts.inter(
@@ -782,7 +856,9 @@ class SalaryDetailScreen extends StatelessWidget {
                 children: [
                   _buildHeroCard(),
                   const SizedBox(height: 16),
-                  _buildAttendanceInfo(),
+                  _buildAttendanceInfo(context),
+                  const SizedBox(height: 10),
+                  _buildSummaryCard(),
                   const SizedBox(height: 20),
                   _buildSectionTitle(
                       Icons.trending_up_rounded, 'Rincian Pendapatan'),
@@ -793,8 +869,6 @@ class SalaryDetailScreen extends StatelessWidget {
                       Icons.trending_down_rounded, 'Rincian Potongan'),
                   const SizedBox(height: 8),
                   _buildSalaryTable(deductions, isDeduction: true),
-                  const SizedBox(height: 20),
-                  _buildSummaryCard(),
                 ],
               ),
             ),
@@ -892,32 +966,43 @@ class SalaryDetailScreen extends StatelessWidget {
     );
   }
 
-  // ── Attendance Info ──────────────────────────────────────────
-  Widget _buildAttendanceInfo() {
-    final items = [
+  // ── Attendance Info (with leave & permission tappable) ───────
+  Widget _buildAttendanceInfo(BuildContext context) {
+    final leaveDays = slip.leaveDays ?? 0;
+    final permissionDays = slip.permissionDays ?? 0;
+
+    final mainItems = [
       (
         Icons.calendar_month_rounded,
         'Hari Kerja',
         '${slip.workDays} hari',
-        AppColors.brandNavy
+        AppColors.brandNavy,
+        false,
+        null as VoidCallback?,
       ),
       (
         Icons.check_circle_rounded,
         'Hadir',
         '${slip.presentDays} hari',
-        const Color(0xFF16A34A)
+        const Color(0xFF16A34A),
+        false,
+        null as VoidCallback?,
       ),
       (
         Icons.cancel_rounded,
         'Tidak Hadir',
         '${slip.absentDays} hari',
-        AppColors.danger
+        AppColors.danger,
+        false,
+        null as VoidCallback?,
       ),
       (
         Icons.star_rounded,
         'Bonus',
         slip.presentDays == slip.workDays ? 'Full' : 'Parsial',
-        AppColors.brandLimeDark
+        AppColors.brandLimeDark,
+        false,
+        null as VoidCallback?,
       ),
     ];
 
@@ -935,35 +1020,330 @@ class SalaryDetailScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: items.map((item) {
-          return Column(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Main attendance row ────────────────────────
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: mainItems.map((item) {
+              return Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: item.$4.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(item.$1, color: item.$4, size: 16),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(item.$3,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: item.$4,
+                      )),
+                  const SizedBox(height: 2),
+                  Text(item.$2,
+                      style: GoogleFonts.inter(
+                          fontSize: 10, color: AppColors.slate700)),
+                ],
+              );
+            }).toList(),
+          ),
+
+          // ── Divider ──────────────────────────────────
+          Container(
+            height: 1,
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            color: AppColors.slate100,
+          ),
+
+          // ── Cuti & Izin row (tappable) ────────────────
+          Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: item.$4.withOpacity(0.1),
-                  shape: BoxShape.circle,
+              Expanded(
+                child: _buildLeavePermissionTile(
+                  context: context,
+                  icon: Icons.beach_access_rounded,
+                  label: 'Cuti',
+                  days: leaveDays,
+                  color: const Color(0xFF7C3AED),
+                  historyType: 'cuti',
+                  history: slip.leaveHistory ?? [],
                 ),
-                child: Icon(item.$1, color: item.$4, size: 16),
               ),
-              const SizedBox(height: 6),
-              Text(item.$3,
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: item.$4,
-                  )),
-              const SizedBox(height: 2),
-              Text(item.$2,
-                  style: GoogleFonts.inter(
-                      fontSize: 10, color: AppColors.slate700)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildLeavePermissionTile(
+                  context: context,
+                  icon: Icons.assignment_late_rounded,
+                  label: 'Izin',
+                  days: permissionDays,
+                  color: const Color(0xFF0891B2),
+                  historyType: 'izin',
+                  history: slip.permissionHistory ?? [],
+                ),
+              ),
             ],
-          );
-        }).toList(),
+          ),
+        ],
       ),
     );
+  }
+
+  // ── Cuti / Izin tile ─────────────────────────────────────────
+  Widget _buildLeavePermissionTile({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required int days,
+    required Color color,
+    required String historyType,
+    required List<LeaveRecord> history,
+  }) {
+    return GestureDetector(
+      onTap: () => _showLeaveHistorySheet(
+        context: context,
+        type: historyType,
+        color: color,
+        icon: icon,
+        history: history,
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 15),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$days hari',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: color,
+                      )),
+                  Text(label,
+                      style: GoogleFonts.inter(
+                          fontSize: 10, color: AppColors.slate600)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: color.withOpacity(0.6), size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Leave / Permission History Bottom Sheet ───────────────────
+  void _showLeaveHistorySheet({
+    required BuildContext context,
+    required String type,
+    required Color color,
+    required IconData icon,
+    required List<LeaveRecord> history,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.55,
+        minChildSize: 0.35,
+        maxChildSize: 0.85,
+        expand: false,
+        builder: (_, scrollController) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              children: [
+                // Handle
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.slate200,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(9),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, color: color, size: 20),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Riwayat ${type == 'cuti' ? 'Cuti' : 'Izin'}',
+                            style: AppText.headline3
+                                .copyWith(color: AppColors.slate900),
+                          ),
+                          Text(
+                            slip.period,
+                            style: GoogleFonts.inter(
+                                fontSize: 11, color: AppColors.slate700),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Container(height: 1, color: AppColors.slate100),
+                // List
+                Expanded(
+                  child: history.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(icon,
+                                  size: 40, color: color.withOpacity(0.3)),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Tidak ada riwayat ${type == 'cuti' ? 'cuti' : 'izin'}\npada periode ini',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: AppColors.slate400),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          controller: scrollController,
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+                          itemCount: history.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (_, i) {
+                            final rec = history[i];
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppColors.slate50,
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: AppColors.slate200),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(7),
+                                    decoration: BoxDecoration(
+                                      color: color.withOpacity(0.1),
+                                      borderRadius:
+                                          BorderRadius.circular(8),
+                                    ),
+                                    child:
+                                        Icon(icon, color: color, size: 14),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Text(rec.reason,
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: AppColors.slate800,
+                                                )),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: _statusColor(
+                                                        rec.status)
+                                                    .withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                              ),
+                                              child: Text(
+                                                rec.status,
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: _statusColor(
+                                                      rec.status),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${DateFormat("dd MMM yyyy").format(rec.startDate)} – ${DateFormat("dd MMM yyyy").format(rec.endDate)}  ·  ${rec.totalDays} hari',
+                                          style: GoogleFonts.inter(
+                                              fontSize: 11,
+                                              color: AppColors.slate700),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'disetujui':
+      case 'approved':
+        return const Color(0xFF16A34A);
+      case 'ditolak':
+      case 'rejected':
+        return AppColors.danger;
+      default:
+        return const Color(0xFFD97706);
+    }
   }
 
   // ── Section Title ─────────────────────────────────────────────
@@ -1005,7 +1385,6 @@ class SalaryDetailScreen extends StatelessWidget {
             2: FlexColumnWidth(4),
           },
           children: [
-            // ── Header Row ──────────────────────────────
             TableRow(
               decoration: const BoxDecoration(color: AppColors.brandNavy),
               children: [
@@ -1014,7 +1393,6 @@ class SalaryDetailScreen extends StatelessWidget {
                 _th('Jumlah', align: TextAlign.right),
               ],
             ),
-            // ── Data Rows ──────────────────────────────
             ...components.asMap().entries.map((entry) {
               final isAlt = entry.key.isOdd;
               final comp = entry.value;
@@ -1104,9 +1482,7 @@ class SalaryDetailScreen extends StatelessWidget {
           _summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
               isDeduction: true),
           _divider(),
-          _summaryRow(
-              'Gaji Bersih', _fmt(slip.netSalary),
-              isTotal: true),
+          _summaryRow('Gaji Bersih', _fmt(slip.netSalary), isTotal: true),
         ],
       ),
     );
@@ -1147,7 +1523,7 @@ class SalaryDetailScreen extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED WIDGETS (unchanged from original)
+// SHARED WIDGETS
 // ─────────────────────────────────────────────────────────────────────────────
 class _EarningsRow extends StatelessWidget {
   final String label, amount;

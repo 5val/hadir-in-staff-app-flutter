@@ -6,7 +6,6 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 
 /// Read-only history of all subordinate leave requests — visible to supervisors.
-/// Styled identically to AllLeaveHistoryScreen; no approve/reject actions.
 class AllSubordinateLeaveHistoryScreen extends StatefulWidget {
   const AllSubordinateLeaveHistoryScreen({super.key});
 
@@ -40,7 +39,8 @@ class _AllSubordinateLeaveHistoryScreenState
               size: 18, color: AppColors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Riwayat Pengajuan Karyawan', style: AppText.headline3.copyWith(color: AppColors.white)),
+        title: Text('Riwayat Pengajuan Karyawan',
+            style: AppText.headline3.copyWith(color: AppColors.white)),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(height: 1, color: AppColors.slate200),
@@ -48,63 +48,139 @@ class _AllSubordinateLeaveHistoryScreenState
       ),
       body: Column(
         children: [
-          // ── Filter bar ────────────────────────────────────
+          // ── Filter chips: Jenis ───────────────────────────
           Container(
             color: AppColors.white,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: DropdownButtonFormField<LeaveType?>(
-                    value: _filterType,
-                    decoration: const InputDecoration(
-                      labelText: 'Jenis',
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      isDense: true,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: null,              child: Text('Semua Jenis')),
-                      DropdownMenuItem(value: LeaveType.annual,  child: Text('Cuti')),
-                      DropdownMenuItem(value: LeaveType.sick,    child: Text('Sakit')),
-                      DropdownMenuItem(value: LeaveType.seminar, child: Text('Seminar')),
-                      DropdownMenuItem(value: LeaveType.school,  child: Text('Sekolah')),
+                Text('Jenis',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate700)),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _FilterChip(
+                        label: 'Semua',
+                        selected: _filterType == null,
+                        onTap: () => setState(() => _filterType = null),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Cuti',
+                        icon: Icons.beach_access_rounded,
+                        selected: _filterType == LeaveType.annual,
+                        onTap: () => setState(() =>
+                            _filterType = _filterType == LeaveType.annual
+                                ? null
+                                : LeaveType.annual),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Sakit',
+                        icon: Icons.local_hospital_rounded,
+                        selected: _filterType == LeaveType.sick,
+                        onTap: () => setState(() =>
+                            _filterType = _filterType == LeaveType.sick
+                                ? null
+                                : LeaveType.sick),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Seminar',
+                        icon: Icons.school_rounded,
+                        selected: _filterType == LeaveType.seminar,
+                        onTap: () => setState(() =>
+                            _filterType = _filterType == LeaveType.seminar
+                                ? null
+                                : LeaveType.seminar),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Lainnya',
+                        icon: Icons.event_note_rounded,
+                        selected: _filterType == LeaveType.school,
+                        onTap: () => setState(() =>
+                            _filterType = _filterType == LeaveType.school
+                                ? null
+                                : LeaveType.school),
+                      ),
                     ],
-                    onChanged: (v) => setState(() => _filterType = v),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: DropdownButtonFormField<RequestStatus?>(
-                    value: _filterStatus,
-                    decoration: const InputDecoration(
-                      labelText: 'Status',
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      isDense: true,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: null,                    child: Text('Semua Status')),
-                      DropdownMenuItem(value: RequestStatus.pending,   child: Text('Menunggu')),
-                      DropdownMenuItem(value: RequestStatus.approved,  child: Text('Disetujui')),
-                      DropdownMenuItem(value: RequestStatus.rejected,  child: Text('Ditolak')),
-                    ],
-                    onChanged: (v) => setState(() => _filterStatus = v),
-                  ),
-                ),
-                if (_filterType != null || _filterStatus != null) ...[
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.clear_rounded,
-                        color: AppColors.danger, size: 20),
-                    onPressed: () =>
-                        setState(() { _filterType = null; _filterStatus = null; }),
-                    tooltip: 'Reset filter',
-                  ),
-                ],
+                const SizedBox(height: 12),
               ],
             ),
           ),
+
+          // ── Filter chips: Status ──────────────────────────
+          Container(
+            color: AppColors.white,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Status',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate700)),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _FilterChip(
+                        label: 'Semua',
+                        selected: _filterStatus == null,
+                        onTap: () =>
+                            setState(() => _filterStatus = null),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Menunggu',
+                        color: AppColors.brandOrange,
+                        selected: _filterStatus == RequestStatus.pending,
+                        onTap: () => setState(() =>
+                            _filterStatus =
+                                _filterStatus == RequestStatus.pending
+                                    ? null
+                                    : RequestStatus.pending),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Disetujui',
+                        color: AppColors.brandLimeDark,
+                        selected: _filterStatus == RequestStatus.approved,
+                        onTap: () => setState(() =>
+                            _filterStatus =
+                                _filterStatus == RequestStatus.approved
+                                    ? null
+                                    : RequestStatus.approved),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Ditolak',
+                        color: AppColors.danger,
+                        selected: _filterStatus == RequestStatus.rejected,
+                        onTap: () => setState(() =>
+                            _filterStatus =
+                                _filterStatus == RequestStatus.rejected
+                                    ? null
+                                    : RequestStatus.rejected),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           Container(height: 1, color: AppColors.slate200),
 
           // ── Summary chips ─────────────────────────────────
@@ -113,13 +189,31 @@ class _AllSubordinateLeaveHistoryScreenState
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Row(
               children: [
-                _SummaryChip(label: 'Total',     count: _filtered.length,                                                                    color: AppColors.brandNavy),
+                _SummaryChip(
+                    label: 'Total',
+                    count: _filtered.length,
+                    color: AppColors.brandNavy),
                 const SizedBox(width: 8),
-                _SummaryChip(label: 'Disetujui', count: _filtered.where((r) => r.status == RequestStatus.approved).length, color: AppColors.brandLimeDark),
+                _SummaryChip(
+                    label: 'Disetujui',
+                    count: _filtered
+                        .where((r) => r.status == RequestStatus.approved)
+                        .length,
+                    color: AppColors.brandLimeDark),
                 const SizedBox(width: 8),
-                _SummaryChip(label: 'Menunggu',  count: _filtered.where((r) => r.status == RequestStatus.pending).length,  color: AppColors.warning),
+                _SummaryChip(
+                    label: 'Menunggu',
+                    count: _filtered
+                        .where((r) => r.status == RequestStatus.pending)
+                        .length,
+                    color: AppColors.brandOrange),
                 const SizedBox(width: 8),
-                _SummaryChip(label: 'Ditolak',   count: _filtered.where((r) => r.status == RequestStatus.rejected).length, color: AppColors.danger),
+                _SummaryChip(
+                    label: 'Ditolak',
+                    count: _filtered
+                        .where((r) => r.status == RequestStatus.rejected)
+                        .length,
+                    color: AppColors.danger),
               ],
             ),
           ),
@@ -151,6 +245,61 @@ class _AllSubordinateLeaveHistoryScreenState
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Filter Chip ───────────────────────────────────────────────
+class _FilterChip extends StatelessWidget {
+  final String    label;
+  final IconData? icon;
+  final Color     color;
+  final bool      selected;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.color = AppColors.brandNavy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? color.withOpacity(0.1) : AppColors.slate100,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : AppColors.slate200,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon,
+                  size: 13,
+                  color: selected ? color : AppColors.slate600),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? color : AppColors.slate600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -197,7 +346,7 @@ class _SubordinateRequestCard extends StatelessWidget {
     switch (request.status) {
       case RequestStatus.approved: return AppColors.brandLimeDark;
       case RequestStatus.rejected: return AppColors.danger;
-      case RequestStatus.pending:  return AppColors.warning;
+      case RequestStatus.pending:  return AppColors.brandOrange;
     }
   }
 
@@ -214,7 +363,7 @@ class _SubordinateRequestCard extends StatelessWidget {
       case LeaveType.annual:  return 'Cuti Tahunan';
       case LeaveType.sick:    return 'Izin Sakit';
       case LeaveType.seminar: return 'Izin Seminar';
-      case LeaveType.school:  return 'Izin Sekolah';
+      case LeaveType.school:  return 'Izin Lainnya';
       default:                return 'Izin Lainnya';
     }
   }
@@ -224,7 +373,6 @@ class _SubordinateRequestCard extends StatelessWidget {
       case LeaveType.annual:  return Icons.beach_access_rounded;
       case LeaveType.sick:    return Icons.local_hospital_rounded;
       case LeaveType.seminar: return Icons.school_rounded;
-      case LeaveType.school:  return Icons.menu_book_rounded;
       default:                return Icons.event_note_rounded;
     }
   }
@@ -245,7 +393,6 @@ class _SubordinateRequestCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            // Left icon
             Container(
               width: 44, height: 44,
               decoration: BoxDecoration(
@@ -259,7 +406,6 @@ class _SubordinateRequestCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Type label + status badge
                   Row(
                     children: [
                       Text(_typeLabel,
@@ -272,11 +418,9 @@ class _SubordinateRequestCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 3),
-                  // Employee name
                   if (request.employeeName != null)
                     Row(
                       children: [
-                        // Mini avatar
                         Container(
                           width: 18, height: 18,
                           decoration: BoxDecoration(
@@ -345,11 +489,11 @@ class _SubordinateRequestCard extends StatelessWidget {
           children: [
             Center(
               child: Container(
-                width: 36, height: 4,
-                decoration: BoxDecoration(
-                    color: AppColors.slate300,
-                    borderRadius: BorderRadius.circular(2)),
-              ),
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.slate300,
+                      borderRadius: BorderRadius.circular(2))),
             ),
             const SizedBox(height: 16),
             Row(
@@ -363,7 +507,7 @@ class _SubordinateRequestCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             if (request.employeeName != null) ...[
-              _Row('Karyawan',  request.employeeName!),
+              _Row('Karyawan', request.employeeName!),
               const AppDivider(),
             ],
             _Row('Jenis Pengajuan', _typeLabel),
@@ -374,7 +518,7 @@ class _SubordinateRequestCard extends StatelessWidget {
             const AppDivider(),
             _Row('Durasi', '${request.dayCount} hari'),
             const AppDivider(),
-            _Row('Alasan',  request.reason ?? '-'),
+            _Row('Alasan', request.reason ?? '-'),
             const AppDivider(),
             _Row('Diajukan',
                 DateFormat('dd MMM yyyy, HH:mm').format(request.submittedAt)),

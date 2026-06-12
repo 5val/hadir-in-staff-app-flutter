@@ -18,6 +18,7 @@ class AppColors {
   static const Color brandLime      = Color(0xFF9CCC65);
   static const Color brandLimeLight = Color(0xFFC5E1A5);
   static const Color brandLimeDark  = Color(0xFF7CB342);
+  static const Color brandOrange  = Color(0xFFE07A10);
 
   // ── Semantic convenience aliases ─────────────────────────
   static const Color primary   = brandNavy;

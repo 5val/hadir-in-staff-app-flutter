@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math';
 import 'package:hadirin_staff_app/screens/account_tab.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +16,8 @@ import 'notification_screen.dart';
 import 'history_screen.dart';
 import 'login_screen.dart';
 import 'main_screen.dart';
+import 'all_attendance_history_screen.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onNavigateToAccount;
@@ -52,6 +56,7 @@ class _HomeTabState extends State<HomeTab> {
   bool _locationOn      = false;
   bool _fakeLocation    = false;
   bool _checkingLoc     = false;
+  bool _locationInRange  = false;
 
   Timer? _clockTimer, _workTimer;
 
@@ -135,10 +140,16 @@ class _HomeTabState extends State<HomeTab> {
       _locationChecked = true;
       _locationOn      = true;
       _fakeLocation    = false;
+      _locationInRange  = Random().nextBool(); // Simulasi random lokasi
     });
   }
 
   // ── Camera navigation ─────────────────────────────────────────
+  // ── Check-in detail state ──────────────────────────────────────
+  String?   _checkInPhotoPath;
+  String?   _checkInLocation;
+  DateTime? _checkInDisplayTime;
+
   Future<void> _openCameraForCheckIn() async {
     final result = await Navigator.push<CameraResult>(
       context,
@@ -150,6 +161,11 @@ class _HomeTabState extends State<HomeTab> {
     );
     if (!mounted || result == null || !result.confirmed) return;
     _att.doCheckIn();
+    setState(() {
+      _checkInPhotoPath   = result.imagePath;
+      _checkInLocation    = result.address ?? _officeAddress;
+      _checkInDisplayTime = DateTime.now();
+    });
     _showSnackbar('Check-in berhasil! Selamat bekerja 💪');
   }
 
@@ -260,13 +276,118 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
+  // ── SOS Call ──────────────────────────────────────────────────
+  void _showSosDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.danger.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.sos_rounded,
+                  color: AppColors.danger, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text('Hubungi Atasan',
+                style: GoogleFonts.inter(
+                    fontSize: 16, fontWeight: FontWeight.w800,
+                    color: AppColors.slate900)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Kamu akan menghubungi atasan langsung untuk situasi darurat atau mendesak.',
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600, height: 1.4)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.slate50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.slate200),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38, height: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.brandNavy.withOpacity(0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.person_rounded,
+                        color: AppColors.brandNavy, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Budi Santoso',
+                          style: GoogleFonts.inter(
+                              fontSize: 13, fontWeight: FontWeight.w700,
+                              color: AppColors.slate900)),
+                      Text('Supervisor · +62 812-3456-7890',
+                          style: GoogleFonts.inter(
+                              fontSize: 11, color: AppColors.slate700)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal',
+                style: GoogleFonts.inter(color: AppColors.slate700)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.call_rounded, size: 16),
+            label: Text('Hubungi Sekarang',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            onPressed: () {
+              Navigator.pop(context);
+              _showSnackbar('📞 Menghubungi atasan...', color: AppColors.danger);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final bool isCheckedOut = _status == AttendanceProviderStatus.checkedOut;
     return Stack(
       children: [
         Scaffold(
           backgroundColor: AppColors.slate50,
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: _showSosDialog,
+            backgroundColor: AppColors.danger,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.phone, size: 22),
+            label: Text('SOS',
+                style: GoogleFonts.inter(
+                    fontSize: 13, fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5)),
+            elevation: 4,
+          ),
           body: SafeArea(
             child: Column(
               children: [
@@ -288,10 +409,18 @@ class _HomeTabState extends State<HomeTab> {
                           const SizedBox(height: 8),
                         ],
                         _buildAttendanceSection(),
-                        const SizedBox(height: 14),
-                        if (_isWorkDay) _buildTimeline(),
-                        const SizedBox(height: 14),
-                        _buildAttendanceHistory(),
+                        if (_checkInDisplayTime != null &&
+                            _status != AttendanceProviderStatus.notCheckedIn) ...[
+                          const SizedBox(height: 14),
+                          _buildCheckInDetailCard(),
+                        ],
+                        // Timeline hanya tampil jika belum checkout
+                        if (_isWorkDay && !isCheckedOut) ...[
+                          const SizedBox(height: 14),
+                          _buildTimeline(),
+                        ],
+                        // const SizedBox(height: 14),
+                        // _buildAttendanceHistoryPreview(),
                       ],
                     ),
                   ),
@@ -312,6 +441,146 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
+  // ── Check-In Detail Card ───────────────────────────────────────
+  Widget _buildCheckInDetailCard() {
+    final time = _checkInDisplayTime;
+    if (time == null) return const SizedBox.shrink();
+    final timeStr = '${time.hour.toString().padLeft(2,'0')}:${time.minute.toString().padLeft(2,'0')}';
+    final dateStr = DateFormat('EEEE, d MMMM yyyy', 'id_ID').format(time);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.brandLime.withOpacity(0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brandLime.withOpacity(0.15),
+            blurRadius: 8, offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28, height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.brandLime.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded,
+                    color: AppColors.brandLimeDark, size: 16),
+              ),
+              const SizedBox(width: 8),
+              Text('DETAIL CHECK-IN',
+                  style: GoogleFonts.inter(
+                      fontSize: 10, fontWeight: FontWeight.w800,
+                      color: AppColors.brandLimeDark, letterSpacing: 1.0)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Foto preview
+              Container(
+                width: 72, height: 72,
+                decoration: BoxDecoration(
+                  color: AppColors.slate100,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.slate200),
+                ),
+                child: _checkInPhotoPath != null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: kIsWeb
+                            ? Image.network(
+                                _checkInPhotoPath!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.person_rounded,
+                                    color: AppColors.slate400, size: 32),
+                              )
+                            : Image.file(
+                                File(_checkInPhotoPath!),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Icon(
+                                    Icons.person_rounded,
+                                    color: AppColors.slate400, size: 32),
+                              ),
+                      )
+                    : const Icon(Icons.person_rounded,
+                        color: AppColors.slate400, size: 32),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Waktu
+                    Row(
+                      children: [
+                        const Icon(Icons.access_time_rounded,
+                            size: 13, color: AppColors.slate400),
+                        const SizedBox(width: 5),
+                        Text('$timeStr · $dateStr',
+                            style: GoogleFonts.inter(
+                                fontSize: 11, fontWeight: FontWeight.w600,
+                                color: AppColors.slate700)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // Lokasi
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.location_on_rounded,
+                            size: 13, color: AppColors.slate400),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(_officeName,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 11, fontWeight: FontWeight.w700,
+                                      color: AppColors.slate800)),
+                              Text(_checkInLocation ?? _officeAddress,
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10, color: AppColors.slate700),
+                                  overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // Status badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.brandLime.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('✓  TERVERIFIKASI',
+                          style: GoogleFonts.inter(
+                              fontSize: 9, fontWeight: FontWeight.w800,
+                              color: AppColors.brandLimeDark, letterSpacing: 0.5)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── AppBar ─────────────────────────────────────────────────────
   Widget _buildAppBar() {
     return Container(
@@ -319,41 +588,24 @@ class _HomeTabState extends State<HomeTab> {
       padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
       child: Row(
         children: [
-          GestureDetector(
-            onTap: widget.onNavigateToAccount,
-            child: Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.brandNavyDark, shape: BoxShape.circle,
-                border: Border.all(
-                    color: AppColors.brandNavyDark.withOpacity(0.2), width: 2),
-              ),
-              child: Center(
-                child: Text(
-                  user.name.split(' ').map((w) => w[0]).take(2).join(),
-                  style: GoogleFonts.inter(
-                      color: Colors.white, fontSize: 13,
-                      fontWeight: FontWeight.w700),
-                ),
-              ),
-            ),
+          Image.asset(
+            AppAssets.logoIcon,
+            height: 28,
+            // color: Colors.white,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Hadir-In',
-                    style: GoogleFonts.inter(
-                        fontSize: 15, fontWeight: FontWeight.w800,
-                        color: AppColors.white)),
-                Text(user.name.toUpperCase(),
-                    style: GoogleFonts.inter(
-                        fontSize: 9, fontWeight: FontWeight.w600,
-                        color: AppColors.slate200, letterSpacing: 0.8)),
-              ],
-            ),
-          ),
+          const SizedBox(width: 8),
+          Text('Hadir-In',
+              style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.white)),
+          const Spacer(),
+          IconButton(
+                icon: const Icon(Icons.history_outlined,
+                    color: AppColors.white, size: 22),
+                onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const AttendanceHistoryFullScreen())),
+              ),
           Stack(
             children: [
               IconButton(
@@ -534,15 +786,22 @@ class _HomeTabState extends State<HomeTab> {
                   children: [
                     Container(
                       width: 7, height: 7,
-                      decoration: const BoxDecoration(
-                          color: AppColors.brandLimeDark,
+                      decoration: BoxDecoration(
+                          color: _locationInRange
+                              ? AppColors.brandLimeDark
+                              : AppColors.danger,
                           shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 5),
-                    Text('TERVERIFIKASI · DALAM AREA',
+                    Text(
+                        _locationInRange
+                            ? 'TERVERIFIKASI · DALAM AREA'
+                            : 'DI LUAR JANGKAUAN AREA',
                         style: GoogleFonts.inter(
                             fontSize: 9, fontWeight: FontWeight.w700,
-                            color: AppColors.brandLimeDark,
+                            color: _locationInRange
+                                ? AppColors.brandLimeDark
+                                : AppColors.danger,
                             letterSpacing: 0.5)),
                   ],
                 ),
@@ -651,7 +910,10 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Attendance Section ────────────────────────────────────────
   Widget _buildAttendanceSection() {
-    final canGpsAction = _locationOn && !_fakeLocation && _locationChecked;
+    final canGpsAction = _locationOn &&
+        !_fakeLocation &&
+        _locationChecked &&
+        _locationInRange;
 
     switch (_status) {
       // ── Belum check-in ────────────────────────────────────────
@@ -683,6 +945,7 @@ class _HomeTabState extends State<HomeTab> {
       // ── Sudah check-in ────────────────────────────────────────
       case AttendanceProviderStatus.checkedIn:
         final checkoutActive = _canCheckout && canGpsAction;
+        // final checkoutActive = true;
         final breakActive    = _canStartBreak;
 
         return Column(
@@ -836,7 +1099,7 @@ class _HomeTabState extends State<HomeTab> {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: breakActive ? AppColors.slate100 : AppColors.slate50,
+            color: breakActive ? AppColors.brandLimeDark : AppColors.slate50,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: breakActive ? AppColors.slate200 : AppColors.slate100,
@@ -850,8 +1113,8 @@ class _HomeTabState extends State<HomeTab> {
                   Icon(
                     Icons.free_breakfast_rounded,
                     color: breakActive
-                        ? AppColors.slate600
-                        : AppColors.slate300,
+                        ? AppColors.slate50
+                        : AppColors.slate700,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -860,13 +1123,13 @@ class _HomeTabState extends State<HomeTab> {
                     style: GoogleFonts.inter(
                         fontSize: 14, fontWeight: FontWeight.w600,
                         color: breakActive
-                            ? AppColors.slate700
-                            : AppColors.slate300),
+                            ? AppColors.slate50
+                            : AppColors.slate700),
                   ),
                   if (!breakActive) ...[
                     const SizedBox(width: 6),
                     Icon(Icons.lock_rounded,
-                        size: 12, color: AppColors.slate300),
+                        size: 12, color: AppColors.slate50),
                   ],
                 ],
               ),
@@ -876,8 +1139,8 @@ class _HomeTabState extends State<HomeTab> {
                 style: GoogleFonts.inter(
                     fontSize: 10,
                     color: breakActive
-                        ? AppColors.slate400
-                        : AppColors.slate300),
+                        ? AppColors.slate50
+                        : AppColors.slate400),
               ),
             ],
           ),
@@ -888,7 +1151,10 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Check-in Blocked (setelah jam 12) ─────────────────────────
   Widget _buildCheckinBlockedAfterNoon() {
-    final canGpsAction = _locationOn && !_fakeLocation && _locationChecked;
+    final canGpsAction = _locationOn &&
+        !_fakeLocation &&
+        _locationChecked &&
+        _locationInRange;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(8),
@@ -906,7 +1172,7 @@ class _HomeTabState extends State<HomeTab> {
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.block_rounded,
-                color: AppColors.slate400, size: 40),
+                color: AppColors.slate400, size: 20),
           ),
           const SizedBox(height: 6),
           Text('Check-In Tidak Tersedia',
@@ -915,47 +1181,13 @@ class _HomeTabState extends State<HomeTab> {
                   color: AppColors.slate700)),
           const SizedBox(height: 6),
           Text(
-            'Sudah lewat pukul 12:00 siang.\nCheck-in hanya bisa dilakukan sebelum tengah hari.',
+            'Sudah lewat pukul 12:00 siang',
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
                 fontSize: 13, color: AppColors.slate700,
                 height: 1.5),
           ),
-          const SizedBox(height: 6),
-          // ── Arahkan ke checkout jika belum checkin tapi sudah lewat jam 12 ──
-          // Tunjukkan info bahwa seharusnya mereka melakukan checkout
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.brandNavy.withOpacity(0.07),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppColors.brandNavy.withOpacity(0.2)),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.info_outline_rounded,
-                        size: 16, color: AppColors.brandNavy),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Sudah ada di kantor?',
-                      style: GoogleFonts.inter(
-                          fontSize: 13, fontWeight: FontWeight.w700,
-                          color: AppColors.brandNavy),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Jika kamu sudah hadir sebelumnya, langsung lakukan check-out untuk merekam kepulangan.',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(
-                      fontSize: 11, color: AppColors.slate600, height: 1.4),
-                ),
-                const SizedBox(height: 12),
+          const SizedBox(height: 12),
                 GestureDetector(
                   onTap: canGpsAction ? _openCameraForCheckOut : null,
                   child: Container(
@@ -988,24 +1220,59 @@ class _HomeTabState extends State<HomeTab> {
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.textSecondary.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.textSecondary.withOpacity(0.3)),
-            ),
-            child: Text(
-              'Hubungi HRD jika ada kendala',
-              style: GoogleFonts.inter(
-                  fontSize: 12, fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary),
-            ),
-          ),
+          // const SizedBox(height: 6),
+          // ── Arahkan ke checkout jika belum checkin tapi sudah lewat jam 12 ──
+          // Tunjukkan info bahwa seharusnya mereka melakukan checkout
+          // Container(
+          //   width: double.infinity,
+          //   padding: const EdgeInsets.all(14),
+          //   decoration: BoxDecoration(
+          //     color: AppColors.brandNavy.withOpacity(0.07),
+          //     borderRadius: BorderRadius.circular(14),
+          //     border: Border.all(color: AppColors.brandNavy.withOpacity(0.2)),
+          //   ),
+          //   child: Column(
+          //     children: [
+          //       Row(
+          //         mainAxisAlignment: MainAxisAlignment.center,
+          //         children: [
+          //           const Icon(Icons.info_outline_rounded,
+          //               size: 16, color: AppColors.brandNavy),
+          //           const SizedBox(width: 6),
+          //           Text(
+          //             'Sudah ada di kantor?',
+          //             style: GoogleFonts.inter(
+          //                 fontSize: 13, fontWeight: FontWeight.w700,
+          //                 color: AppColors.brandNavy),
+          //           ),
+          //         ],
+          //       ),
+          //       const SizedBox(height: 6),
+          //       Text(
+          //         'Jika kamu sudah hadir sebelumnya, langsung lakukan check-out untuk merekam kepulangan.',
+          //         textAlign: TextAlign.center,
+          //         style: GoogleFonts.inter(
+          //             fontSize: 11, color: AppColors.slate600, height: 1.4),
+          //       ),
+                
+          //     ],
+          //   ),
+          // ),
+          // const SizedBox(height: 12),
+          // Container(
+          //   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          //   decoration: BoxDecoration(
+          //     color: AppColors.textSecondary.withOpacity(0.12),
+          //     borderRadius: BorderRadius.circular(20),
+          //     border: Border.all(color: AppColors.textSecondary.withOpacity(0.3)),
+          //   ),
+          //   child: Text(
+          //     'Hubungi HRD jika ada kendala',
+          //     style: GoogleFonts.inter(
+          //         fontSize: 12, fontWeight: FontWeight.w600,
+          //         color: AppColors.textSecondary),
+          //   ),
+          // ),
         ],
       ),
     );
@@ -1118,24 +1385,24 @@ class _HomeTabState extends State<HomeTab> {
                   ? AppColors.brandLime.withOpacity(0.15) : AppColors.slate100,
             ),
             // ── Check-Out ─────────────────────────────────
-            _TimelineGridCard(
-              icon: Icons.logout_rounded,
-              iconColor: _status == AttendanceProviderStatus.checkedOut
-                  ? AppColors.brandNavy : AppColors.slate400,
-              iconBg: _status == AttendanceProviderStatus.checkedOut
-                  ? AppColors.brandNavy.withOpacity(0.1) : AppColors.slate100,
-              label: 'Check-Out',
-              value: _att.checkOutTime != null
-                  ? _fmtHM24(_att.checkOutTime!) : '--:--',
-              sub: _status == AttendanceProviderStatus.checkedOut
-                  ? 'Selesai hari ini' : 'Terjadwal: ${user.currentShift.endTimeStr}',
-              badge: _status == AttendanceProviderStatus.checkedOut
-                  ? 'SELESAI' : 'TERJADWAL',
-              badgeColor: _status == AttendanceProviderStatus.checkedOut
-                  ? AppColors.brandNavy : AppColors.slate400,
-              badgeBg: _status == AttendanceProviderStatus.checkedOut
-                  ? AppColors.brandNavy.withOpacity(0.1) : AppColors.slate100,
-            ),
+            // _TimelineGridCard(
+            //   icon: Icons.logout_rounded,
+            //   iconColor: _status == AttendanceProviderStatus.checkedOut
+            //       ? AppColors.brandNavy : AppColors.slate400,
+            //   iconBg: _status == AttendanceProviderStatus.checkedOut
+            //       ? AppColors.brandNavy.withOpacity(0.1) : AppColors.slate100,
+            //   label: 'Check-Out',
+            //   value: _att.checkOutTime != null
+            //       ? _fmtHM24(_att.checkOutTime!) : '--:--',
+            //   sub: _status == AttendanceProviderStatus.checkedOut
+            //       ? 'Selesai hari ini' : 'Terjadwal: ${user.currentShift.endTimeStr}',
+            //   badge: _status == AttendanceProviderStatus.checkedOut
+            //       ? 'SELESAI' : 'TERJADWAL',
+            //   badgeColor: _status == AttendanceProviderStatus.checkedOut
+            //       ? AppColors.brandNavy : AppColors.slate400,
+            //   badgeBg: _status == AttendanceProviderStatus.checkedOut
+            //       ? AppColors.brandNavy.withOpacity(0.1) : AppColors.slate100,
+            // ),
             // ── Istirahat ─────────────────────────────────
             _TimelineGridCard(
               icon: Icons.free_breakfast_rounded,
@@ -1186,9 +1453,9 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  // ── Attendance History ────────────────────────────────────────
-  Widget _buildAttendanceHistory() {
-    final history = SampleData.recentAttendance.take(5).toList();
+  // ── Attendance History Preview (home - navigate to full page) ─
+  Widget _buildAttendanceHistoryPreview() {
+    final history = SampleData.recentAttendance.take(3).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1199,7 +1466,7 @@ class _HomeTabState extends State<HomeTab> {
                 style: AppText.headline3.copyWith(color: AppColors.slate900)),
             TextButton(
               onPressed: () => Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => const HistoryScreen())),
+                  MaterialPageRoute(builder: (_) => const AttendanceHistoryFullScreen())),
               child: Text('Lihat Semua',
                   style: GoogleFonts.inter(
                       fontSize: 11, fontWeight: FontWeight.w700,
@@ -1209,158 +1476,175 @@ class _HomeTabState extends State<HomeTab> {
         ),
         const SizedBox(height: 8),
         Column(
-          children: history.map((rec) {
-            final isLate = rec.checkIn != null &&
-                rec.checkIn!.hour > user.currentShift.startTime.hour;
-            final absent = rec.checkIn == null;
+          children: history.map((rec) { // Keep the existing logic for the preview
+              final isHoliday = rec.status == AttendanceStatus.holiday;
+              final isLate = !isHoliday && rec.checkIn != null &&
+                  rec.checkIn!.hour > user.currentShift.startTime.hour; // Only late if not holiday
+              final absent = !isHoliday && rec.checkIn == null; // Only absent if not holiday
 
-            // Hitung total jam kerja
-            String totalWork = '--:--';
-            if (rec.checkIn != null && rec.checkOut != null) {
-              final dur = rec.checkOut!.difference(rec.checkIn!);
-              totalWork = '${dur.inHours.toString().padLeft(2,'0')}:${(dur.inMinutes % 60).toString().padLeft(2,'0')}';
-            }
+              Color statusColor;
+              Color statusBg;
+              String statusLabel;
 
-            final statusColor = absent
-                ? AppColors.danger
-                : (isLate ? AppColors.warning : AppColors.brandLimeDark);
-            final statusBg = absent
-                ? AppColors.danger.withOpacity(0.08)
-                : (isLate
-                    ? AppColors.warning.withOpacity(0.08)
-                    : AppColors.brandLime.withOpacity(0.15));
-            final statusLabel = absent ? 'ABSEN' : (isLate ? 'TERLAMBAT' : 'TEPAT WAKTU');
+              if (isHoliday) {
+                statusColor = AppColors.brandNavy;
+                statusBg = AppColors.brandNavy.withOpacity(0.08);
+                statusLabel = 'LIBUR';
+              } else if (absent) {
+                statusColor = AppColors.danger;
+                statusBg = AppColors.danger.withOpacity(0.08);
+                statusLabel = 'ABSEN';
+              } else if (isLate) {
+                statusColor = AppColors.warning;
+                statusBg = AppColors.warning.withOpacity(0.08);
+                statusLabel = 'TERLAMBAT';
+              } else {
+                statusColor = AppColors.brandLimeDark;
+                statusBg = AppColors.brandLime.withOpacity(0.15);
+                statusLabel = 'TEPAT WAKTU';
+              }
 
-            // Tanggal
-            final day = DateFormat('d', 'id_ID').format(rec.date);
-            final dayName = DateFormat('EEE', 'id_ID').format(rec.date).toUpperCase();
-            final monthYear = DateFormat('MMM', 'id_ID').format(rec.date);
+              // If it's a holiday, check-in/out times are not relevant
+              final checkInTime = isHoliday ? '--:--' : (rec.checkIn != null ? _fmtHM24(rec.checkIn!) : '--:--');
+              final checkOutTime = isHoliday ? '--:--' : (rec.checkOut != null ? _fmtHM24(rec.checkOut!) : '--:--');
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.slate100),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.slate200.withOpacity(0.5),
-                    blurRadius: 4, offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Row(
-                  children: [
-                    // ── Tanggal kotak ─────────────────────────
-                    Container(
-                      width: 48, height: 52,
-                      decoration: BoxDecoration(
-                        color: absent
-                            ? AppColors.danger.withOpacity(0.08)
-                            : AppColors.brandNavy,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                           Text(dayName,
-                              style: GoogleFonts.inter(
-                                  fontSize: 8, fontWeight: FontWeight.w700,
-                                  color: absent
-                                      ? AppColors.danger.withOpacity(0.6)
-                                      : Colors.white.withOpacity(0.7),
-                                  letterSpacing: 0.5)),
-                          Text(day,
-                              style: GoogleFonts.inter(
-                                  fontSize: 20, fontWeight: FontWeight.w800,
-                                  color: absent ? AppColors.danger : Colors.white,
-                                  height: 1.0)),
-                          Text(monthYear,
-                              style: GoogleFonts.inter(
-                                  fontSize: 8,
-                                  color: absent
-                                      ? AppColors.danger.withOpacity(0.5)
-                                      : Colors.white.withOpacity(0.55))),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // ── Info waktu ────────────────────────────
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Baris 1: Check-In / Check-Out / Total
-                          if (!absent) ...[
-                            Row(
-                              children: [
-                                _HistoryTimeCol(
-                                  label: 'Check In',
-                                  value: rec.checkIn != null
-                                      ? _fmtHM24(rec.checkIn!) : '--:--',
-                                ),
-                                const SizedBox(width: 14),
-                                _HistoryTimeCol(
-                                  label: 'Check Out',
-                                  value: rec.checkOut != null
-                                      ? _fmtHM24(rec.checkOut!) : '--:--',
-                                ),
-                                const SizedBox(width: 14),
-                                _HistoryTimeCol(
-                                  label: 'Total Jam',
-                                  value: totalWork,
-                                  highlight: true,
-                                ),
-                              ],
-                            ),
-                          ] else ...[
-                            Text('Tidak Hadir',
-                                style: GoogleFonts.inter(
-                                    fontSize: 14, fontWeight: FontWeight.w700,
-                                    color: AppColors.danger)),
-                          ],
-                          const SizedBox(height: 6),
-                          // Baris 2: Lokasi
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded,
-                                  size: 11, color: AppColors.slate400),
-                              const SizedBox(width: 3),
-                              Expanded(
-                                child: Text(
-                                  'Office, West Jakarta, Indonesia',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 10, color: AppColors.slate400),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // ── Status badge ──────────────────────────
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: statusBg,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(statusLabel,
-                          style: GoogleFonts.inter(
-                              fontSize: 8, fontWeight: FontWeight.w800,
-                              color: statusColor, letterSpacing: 0.3)),
+
+              // Hitung total jam kerja
+              String totalWork = '--:--';
+              if (rec.checkIn != null && rec.checkOut != null) {
+                final dur = rec.checkOut!.difference(rec.checkIn!);
+                totalWork = '${dur.inHours.toString().padLeft(2,'0')}:${(dur.inMinutes % 60).toString().padLeft(2,'0')}';
+              }
+
+              // Tanggal
+              final day = DateFormat('d', 'id_ID').format(rec.date);
+              final dayName = DateFormat('EEE', 'id_ID').format(rec.date).toUpperCase();
+              final monthYear = DateFormat('MMM', 'id_ID').format(rec.date);
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.slate100),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.slate200.withOpacity(0.5),
+                      blurRadius: 4, offset: const Offset(0, 1),
                     ),
                   ],
                 ),
-              ),
-            );
-          }).toList(),
-        ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Row(
+                    children: [
+                      // ── Tanggal kotak ─────────────────────────
+                      Container(
+                        width: 48, height: 52,
+                        decoration: BoxDecoration( // Use the new status colors
+                          color: isHoliday
+                              ? AppColors.brandNavy.withOpacity(0.08)
+                              : (absent ? AppColors.danger.withOpacity(0.08) : AppColors.brandNavy),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(dayName,
+                                style: GoogleFonts.inter(
+                                    fontSize: 8, fontWeight: FontWeight.w700,
+                                    color: isHoliday
+                                        ? AppColors.brandNavy.withOpacity(0.6)
+                                        : (absent ? AppColors.danger.withOpacity(0.6) : Colors.white.withOpacity(0.7)),
+                                    letterSpacing: 0.5)),
+                            Text(day,
+                                style: GoogleFonts.inter(
+                                    fontSize: 20, fontWeight: FontWeight.w800,
+                                    color: isHoliday ? AppColors.brandNavy : (absent ? AppColors.danger : Colors.white),
+                                    height: 1.0)),
+                            Text(monthYear,
+                                style: GoogleFonts.inter(
+                                    fontSize: 8,
+                                    color: isHoliday
+                                        ? AppColors.brandNavy.withOpacity(0.5)
+                                        : (absent ? AppColors.danger.withOpacity(0.5) : Colors.white.withOpacity(0.55)))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // ── Info waktu ────────────────────────────
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [ // Adjust content based on holiday status
+                            if (!isHoliday && !absent) ...[
+                              Row(
+                                children: [
+                                  _HistoryTimeCol(
+                                    label: 'Check In',
+                                    value: checkInTime,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  _HistoryTimeCol(
+                                    label: 'Check Out',
+                                    value: checkOutTime,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  _HistoryTimeCol(
+                                    label: 'Total Jam',
+                                    value: totalWork,
+                                    highlight: true,
+                                  ),
+                                ],
+                              ),
+                            ] else if (isHoliday) ...[
+                              Text('Hari Libur', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.brandNavy)),
+                            ] else if (absent) ...[
+                              Text('Tidak Hadir',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 14, fontWeight: FontWeight.w700, // This is for absent
+                                      color: AppColors.danger)),
+                            ],
+                            const SizedBox(height: 6),
+                            // Baris 2: Lokasi
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_rounded,
+                                    size: 11, color: AppColors.slate400),
+                                const SizedBox(width: 3),
+                                Expanded(
+                                  child: Text( // Adjust location text for holiday
+                                    isHoliday ? 'Tidak ada aktivitas' : 'Office, West Jakarta, Indonesia',
+                                    style: GoogleFonts.inter(
+                                        fontSize: 10, color: AppColors.slate400),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // ── Status badge ──────────────────────────
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: statusBg,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(statusLabel,
+                            style: GoogleFonts.inter(
+                                fontSize: 8, fontWeight: FontWeight.w800,
+                                color: statusColor, letterSpacing: 0.3)),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
       ],
     );
   }
@@ -1469,4 +1753,297 @@ class _ProfileQuickView extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       const Scaffold(body: Center(child: Text('Profile')));
+}
+
+// ── Full Attendance History Screen ────────────────────────────────
+class AttendanceHistoryFullScreen extends StatefulWidget {
+  const AttendanceHistoryFullScreen({super.key});
+  @override
+  State<AttendanceHistoryFullScreen> createState() =>
+      _AttendanceHistoryFullScreenState();
+}
+
+class _AttendanceHistoryFullScreenState
+    extends State<AttendanceHistoryFullScreen> {
+  final _user = SampleData.currentUser;
+
+  // Batas 3 bulan terakhir
+  late final DateTime _cutoff;
+  late final List<_HistoryDay> _days;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _cutoff = DateTime(now.year, now.month - 2, 1); // 3 bulan terakhir
+    _days = _buildDayList(now);
+  }
+
+  List<_HistoryDay> _buildDayList(DateTime now) {
+    final List<_HistoryDay> result = [];
+    // Dari hari ini mundur ke cutoff
+    DateTime cursor = DateTime(now.year, now.month, now.day);
+    while (!cursor.isBefore(_cutoff)) {
+      final weekday = cursor.weekday; // 6=Sat, 7=Sun
+      final isWeekend = weekday == DateTime.saturday || weekday == DateTime.sunday;
+
+      if (isWeekend) {
+        result.add(_HistoryDay(date: cursor, isWeekend: true, record: null));
+      } else {
+        // Cari record dari SampleData
+        final rec = SampleData.recentAttendance.cast<AttendanceRecord?>()
+            .firstWhere(
+              (r) => r != null &&
+                  r.date.year == cursor.year &&
+                  r.date.month == cursor.month &&
+                  r.date.day == cursor.day,
+              orElse: () => null,
+            );
+        result.add(_HistoryDay(date: cursor, isWeekend: false, record: rec));
+      }
+      cursor = cursor.subtract(const Duration(days: 1));
+    }
+    return result;
+  }
+
+  String _fmtHM24(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    // Group by month for section headers
+    final Map<String, List<_HistoryDay>> grouped = {};
+    for (final day in _days) {
+      final key = DateFormat('MMMM yyyy', 'id_ID').format(day.date);
+      grouped.putIfAbsent(key, () => []).add(day);
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.slate50,
+      appBar: AppBar(
+        backgroundColor: AppColors.brandNavy,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
+        title: Text('Riwayat Kehadiran',
+            style: GoogleFonts.inter(
+                fontSize: 17, fontWeight: FontWeight.w800,
+                color: Colors.white)),
+        // bottom: PreferredSize(
+        //   preferredSize: const Size.fromHeight(36),
+        //   child: Container(
+        //     color: AppColors.brandNavy,
+        //     padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        //     child: Row(
+        //       children: [
+        //         const Icon(Icons.history_rounded,
+        //             size: 13, color: Colors.white54),
+        //         const SizedBox(width: 5),
+        //         Text(
+        //           '3 bulan terakhir · ${DateFormat('d MMM', 'id_ID').format(_cutoff)} – sekarang',
+        //           style: GoogleFonts.inter(
+        //               fontSize: 11, color: Colors.white60),
+        //         ),
+        //       ],
+        //     ),
+        //   ),
+        // ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        children: grouped.entries.map((entry) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Month header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                child: Text(
+                  entry.key.toUpperCase(),
+                  style: GoogleFonts.inter(
+                      fontSize: 10, fontWeight: FontWeight.w800,
+                      color: AppColors.brandNavy, letterSpacing: 1.2),
+                ),
+              ),
+              ...entry.value.map((day) => _buildDayTile(day)),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildDayTile(_HistoryDay day) {
+    final rec       = day.record;
+    final isWeekend = day.isWeekend;
+    final isHoliday = rec?.status == AttendanceStatus.holiday;
+    final isLibur   = isWeekend || isHoliday;
+    final absent    = !isLibur && rec == null;
+    final isLate    = !isLibur && !absent && rec!.checkIn != null &&
+        rec.checkIn!.hour > _user.currentShift.startTime.hour;
+
+    // Status
+    final String statusLabel;
+    final Color  statusColor, statusBg;
+    if (isWeekend) {
+      statusLabel = 'LIBUR';
+      statusColor = AppColors.brandNavy;
+      statusBg    = AppColors.brandNavy.withOpacity(0.08);
+    } else if (isHoliday) {
+      statusLabel = 'LIBUR';
+      statusColor = AppColors.brandNavy;
+      statusBg    = AppColors.brandNavy.withOpacity(0.08);
+    } else if (absent) {
+      statusLabel = 'ABSEN';
+      statusColor = AppColors.danger;
+      statusBg    = AppColors.danger.withOpacity(0.08);
+    } else if (isLate) {
+      statusLabel = 'TERLAMBAT';
+      statusColor = AppColors.warning;
+      statusBg    = AppColors.warning.withOpacity(0.08);
+    } else {
+      statusLabel = 'TEPAT WAKTU';
+      statusColor = AppColors.brandLimeDark;
+      statusBg    = AppColors.brandLime.withOpacity(0.15);
+    }
+
+    final dayName  = DateFormat('EEE', 'id_ID').format(day.date).toUpperCase();
+    final dayNum   = DateFormat('d', 'id_ID').format(day.date);
+    final monthStr = DateFormat('MMM', 'id_ID').format(day.date);
+
+    final checkInStr  = rec?.checkIn  != null ? _fmtHM24(rec!.checkIn!)  : '--:--';
+    final checkOutStr = rec?.checkOut != null ? _fmtHM24(rec!.checkOut!) : '--:--';
+    String totalWork = '--:--';
+    if (rec?.checkIn != null && rec?.checkOut != null) {
+      final dur = rec!.checkOut!.difference(rec.checkIn!);
+      totalWork = '${dur.inHours.toString().padLeft(2,'0')}:${(dur.inMinutes % 60).toString().padLeft(2,'0')}';
+    }
+
+    final dateBoxColor = isLibur
+        ? AppColors.brandNavy.withOpacity(0.08)
+        : (absent ? AppColors.danger.withOpacity(0.08) : AppColors.brandNavy);
+    final dateTextColor = isLibur
+        ? AppColors.brandNavy
+        : (absent ? AppColors.danger : Colors.white);
+    final dateSubColor = isLibur
+        ? AppColors.brandNavy.withOpacity(0.5)
+        : (absent ? AppColors.danger.withOpacity(0.5) : Colors.white.withOpacity(0.55));
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slate100),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.slate200.withOpacity(0.5),
+            blurRadius: 4, offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            // Date box
+            Container(
+              width: 48, height: 52,
+              decoration: BoxDecoration(
+                color: dateBoxColor,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(dayName,
+                      style: GoogleFonts.inter(
+                          fontSize: 8, fontWeight: FontWeight.w700,
+                          color: dateSubColor.withOpacity(0.8),
+                          letterSpacing: 0.5)),
+                  Text(dayNum,
+                      style: GoogleFonts.inter(
+                          fontSize: 20, fontWeight: FontWeight.w800,
+                          color: dateTextColor, height: 1.0)),
+                  Text(monthStr,
+                      style: GoogleFonts.inter(
+                          fontSize: 8, color: dateSubColor)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Info
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isLibur) ...[
+                    Text(
+                      isWeekend ? (day.date.weekday == DateTime.saturday ? 'Sabtu' : 'Minggu') : 'Hari Libur',
+                      style: GoogleFonts.inter(
+                          fontSize: 13, fontWeight: FontWeight.w700,
+                          color: AppColors.brandNavy),
+                    ),
+                  ] else if (absent) ...[
+                    Text('Tidak Hadir',
+                        style: GoogleFonts.inter(
+                            fontSize: 13, fontWeight: FontWeight.w700,
+                            color: AppColors.danger)),
+                  ] else ...[
+                    Row(
+                      children: [
+                        _HistoryTimeCol(label: 'Check In',  value: checkInStr),
+                        const SizedBox(width: 14),
+                        _HistoryTimeCol(label: 'Check Out', value: checkOutStr),
+                        const SizedBox(width: 14),
+                        _HistoryTimeCol(label: 'Total Jam', value: totalWork, highlight: true),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_rounded,
+                          size: 11, color: AppColors.slate400),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          isLibur
+                              ? 'Tidak ada aktivitas'
+                              : (absent ? '-' : 'Kantor Pusat Hadir-In, Jakarta'),
+                          style: GoogleFonts.inter(
+                              fontSize: 10, color: AppColors.slate400),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Status badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: statusBg,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(statusLabel,
+                  style: GoogleFonts.inter(
+                      fontSize: 8, fontWeight: FontWeight.w800,
+                      color: statusColor, letterSpacing: 0.3)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryDay {
+  final DateTime       date;
+  final bool           isWeekend;
+  final AttendanceRecord? record;
+  const _HistoryDay({required this.date, required this.isWeekend, required this.record});
 }

@@ -27,8 +27,27 @@ class AppSession {
       );
     } catch (_) {}
   }
+  static void setUserByPhone(String phone) {
+    try {
+      final user = findUserByPhone(phone);
+      if (user != null) {
+        _currentUser = user;
+      }
+    } catch (_) {}
+  }
 
   static void clearUser() => _currentUser = null;
+
+  static void updateEmail(String newEmail) {
+    final current = currentUser;
+    final updated = current.copyWith(email: newEmail);
+    _currentUser = updated;
+    
+    final index = SampleData._users.indexWhere((u) => u.id == updated.id);
+    if (index != -1) {
+      SampleData._users[index] = updated;
+    }
+  }
 
   /// Returns UserProfile if credentials valid, else null.
   static UserProfile? validateLogin(String username, String password) {
@@ -39,6 +58,26 @@ class AppSession {
              u.username.toLowerCase() == username.toLowerCase()) &&
             u.password == password,
       );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static UserProfile? findUserByPhone(String phone) {
+    try {
+      final normalizedInput = phone.replaceAll(RegExp(r'\D'), '');
+      if (normalizedInput.isEmpty) return null;
+      return SampleData._users.firstWhere((u) {
+        final normalizedUser = u.phoneNumber.replaceAll(RegExp(r'\D'), '');
+        // Match exact or trailing suffix if length is sufficient (e.g. 0812... vs 62812...)
+        if (normalizedInput == normalizedUser) return true;
+        if (normalizedInput.length >= 9 && normalizedUser.length >= 9) {
+          final suffixInput = normalizedInput.substring(normalizedInput.length - 9);
+          final suffixUser = normalizedUser.substring(normalizedUser.length - 9);
+          return suffixInput == suffixUser;
+        }
+        return false;
+      });
     } catch (_) {
       return null;
     }
@@ -64,6 +103,7 @@ class PositionModel {
   final int dailyBonus;
   final int healthAllowance;
   final int transportAllowance;
+  final int salaryDisbursementDay;
 
   const PositionModel({
     required this.id,
@@ -82,6 +122,7 @@ class PositionModel {
     required this.dailyBonus,
     required this.healthAllowance,
     required this.transportAllowance,
+    required this.salaryDisbursementDay,
   });
 }
 
@@ -134,6 +175,7 @@ class UserProfile {
   final String positionId;
   final String divisionId;
   final String email;
+  final String phoneNumber;
   final UserRole role;
   final ShiftModel currentShift;
   final PositionModel position;
@@ -149,18 +191,19 @@ class UserProfile {
     required this.positionId,
     required this.divisionId,
     required this.email,
+    required this.phoneNumber,
     required this.role,
     required this.currentShift,
     required this.position,
     this.points = 0,
   });
 
-  UserProfile copyWith({int? points}) =>
+  UserProfile copyWith({int? points, String? email}) =>
       UserProfile(
         id: id, name: name, username: username, password: password,
         employeeId: employeeId, nik: nik,
         positionId: positionId, divisionId: divisionId,
-        email: email, role: role, currentShift: currentShift,
+        email: email ?? this.email, phoneNumber: phoneNumber, role: role, currentShift: currentShift,
         position: position, points: points ?? this.points,
       );
 }
@@ -259,6 +302,22 @@ class SalaryComponent {
   });
 }
 
+class LeaveRecord {
+  final String reason;
+  final DateTime startDate;
+  final DateTime endDate;
+  final int totalDays;
+  final String status; // 'Disetujui' | 'Ditolak' | 'Menunggu'
+
+  const LeaveRecord({
+    required this.reason,
+    required this.startDate,
+    required this.endDate,
+    required this.totalDays,
+    required this.status,
+  });
+}
+
 class SalarySlip {
   final String period;
   final DateTime periodStart;
@@ -268,6 +327,10 @@ class SalarySlip {
   final int presentDays;
   final int lateDays;
   final int overtimeHours;
+  final int? leaveDays;
+  final int? permissionDays;
+  final List<LeaveRecord>? leaveHistory;
+  final List<LeaveRecord>? permissionHistory;
 
   const SalarySlip({
     required this.period,
@@ -278,6 +341,10 @@ class SalarySlip {
     required this.presentDays,
     required this.lateDays,
     required this.overtimeHours,
+    required this.leaveDays,
+    required this.permissionDays,
+    required this.leaveHistory,
+    required this.permissionHistory,
   });
 
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
@@ -356,6 +423,7 @@ class SampleData {
     dailyBonus: 50000,
     healthAllowance: 200000,
     transportAllowance: 500000,
+    salaryDisbursementDay: 25,
   );
 
   static const PositionModel posITSupervisor = PositionModel(
@@ -375,6 +443,7 @@ class SampleData {
     dailyBonus: 75000,
     healthAllowance: 200000,
     transportAllowance: 500000,
+    salaryDisbursementDay: 25,
   );
 
   static const ShiftModel morningShift = ShiftModel(
@@ -412,13 +481,14 @@ class SampleData {
       positionId: 'P002',
       divisionId: 'D002',
       email: 'rina.kartika@hadirin.id',
+      phoneNumber: '081234567890',
       role: UserRole.supervisor,
       currentShift: morningShift,
       position: posITSupervisor,
       points: 420,
    ),
    const UserProfile(
-    id: 'U001',
+    id: 'U002',
     name: 'Ahmad Rizki',
     username: 'ahmad',
     password: '123456',
@@ -427,6 +497,7 @@ class SampleData {
     positionId: 'P001',
     divisionId: 'D001',
     email: 'ahmad.rizki@staffsync.id',
+    phoneNumber: '089876543210',
     role: UserRole.staff,
     currentShift: morningShift,
     position: posSalesExecutive,
@@ -569,55 +640,28 @@ class SampleData {
       presentDays: 23,
       lateDays: 0,
       overtimeHours: 2,
+      leaveDays: 0,
+      permissionDays: 0,
+      leaveHistory: [
+        LeaveRecord(
+          reason: 'Acara Keluarga',
+          startDate: DateTime(2024, 5, 10),
+          endDate: DateTime(2024, 5, 10),
+          totalDays: 1,
+          status: 'Ditolak', // Contoh pengajuan cuti yang ditolak
+        ),
+      ],
+      permissionHistory: const [],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '23 hari × Rp 30.000',
-          amount: 690000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran Penuh',
-          note: 'Hadir 23/23 hari kerja',
-          amount: 1150000,
-        ),
-        SalaryComponent(
-          label: 'Lembur (2 jam)',
-          note: '2 jam × Rp 75.000',
-          amount: 150000,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 350000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '23 hari × Rp 30.000', amount: 690000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran Penuh', note: 'Hadir 23/23 hari kerja', amount: 1150000),
+        SalaryComponent(label: 'Lembur (2 jam)', note: '2 jam × Rp 75.000', amount: 150000),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 350000, isDeduction: true),
       ],
     ),
 
@@ -627,59 +671,39 @@ class SampleData {
       periodStart: DateTime(2024, 4, 1),
       periodEnd: DateTime(2024, 4, 30),
       workingDays: 22,
-      presentDays: 20,
+      presentDays: 20, // 2 hari tidak hadir (1 Cuti, 1 Izin)
       lateDays: 2,
       overtimeHours: 0,
+      leaveDays: 1,
+      permissionDays: 1,
+      leaveHistory: [
+        LeaveRecord(
+          reason: 'Cuti Tahunan',
+          startDate: DateTime(2024, 4, 15),
+          endDate: DateTime(2024, 4, 15),
+          totalDays: 1,
+          status: 'Disetujui',
+        ),
+      ],
+      permissionHistory: [
+        LeaveRecord(
+          reason: 'Sakit (Tanpa Surat Dokter)',
+          startDate: DateTime(2024, 4, 22),
+          endDate: DateTime(2024, 4, 22),
+          totalDays: 1,
+          status: 'Disetujui',
+        ),
+      ],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '20 hari × Rp 30.000',
-          amount: 600000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran',
-          note: 'Hadir 20/22 hari (parsial)',
-          amount: 1000000,
-        ),
-        SalaryComponent(
-          label: 'Potongan Keterlambatan',
-          note: '2 hari terlambat × Rp 25.000',
-          amount: 50000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 350000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '20 hari × Rp 30.000', amount: 600000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran', note: 'Hadir 20/22 hari (parsial)', amount: 1000000),
+        SalaryComponent(label: 'Potongan Keterlambatan', note: '2 hari terlambat × Rp 25.000', amount: 50000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 350000, isDeduction: true),
       ],
     ),
 
@@ -692,55 +716,20 @@ class SampleData {
       presentDays: 21,
       lateDays: 0,
       overtimeHours: 5,
+      leaveDays: 0,
+      permissionDays: 0,
+      leaveHistory: const [],
+      permissionHistory: const [],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '21 hari × Rp 30.000',
-          amount: 630000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran Penuh',
-          note: 'Hadir 21/21 hari kerja',
-          amount: 1050000,
-        ),
-        SalaryComponent(
-          label: 'Lembur (5 jam)',
-          note: '5 jam × Rp 75.000',
-          amount: 375000,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 350000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '21 hari × Rp 30.000', amount: 630000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran Penuh', note: 'Hadir 21/21 hari kerja', amount: 1050000),
+        SalaryComponent(label: 'Lembur (5 jam)', note: '5 jam × Rp 75.000', amount: 375000),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 350000, isDeduction: true),
       ],
     ),
 
@@ -750,64 +739,32 @@ class SampleData {
       periodStart: DateTime(2024, 2, 1),
       periodEnd: DateTime(2024, 2, 29),
       workingDays: 20,
-      presentDays: 19,
+      presentDays: 19, // 1 hari tidak hadir (Izin)
       lateDays: 1,
       overtimeHours: 3,
+      leaveDays: 0,
+      permissionDays: 1,
+      leaveHistory: const [],
+      permissionHistory: [
+        LeaveRecord(
+          reason: 'Keperluan Mendadak',
+          startDate: DateTime(2024, 2, 12),
+          endDate: DateTime(2024, 2, 12),
+          totalDays: 1,
+          status: 'Disetujui',
+        ),
+      ],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '19 hari × Rp 30.000',
-          amount: 570000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran',
-          note: 'Hadir 19/20 hari (parsial)',
-          amount: 950000,
-        ),
-        SalaryComponent(
-          label: 'Lembur (3 jam)',
-          note: '3 jam × Rp 75.000',
-          amount: 225000,
-        ),
-        SalaryComponent(
-          label: 'Potongan Keterlambatan',
-          note: '1 hari terlambat × Rp 25.000',
-          amount: 25000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 350000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '19 hari × Rp 30.000', amount: 570000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran', note: 'Hadir 19/20 hari (parsial)', amount: 950000),
+        SalaryComponent(label: 'Lembur (3 jam)', note: '3 jam × Rp 75.000', amount: 225000),
+        SalaryComponent(label: 'Potongan Keterlambatan', note: '1 hari terlambat × Rp 25.000', amount: 25000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 350000, isDeduction: true),
       ],
     ),
 
@@ -817,64 +774,32 @@ class SampleData {
       periodStart: DateTime(2024, 1, 1),
       periodEnd: DateTime(2024, 1, 31),
       workingDays: 23,
-      presentDays: 22,
+      presentDays: 22, // 1 hari tidak hadir (Cuti)
       lateDays: 1,
       overtimeHours: 4,
+      leaveDays: 1,
+      permissionDays: 0,
+      leaveHistory: [
+        LeaveRecord(
+          reason: 'Cuti Tahunan',
+          startDate: DateTime(2024, 1, 5),
+          endDate: DateTime(2024, 1, 5),
+          totalDays: 1,
+          status: 'Disetujui',
+        ),
+      ],
+      permissionHistory: const [],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '22 hari × Rp 30.000',
-          amount: 660000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran',
-          note: 'Hadir 22/23 hari (parsial)',
-          amount: 1100000,
-        ),
-        SalaryComponent(
-          label: 'Lembur (4 jam)',
-          note: '4 jam × Rp 75.000',
-          amount: 300000,
-        ),
-        SalaryComponent(
-          label: 'Potongan Keterlambatan',
-          note: '1 hari terlambat × Rp 25.000',
-          amount: 25000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 350000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '22 hari × Rp 30.000', amount: 660000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran', note: 'Hadir 22/23 hari (parsial)', amount: 1100000),
+        SalaryComponent(label: 'Lembur (4 jam)', note: '4 jam × Rp 75.000', amount: 300000),
+        SalaryComponent(label: 'Potongan Keterlambatan', note: '1 hari terlambat × Rp 25.000', amount: 25000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 350000, isDeduction: true),
       ],
     ),
 
@@ -884,63 +809,32 @@ class SampleData {
       periodStart: DateTime(2023, 12, 1),
       periodEnd: DateTime(2023, 12, 31),
       workingDays: 21,
-      presentDays: 21,
+      presentDays: 21, 
       lateDays: 0,
       overtimeHours: 8,
+      leaveDays: 2, // Cuti bersama biasanya dihitung hadir, jadi presentDays tetap 21
+      permissionDays: 0,
+      leaveHistory: [
+        LeaveRecord(
+          reason: 'Cuti Akhir Tahun',
+          startDate: DateTime(2023, 12, 27),
+          endDate: DateTime(2023, 12, 28),
+          totalDays: 2,
+          status: 'Disetujui',
+        ),
+      ],
+      permissionHistory: const [],
       components: const [
-        SalaryComponent(
-          label: 'Gaji Pokok',
-          note: 'Jabatan IT Supervisor',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Transport',
-          note: 'Dibayarkan per bulan',
-          amount: 500000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Makan',
-          note: '21 hari × Rp 30.000',
-          amount: 630000,
-        ),
-        SalaryComponent(
-          label: 'Tunjangan Kesehatan',
-          note: 'Dibayarkan per bulan',
-          amount: 200000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Kehadiran Penuh',
-          note: 'Hadir 21/21 hari kerja',
-          amount: 1050000,
-        ),
-        SalaryComponent(
-          label: 'Lembur (8 jam)',
-          note: '8 jam × Rp 75.000',
-          amount: 600000,
-        ),
-        SalaryComponent(
-          label: 'Bonus Akhir Tahun',
-          note: 'THR / Bonus tahunan',
-          amount: 10000000,
-        ),
-        SalaryComponent(
-          label: 'BPJS Kesehatan',
-          note: '1% dari gaji pokok',
-          amount: 100000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'BPJS Ketenagakerjaan',
-          note: '2% dari gaji pokok',
-          amount: 200000,
-          isDeduction: true,
-        ),
-        SalaryComponent(
-          label: 'PPh 21',
-          note: 'Pajak penghasilan bulanan',
-          amount: 1200000,
-          isDeduction: true,
-        ),
+        SalaryComponent(label: 'Gaji Pokok', note: 'Jabatan IT Supervisor', amount: 10000000),
+        SalaryComponent(label: 'Tunjangan Transport', note: 'Dibayarkan per bulan', amount: 500000),
+        SalaryComponent(label: 'Tunjangan Makan', note: '21 hari × Rp 30.000', amount: 630000),
+        SalaryComponent(label: 'Tunjangan Kesehatan', note: 'Dibayarkan per bulan', amount: 200000),
+        SalaryComponent(label: 'Bonus Kehadiran Penuh', note: 'Hadir 21/21 hari kerja', amount: 1050000),
+        SalaryComponent(label: 'Lembur (8 jam)', note: '8 jam × Rp 75.000', amount: 600000),
+        SalaryComponent(label: 'Bonus Akhir Tahun', note: 'THR / Bonus tahunan', amount: 10000000),
+        SalaryComponent(label: 'BPJS Kesehatan', note: '1% dari gaji pokok', amount: 100000, isDeduction: true),
+        SalaryComponent(label: 'BPJS Ketenagakerjaan', note: '2% dari gaji pokok', amount: 200000, isDeduction: true),
+        SalaryComponent(label: 'PPh 21', note: 'Pajak penghasilan bulanan', amount: 1200000, isDeduction: true),
       ],
     ),
   ];

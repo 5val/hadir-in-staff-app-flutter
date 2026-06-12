@@ -2,24 +2,37 @@ import 'package:flutter/material.dart';
 import '../services/session_service.dart';
 import 'main_screen.dart';
 import 'login_screen.dart';
+import 'passcode_unlock_screen.dart';
 
 /// Layar pertama — cek sesi login.
-/// Sudah login → MainScreen langsung (tanpa LandingScreen).
+/// Sudah login & Sesi Aktif → MainScreen langsung.
+/// Sudah login tapi Sesi Habis → PasscodeUnlockScreen.
 /// Belum login → LoginScreen.
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: SessionService.isLoggedIn(),
+    return FutureBuilder<Map<String, dynamic>>(
+      future: SessionService.getAuthState(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const _SplashScreen();
         }
-        final hasSession = snap.data ?? false;
-        if (hasSession) {
-          return const MainScreen();
+        final authState = snap.data ?? {
+          'isLoggedIn': false,
+          'isSessionActive': false,
+          'hasPasscode': false,
+        };
+        final isLoggedIn = authState['isLoggedIn'] ?? false;
+        final isSessionActive = authState['isSessionActive'] ?? false;
+
+        if (isLoggedIn) {
+          if (isSessionActive) {
+            return const MainScreen();
+          } else {
+            return const PasscodeUnlockScreen();
+          }
         }
         return const LoginScreen(destination: LoginDestination.landing);
       },
