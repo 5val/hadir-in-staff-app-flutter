@@ -27,7 +27,7 @@ class AttendanceRules {
 
   // ── Jam pulang normal & toleransi pulang awal ────────────────────
   /// Jam pulang normal (17:00 / jam 5 sore)
-  static const int normalCheckoutHour = 17;
+  static const int normalCheckoutHour = 24;
   static const int normalCheckoutMinute = 0;
 
   /// Toleransi pulang awal dalam jam.
