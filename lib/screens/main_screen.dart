@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import '../services/attendance_provider.dart';   // ← shared state
-import '../screens/camera_checkin_screen.dart';  // ← halaman kamera
+import '../services/attendance_provider.dart'; // ← shared state
+import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
+import '../models/models.dart';
 import 'home_tab.dart';
 import 'leave_tab.dart';
 import 'salary_screen.dart';
 import 'account_tab.dart';
+import 'manager_dashboard_tab.dart';
 
 /// Bottom-nav wrapper — Home | Leave & Time Off | [FAB] | Salary | Account
 ///
-/// FAB behaviour berdasarkan [AttendanceProvider._status]:
+/// Admin hanya punya 2 tab: Dashboard & List Absensi (no FAB)
+///
+/// FAB behaviour berdasarkan [AttendanceProvider._status] (untuk non-admin):
 ///  • notCheckedIn  → buka kamera (check-in)
 ///  • checkedIn     → buka kamera (check-out) — tombol istirahat ada di HomeTab
 ///  • onBreak       → alert "Selesai Istirahat?" (tanpa kamera)
@@ -30,6 +34,8 @@ class _MainScreenState extends State<MainScreen> {
   /// AttendanceProvider diinisialisasi di sini agar bisa dibagikan ke
   /// seluruh widget tree melalui [InheritedAttendance].
   final AttendanceProvider _attendance = AttendanceProvider();
+
+  bool get _isAdmin => AppSession.isAdmin;
 
   @override
   void initState() {
@@ -164,7 +170,29 @@ class _MainScreenState extends State<MainScreen> {
   // ── Build ─────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    // Bagikan attendance state ke subtree
+    // Admin: tampilan khusus (hanya dashboard, tidak ada FAB)
+    if (_isAdmin) {
+      return _buildAdminLayout();
+    }
+
+    // Staff / Supervisor: tampilan normal
+    return _buildStaffLayout();
+  }
+
+  // ── Admin Layout (hanya 2 tab, no FAB) ───────────────────────
+  Widget _buildAdminLayout() {
+    return InheritedAttendance(
+      provider: _attendance,
+      child: Scaffold(
+        backgroundColor: AppColors.slate50,
+        body: const AdminDashboardTab(),
+      ),
+    );
+  }
+
+  // ── Staff/Supervisor Layout ───────────────────────────────────
+  Widget _buildStaffLayout() {
+    final isManager = AppSession.currentUser.role == UserRole.supervisor;
     return InheritedAttendance(
       provider: _attendance,
       child: Scaffold(
@@ -176,21 +204,23 @@ class _MainScreenState extends State<MainScreen> {
               onNavigateToAccount: () => _onTabTap(4),
               attendance: _attendance,
             ),
-            const LeaveTab(),
+            isManager
+                ? const AdminDashboardTab()
+                : const LeaveTab(),
             // slot 2 kosong — FAB menangani kamera secara push, bukan IndexedStack
             const SizedBox.shrink(),
             const SalaryScreen(isFromAccount: false),
             const AccountTab(),
           ],
         ),
-        bottomNavigationBar: _buildBottomNav(),
+        bottomNavigationBar: _buildBottomNav(isManager),
         floatingActionButton: _buildFab(),
         floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       ),
     );
   }
 
-  Widget _buildBottomNav() {
+  Widget _buildBottomNav(bool isManager) {
     return BottomAppBar(
       color: AppColors.white,
       elevation: 8,
@@ -203,21 +233,37 @@ class _MainScreenState extends State<MainScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _NavItem(
-              icon: Icons.home_rounded, label: 'Home',
-              selected: _tab == 0, onTap: () => _onTabTap(0),
+              icon: Icons.home_rounded,
+              label: 'Home',
+              selected: _tab == 0,
+              onTap: () => _onTabTap(0),
             ),
-            _NavItem(
-              icon: Icons.event_note_rounded, label: 'Cuti & Izin',
-              selected: _tab == 1, onTap: () => _onTabTap(1),
-            ),
+            if (isManager)
+              _NavItem(
+                icon: Icons.groups_rounded,
+                label: 'Tim',
+                selected: _tab == 1,
+                onTap: () => _onTabTap(1),
+              )
+            else
+              _NavItem(
+                icon: Icons.event_note_rounded,
+                label: 'Cuti & Izin',
+                selected: _tab == 1,
+                onTap: () => _onTabTap(1),
+              ),
             const SizedBox(width: 56), // spacer FAB
             _NavItem(
-              icon: Icons.account_balance_wallet_rounded, label: 'Gaji',
-              selected: _tab == 3, onTap: () => _onTabTap(3),
+              icon: Icons.account_balance_wallet_rounded,
+              label: 'Gaji',
+              selected: _tab == 3,
+              onTap: () => _onTabTap(3),
             ),
             _NavItem(
-              icon: Icons.person_rounded, label: 'Akun',
-              selected: _tab == 4, onTap: () => _onTabTap(4),
+              icon: Icons.person_rounded,
+              label: 'Akun',
+              selected: _tab == 4,
+              onTap: () => _onTabTap(4),
             ),
           ],
         ),
@@ -235,26 +281,28 @@ class _MainScreenState extends State<MainScreen> {
     IconData fabIcon;
     if (isDone) {
       fabColor = AppColors.slate400;
-      fabIcon  = Icons.check_circle_rounded;
+      fabIcon = Icons.check_circle_rounded;
     } else if (isBreak) {
       fabColor = const Color(0xFFE67E22); // orange
-      fabIcon  = Icons.free_breakfast_rounded;
+      fabIcon = Icons.free_breakfast_rounded;
     } else {
       fabColor = AppColors.brandNavy;
-      fabIcon  = Icons.fingerprint_rounded;
+      fabIcon = Icons.camera_alt_outlined;
     }
 
     return GestureDetector(
       onTap: _onFabTap,
       child: Container(
-        width: 60, height: 60,
+        width: 60,
+        height: 60,
         decoration: BoxDecoration(
           color: fabColor,
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
               color: fabColor.withOpacity(0.38),
-              blurRadius: 14, offset: const Offset(0, 6),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
@@ -281,8 +329,7 @@ class InheritedAttendance extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(InheritedAttendance old) =>
-      provider != old.provider;
+  bool updateShouldNotify(InheritedAttendance old) => provider != old.provider;
 }
 
 // ── Nav Item ─────────────────────────────────────────────────────
@@ -293,8 +340,10 @@ class _NavItem extends StatelessWidget {
   final VoidCallback onTap;
 
   const _NavItem({
-    required this.icon, required this.label,
-    required this.selected, required this.onTap,
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
   });
 
   @override

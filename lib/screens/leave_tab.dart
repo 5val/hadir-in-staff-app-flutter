@@ -28,6 +28,18 @@ class _LeaveTabState extends State<LeaveTab> {
   final bool _isSupervisor =
       SampleData.currentUser.role == UserRole.supervisor;
 
+  bool _showAllHistory = false;
+  LeaveType? _filterType;
+  RequestStatus? _filterStatus;
+
+  List<LeaveRequest> get _filtered {
+    var list = List<LeaveRequest>.from(SampleData.leaveRequests);
+    if (_filterType != null) list = list.where((r) => r.type == _filterType).toList();
+    if (_filterStatus != null) list = list.where((r) => r.status == _filterStatus).toList();
+    list.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
+    return list;
+  }
+
   List<_TabDef> get _tabs => _isSupervisor
       ? const [
           _TabDef(Icons.supervisor_account_rounded, 'Karyawan'),
@@ -137,7 +149,10 @@ class _LeaveTabState extends State<LeaveTab> {
 
           return Expanded(
             child: GestureDetector(
-              onTap: () => setState(() => _selectedTab = idx),
+              onTap: () => setState(() {
+                _selectedTab = idx;
+                _showAllHistory = false;
+              }),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 margin: EdgeInsets.only(right: idx < _tabs.length - 1 ? 6 : 0),
@@ -402,6 +417,177 @@ class _LeaveTabState extends State<LeaveTab> {
 
   // ── Riwayat Tab ──────────────────────────────────────────
   Widget _buildRiwayatTab() {
+    if (_showAllHistory) {
+      return Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                onPressed: () => setState(() => _showAllHistory = false),
+              ),
+              Text('Semua Riwayat', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+            ],
+          ),
+          // ── Filter chips: Jenis ───────────────────────────
+          Container(
+            color: AppColors.white,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Jenis',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate700)),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _FilterChip(
+                        label: 'Semua',
+                        selected: _filterType == null,
+                        onTap: () => setState(() => _filterType = null),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Cuti',
+                        icon: Icons.beach_access_rounded,
+                        selected: _filterType == LeaveType.annual,
+                        onTap: () => setState(() => _filterType = _filterType == LeaveType.annual ? null : LeaveType.annual),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Sakit',
+                        icon: Icons.local_hospital_rounded,
+                        selected: _filterType == LeaveType.sick,
+                        onTap: () => setState(() => _filterType = _filterType == LeaveType.sick ? null : LeaveType.sick),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Seminar',
+                        icon: Icons.school_rounded,
+                        selected: _filterType == LeaveType.seminar,
+                        onTap: () => setState(() => _filterType = _filterType == LeaveType.seminar ? null : LeaveType.seminar),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Lainnya',
+                        icon: Icons.event_note_rounded,
+                        selected: _filterType == LeaveType.school,
+                        onTap: () => setState(() => _filterType = _filterType == LeaveType.school ? null : LeaveType.school),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+          // ── Filter chips: Status ──────────────────────────
+          Container(
+            color: AppColors.white,
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Status',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate700)),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _FilterChip(
+                        label: 'Semua',
+                        selected: _filterStatus == null,
+                        onTap: () => setState(() => _filterStatus = null),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Menunggu',
+                        color: AppColors.brandOrange,
+                        selected: _filterStatus == RequestStatus.pending,
+                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.pending ? null : RequestStatus.pending),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Disetujui',
+                        color: AppColors.brandLimeDark,
+                        selected: _filterStatus == RequestStatus.approved,
+                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.approved ? null : RequestStatus.approved),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Ditolak',
+                        color: AppColors.danger,
+                        selected: _filterStatus == RequestStatus.rejected,
+                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.rejected ? null : RequestStatus.rejected),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: AppColors.slate200),
+          // ── Summary chips ─────────────────────────────────
+          Container(
+            color: AppColors.white,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _SummaryChip(label: 'Total', count: _filtered.length, color: AppColors.brandNavy),
+                  const SizedBox(width: 8),
+                  _SummaryChip(label: 'Disetujui', count: _filtered.where((r) => r.status == RequestStatus.approved).length, color: AppColors.brandLimeDark),
+                  const SizedBox(width: 8),
+                  _SummaryChip(label: 'Menunggu', count: _filtered.where((r) => r.status == RequestStatus.pending).length, color: AppColors.brandOrange),
+                  const SizedBox(width: 8),
+                  _SummaryChip(label: 'Ditolak', count: _filtered.where((r) => r.status == RequestStatus.rejected).length, color: AppColors.danger),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: _filtered.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('📭', style: TextStyle(fontSize: 48)),
+                        const SizedBox(height: 12),
+                        Text('Tidak ada pengajuan', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+                        const SizedBox(height: 4),
+                        Text('Coba ubah filter pencarian', style: AppText.body2),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _filtered.length,
+                    itemBuilder: (_, i) {
+                      final req = _filtered[i];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SectionCard(
+                          padding: EdgeInsets.zero,
+                          child: _RequestHistoryTile(request: req),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      );
+    }
+
     final requests = SampleData.leaveRequests
         .where((r) => r.submittedAt
             .isAfter(DateTime.now().subtract(const Duration(days: 7))))
@@ -416,10 +602,11 @@ class _LeaveTabState extends State<LeaveTab> {
                 style:
                     AppText.headline3.copyWith(color: AppColors.slate900)),
             TextButton(
-              onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const AllLeaveHistoryScreen())),
+              onPressed: () => setState(() {
+                _filterType = null;
+                _filterStatus = null;
+                _showAllHistory = true;
+              }),
               child: Text('Lihat Semua',
                   style: GoogleFonts.inter(
                     fontSize: 11,
@@ -1841,6 +2028,93 @@ class _ActionBtn extends StatelessWidget {
             color: filled ? Colors.white : color,
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Filter Chip ───────────────────────────────────────────────
+class _FilterChip extends StatelessWidget {
+  final String    label;
+  final IconData? icon;
+  final Color     color;
+  final bool      selected;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.color = AppColors.brandNavy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: selected ? color.withOpacity(0.1) : AppColors.slate100,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : AppColors.slate200,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon,
+                  size: 13,
+                  color: selected ? color : AppColors.slate600),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? color : AppColors.slate600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Summary Chip ──────────────────────────────────────────────
+class _SummaryChip extends StatelessWidget {
+  final String label;
+  final int    count;
+  final Color  color;
+  const _SummaryChip(
+      {required this.label, required this.count, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$count',
+              style: GoogleFonts.inter(
+                  fontSize: 13, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(width: 4),
+          Text(label,
+              style: GoogleFonts.inter(fontSize: 10, color: color)),
+        ],
       ),
     );
   }

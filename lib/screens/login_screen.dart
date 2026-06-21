@@ -9,7 +9,10 @@ import 'main_screen.dart';
 
 enum LoginDestination { landing, leaveRequest }
 
-enum LoginStep { phone, otp, createPasscode, confirmPasscode }
+// Langkah login:
+// Pertama kali (belum ada passcode): phone → otp → createPasscode → confirmPasscode
+// Kembali login (sudah ada passcode): phone → enterPasscode
+enum LoginStep { phone, otp, enterPasscode, createPasscode, confirmPasscode }
 
 class LoginScreen extends StatefulWidget {
   final LoginDestination destination;
@@ -26,18 +29,18 @@ class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
   final _phoneFormKey = GlobalKey<FormState>();
   final _phoneCtrl = TextEditingController();
-  final _passwordCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
   final _passcodeCtrl = TextEditingController();
   final _confirmPasscodeCtrl = TextEditingController();
+  final _enterPasscodeCtrl = TextEditingController();
 
   LoginStep _currentStep = LoginStep.phone;
   bool _isLoading = false;
-  bool _obscurePassword = true;
   UserProfile? _matchedUser;
   String _sentOtp = "123456";
   int _timerSeconds = 60;
   Timer? _resendTimer;
+  String _savedPasscode = "";
 
   // Custom WA Notification animation state
   bool _showWaNotif = false;
@@ -68,8 +71,6 @@ class _LoginScreenState extends State<LoginScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _waNotifCtrl, curve: Curves.easeOutBack));
 
-    // If destination is leaveRequest (re-verifikasi), and they already have a passcode,
-    // we will redirect or ask for passcode. But they need to be logged in first.
     _checkExistingState();
   }
 
@@ -78,10 +79,10 @@ class _LoginScreenState extends State<LoginScreen>
     _mascotCtrl.dispose();
     _waNotifCtrl.dispose();
     _phoneCtrl.dispose();
-    _passwordCtrl.dispose();
     _otpCtrl.dispose();
     _passcodeCtrl.dispose();
     _confirmPasscodeCtrl.dispose();
+    _enterPasscodeCtrl.dispose();
     _resendTimer?.cancel();
     super.dispose();
   }
@@ -94,7 +95,6 @@ class _LoginScreenState extends State<LoginScreen>
     });
     _waNotifCtrl.forward();
 
-    // Hide after 6 seconds
     Future.delayed(const Duration(seconds: 6), () {
       if (mounted) {
         _waNotifCtrl.reverse().then((_) {
@@ -124,11 +124,13 @@ class _LoginScreenState extends State<LoginScreen>
     });
   }
 
-  void _sendOtp() {
+  /// Tangani submit no. HP — tanpa password.
+  /// Jika user sudah punya passcode → skip OTP → langsung enterPasscode.
+  /// Jika belum → kirim OTP → createPasscode.
+  Future<void> _handlePhoneSubmit() async {
     if (!_phoneFormKey.currentState!.validate()) return;
 
     final phone = _phoneCtrl.text.trim();
-    final password = _passwordCtrl.text;
     final user = AppSession.findUserByPhone(phone);
 
     if (user == null) {
@@ -141,33 +143,38 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    if (user.password != password) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Password salah!"),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _matchedUser = user;
     });
 
-    // Simulate network delay
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (!mounted) return;
+    // Simulasi network delay
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+
+    // Cek apakah sudah ada passcode tersimpan di device ini
+    final prefsState = await SessionService.getAuthState();
+    final savedCode = await SessionService.getPasscode();
+
+    setState(() {
+      _isLoading = false;
+      _savedPasscode = savedCode ?? "";
+    });
+
+    if (prefsState['hasPasscode'] == true && _savedPasscode.isNotEmpty) {
+      // Sudah pernah login → langsung minta passcode
       setState(() {
-        _isLoading = false;
+        _currentStep = LoginStep.enterPasscode;
+      });
+    } else {
+      // Pertama kali → kirim OTP
+      _sentOtp = "123456";
+      setState(() {
         _currentStep = LoginStep.otp;
       });
       _startTimer();
-      // Generate OTP and trigger custom notification
-      _sentOtp = "123456"; // Default standard test OTP
       _showMockWaNotification(_sentOtp);
-    });
+    }
   }
 
   void _verifyOtp() {
@@ -191,6 +198,7 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
     });
@@ -199,32 +207,56 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _currentStep = LoginStep.createPasscode;
       });
-
-      // Check if this device already has a passcode set
-      final prefsState = await SessionService.getAuthState();
-      if (prefsState['hasPasscode'] == true) {
-        // Already has passcode, skip creation
-        await SessionService.saveSessionWithPhone(
-          phone: _phoneCtrl.text.trim(),
-          employeeId: _matchedUser!.id,
-        );
-        if (_isInitialLogin) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const MainScreen()),
-            (r) => false,
-          );
-        } else {
-          Navigator.pop(context, true);
-        }
-      } else {
-        // No passcode, must create one
-        setState(() {
-          _currentStep = LoginStep.createPasscode;
-        });
-      }
     });
+  }
+
+  /// Login kembali — verifikasi passcode yang sudah ada
+  void _verifyEnterPasscode() async {
+    if (_enterPasscodeCtrl.text.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Masukkan 6 digit passcode"),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
+    if (_enterPasscodeCtrl.text != _savedPasscode) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Passcode salah! Silakan coba lagi."),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      _enterPasscodeCtrl.clear();
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() => _isLoading = true);
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+
+    // Simpan session untuk user yang baru dipilih
+    await SessionService.saveSessionWithPhone(
+      phone: _phoneCtrl.text.trim(),
+      employeeId: _matchedUser!.id,
+    );
+
+    setState(() => _isLoading = false);
+
+    if (_isInitialLogin) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (r) => false,
+      );
+    } else {
+      Navigator.pop(context, true);
+    }
   }
 
   void _submitPasscode() {
@@ -237,7 +269,7 @@ class _LoginScreenState extends State<LoginScreen>
       );
       return;
     }
-
+    FocusScope.of(context).unfocus();
     setState(() {
       _currentStep = LoginStep.confirmPasscode;
     });
@@ -276,7 +308,7 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    // Alur login normal / first time
+    // Alur login normal / first time — konfirmasi passcode harus cocok
     if (_confirmPasscodeCtrl.text != _passcodeCtrl.text) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -288,6 +320,7 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
     });
@@ -299,7 +332,7 @@ class _LoginScreenState extends State<LoginScreen>
       _isLoading = false;
     });
 
-    // Save passcode and phone session
+    // Simpan passcode & session
     await SessionService.savePasscode(_confirmPasscodeCtrl.text);
     await SessionService.saveSessionWithPhone(
       phone: _phoneCtrl.text.trim().isNotEmpty
@@ -359,8 +392,6 @@ class _LoginScreenState extends State<LoginScreen>
       }),
     );
   }
-
-  String _savedPasscode = "";
 
   Future<void> _checkExistingState() async {
     if (!_isInitialLogin) {
@@ -498,7 +529,6 @@ class _LoginScreenState extends State<LoginScreen>
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // WhatsApp Icon / Logo
                         Container(
                           width: 38,
                           height: 38,
@@ -516,7 +546,7 @@ class _LoginScreenState extends State<LoginScreen>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
                                     "WhatsApp • Hadir-In OTP",
@@ -561,9 +591,11 @@ class _LoginScreenState extends State<LoginScreen>
   String _getStepTitle() {
     switch (_currentStep) {
       case LoginStep.phone:
-        return "Login";
+        return "Masuk";
       case LoginStep.otp:
         return "Verifikasi OTP WA";
+      case LoginStep.enterPasscode:
+        return "Masukkan Passcode";
       case LoginStep.createPasscode:
         return "Buat Passcode";
       case LoginStep.confirmPasscode:
@@ -574,11 +606,13 @@ class _LoginScreenState extends State<LoginScreen>
   String _getStepSubtitle() {
     switch (_currentStep) {
       case LoginStep.phone:
-        return "Masuk ke akun karyawan dengan nomor WhatsApp terdaftar";
+        return "Masuk dengan nomor WhatsApp yang terdaftar";
       case LoginStep.otp:
         return "Masukkan 6 digit kode OTP yang kami kirimkan ke WhatsApp Anda";
+      case LoginStep.enterPasscode:
+        return "Masukkan passcode 6 digit Anda untuk masuk";
       case LoginStep.createPasscode:
-        return "Atur 6 digit passcode rahasia untuk login cepat selanjutnya";
+        return "Buat passcode 6 digit untuk login cepat selanjutnya";
       case LoginStep.confirmPasscode:
         return "Masukkan kembali passcode Anda untuk konfirmasi";
     }
@@ -590,6 +624,8 @@ class _LoginScreenState extends State<LoginScreen>
         return _buildPhoneStep();
       case LoginStep.otp:
         return _buildOtpStep();
+      case LoginStep.enterPasscode:
+        return _buildEnterPasscodeStep();
       case LoginStep.createPasscode:
         return _buildCreatePasscodeStep();
       case LoginStep.confirmPasscode:
@@ -597,20 +633,21 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
+  // ── Step: Input Nomor HP (tanpa password) ─────────────────────
   Widget _buildPhoneStep() {
     return Form(
       key: _phoneFormKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Nomor Telepon', style: AppText.label),
+          Text('Nomor Telepon / WhatsApp', style: AppText.label),
           const SizedBox(height: 6),
           TextFormField(
             controller: _phoneCtrl,
             keyboardType: TextInputType.phone,
             style: const TextStyle(color: AppColors.slate900),
             decoration: const InputDecoration(
-              hintText: 'Masukkan nomor telepon',
+              hintText: 'Contoh: 081234567890',
               prefixIcon: Icon(Icons.phone_iphone_rounded),
             ),
             validator: (v) {
@@ -619,59 +656,52 @@ class _LoginScreenState extends State<LoginScreen>
               return null;
             },
           ),
-          const SizedBox(height: 16),
-          Text('Password', style: AppText.label),
-          const SizedBox(height: 6),
-          TextFormField(
-            controller: _passwordCtrl,
-            obscureText: _obscurePassword,
-            style: const TextStyle(color: AppColors.slate900),
-            decoration: InputDecoration(
-              hintText: 'Masukkan password',
-              prefixIcon: const Icon(Icons.lock_outline_rounded),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  color: AppColors.slate400,
-                  size: 20,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _obscurePassword = !_obscurePassword;
-                  });
-                },
-              ),
+          const SizedBox(height: 8),
+          // Info hint
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.brandNavy.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(10),
             ),
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Password wajib diisi';
-              if (v.length < 6) return 'Password minimal 6 karakter';
-              return null;
-            },
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded,
+                    size: 14, color: AppColors.brandNavy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Login pertama: OTP akan dikirim ke WhatsApp Anda.\nLogin berikutnya: langsung gunakan passcode.',
+                    style: GoogleFonts.inter(
+                        fontSize: 11, color: AppColors.slate600),
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           GradientButton(
-            label: "LOGIN",
+            label: "LANJUTKAN",
             isLoading: _isLoading,
-            onTap: _sendOtp,
+            onTap: _handlePhoneSubmit,
           ),
         ],
       ),
     );
   }
 
+  // ── Step: OTP ─────────────────────────────────────────────────
   Widget _buildOtpStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Hidden field to capture input
         Stack(
           alignment: Alignment.center,
           children: [
             Opacity(
               opacity: 0,
               child: TextFormField(
+                key: const ValueKey('otp_field'),
                 controller: _otpCtrl,
                 keyboardType: TextInputType.number,
                 maxLength: 6,
@@ -684,11 +714,8 @@ class _LoginScreenState extends State<LoginScreen>
                 },
               ),
             ),
-            // Custom boxes
             GestureDetector(
-              onTap: () {
-                // Keep Focus
-              },
+              onTap: () {},
               child: _buildPinBoxes(_otpCtrl.text, 6),
             ),
           ],
@@ -696,7 +723,6 @@ class _LoginScreenState extends State<LoginScreen>
 
         const SizedBox(height: 32),
 
-        // Resend Timer / Action
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -753,6 +779,84 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  // ── Step: Enter Passcode (returning user) ─────────────────────
+  Widget _buildEnterPasscodeStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Nama user yang ditemukan
+        if (_matchedUser != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.brandNavy.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person_rounded,
+                    size: 16, color: AppColors.brandNavy),
+                const SizedBox(width: 8),
+                Text(
+                  _matchedUser!.name,
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: AppColors.brandNavy,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            Opacity(
+              opacity: 0,
+              child: TextFormField(
+                key: const ValueKey('enter_passcode_field'),
+                controller: _enterPasscodeCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                autofocus: true,
+                onChanged: (val) {
+                  setState(() {});
+                  if (val.length == 6) {
+                    _verifyEnterPasscode();
+                  }
+                },
+              ),
+            ),
+            _buildPinBoxes(_enterPasscodeCtrl.text, 6, obscure: true),
+          ],
+        ),
+        const SizedBox(height: 36),
+        GradientButton(
+          label: "MASUK",
+          isLoading: _isLoading,
+          onTap: _verifyEnterPasscode,
+        ),
+        const SizedBox(height: 12),
+        TextButton(
+          onPressed: () {
+            setState(() {
+              _currentStep = LoginStep.phone;
+              _enterPasscodeCtrl.clear();
+            });
+          },
+          child: Text(
+            "Ganti Nomor HP",
+            style: GoogleFonts.inter(color: AppColors.slate600, fontSize: 13),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Step: Buat Passcode ────────────────────────────────────────
   Widget _buildCreatePasscodeStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -763,6 +867,7 @@ class _LoginScreenState extends State<LoginScreen>
             Opacity(
               opacity: 0,
               child: TextFormField(
+                key: const ValueKey('passcode_field'),
                 controller: _passcodeCtrl,
                 keyboardType: TextInputType.number,
                 maxLength: 6,
@@ -787,6 +892,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  // ── Step: Konfirmasi Passcode ──────────────────────────────────
   Widget _buildConfirmPasscodeStep() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -797,6 +903,7 @@ class _LoginScreenState extends State<LoginScreen>
             Opacity(
               opacity: 0,
               child: TextFormField(
+                key: const ValueKey('confirm_passcode_field'),
                 controller: _confirmPasscodeCtrl,
                 keyboardType: TextInputType.number,
                 maxLength: 6,
@@ -814,8 +921,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 36),
         GradientButton(
-          label: "Konfirmasi & Masuk",
-          isLoading: _isLoading,
+          label: "Konfirmasi",
           onTap: _submitConfirmPasscode,
         ),
         const SizedBox(height: 12),
@@ -827,7 +933,7 @@ class _LoginScreenState extends State<LoginScreen>
             });
           },
           child: Text(
-            "Ubah Passcode Awal",
+            "Kembali",
             style: GoogleFonts.inter(color: AppColors.slate600, fontSize: 13),
           ),
         ),

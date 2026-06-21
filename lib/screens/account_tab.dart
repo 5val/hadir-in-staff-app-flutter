@@ -10,6 +10,7 @@ import 'account_info_screen.dart';
 import 'history_screen.dart';
 import 'salary_screen.dart';
 import 'auth_wrapper.dart';
+import 'all_attendance_history_screen.dart';
 
 /// Account / Profile Tab — full sections per design spec
 class AccountTab extends StatefulWidget {
@@ -116,7 +117,9 @@ class _AccountTabState extends State<AccountTab> {
                       _MenuItem(
                         icon: Icons.badge_outlined,
                         label: 'Informasi Akun',
-                        subtitle: 'ID, email, divisi, shift',
+                        subtitle: user.role == UserRole.admin
+                            ? 'ID, email, divisi'
+                            : 'ID, email, divisi, shift',
                         onTap: () async {
                           await Navigator.push(
                             context,
@@ -126,26 +129,29 @@ class _AccountTabState extends State<AccountTab> {
                           setState(() {});
                         },
                       ),
-                      _MenuItem(
-                        icon: Icons.history_rounded,
-                        label: 'Riwayat Kehadiran',
-                        subtitle: 'Lihat rekap kehadiran lengkap',
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => const HistoryScreen())),
-                      ),
-                      _MenuItem(
-                        icon: Icons.receipt_long_rounded,
-                        label: 'Riwayat Gaji',
-                        subtitle: 'Slip gaji bulan-bulan lalu',
-                        showDivider: false,
-                        onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    const SalaryScreen(isFromAccount: true))),
-                      ),
+                      if (user.role != UserRole.admin)
+                        _MenuItem(
+                          icon: Icons.history_rounded,
+                          label: 'Riwayat Kehadiran',
+                          subtitle: 'Lihat rekap kehadiran lengkap',
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const AllAttendanceHistoryScreen())),
+                        ),
+                      if (user.role != UserRole.admin)
+                        _MenuItem(
+                          icon: Icons.receipt_long_rounded,
+                          label: 'Riwayat Gaji',
+                          subtitle: 'Slip gaji bulan-bulan lalu',
+                          showDivider: false,
+                          onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const SalaryScreen(isFromAccount: true))),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -461,18 +467,20 @@ class _AccountTabState extends State<AccountTab> {
                 value: user.employeeId,
                 icon: Icons.badge_outlined,
               ),
-              Container(width: 1, height: 36, color: AppColors.slate200),
-              _StatChip(
-                label: 'Sisa Cuti',
-                value: '9 hari',
-                icon: Icons.beach_access_rounded,
-              ),
-              Container(width: 1, height: 36, color: AppColors.slate200),
-              _StatChip(
-                label: 'Shift',
-                value: user.currentShift.name,
-                icon: Icons.schedule_rounded,
-              ),
+              if (user.role != UserRole.admin) ...[
+                Container(width: 1, height: 36, color: AppColors.slate200),
+                _StatChip(
+                  label: 'Sisa Cuti',
+                  value: '9 hari',
+                  icon: Icons.beach_access_rounded,
+                ),
+                Container(width: 1, height: 36, color: AppColors.slate200),
+                _StatChip(
+                  label: 'Shift',
+                  value: user.currentShift.name,
+                  icon: Icons.schedule_rounded,
+                ),
+              ],
             ],
           ),
         ],
@@ -683,9 +691,11 @@ class _AccountTabState extends State<AccountTab> {
             _InfoRow(Icons.email_outlined, 'Email', user.email),
             const AppDivider(),
             _InfoRow(Icons.business_outlined, 'Divisi', 'Marketing'),
-            const AppDivider(),
-            _InfoRow(Icons.schedule_outlined, 'Shift',
-                '${user.currentShift.name} (${user.currentShift.startTimeStr}–${user.currentShift.endTimeStr})'),
+            if (user.role != UserRole.admin) ...[
+              const AppDivider(),
+              _InfoRow(Icons.schedule_outlined, 'Shift',
+                  '${user.currentShift.name} (${user.currentShift.startTimeStr}–${user.currentShift.endTimeStr})'),
+            ],
             const AppDivider(),
             _InfoRow(Icons.work_outline_rounded, 'Jabatan', user.position.name),
           ],
