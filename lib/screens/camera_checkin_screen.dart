@@ -1292,178 +1292,386 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   }
 
   // ── Confirm / Retake overlay ────────────────────────────────────
-  Widget _buildConfirmOverlay() {
-    final inRange = _locationInRange;
+  // Widget _buildConfirmOverlay() {
+  //   final inRange = _locationInRange;
 
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black.withOpacity(0.74),
-        child: Center(
-          child: ScaleTransition(
-            scale: _resultScale,
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+  //   return Positioned.fill(
+  //     child: Container(
+  //       color: Colors.black.withOpacity(0.74),
+  //       child: Center(
+  //         child: ScaleTransition(
+  //           scale: _resultScale,
+  //           child: Container(
+  //             margin: const EdgeInsets.symmetric(horizontal: 24),
+  //             padding: const EdgeInsets.all(24),
+  //             decoration: BoxDecoration(
+  //               color: Colors.white,
+  //               borderRadius: BorderRadius.circular(24),
+  //             ),
+  //             child: Column(
+  //               mainAxisSize: MainAxisSize.min,
+  //               children: [
+  //                 // ── Preview foto yang diambil ─────────────
+  //                 if (_capturedFile != null) ...[
+  //                   ClipRRect(
+  //                     borderRadius: BorderRadius.circular(12),
+  //                     child: kIsWeb
+  //                         ? Image.network(
+  //                             _capturedFile!.path,
+  //                             width: double.infinity,
+  //                             height: 160,
+  //                             fit: BoxFit.cover,
+  //                             errorBuilder: (_, __, ___) => _errorContainer(),
+  //                           )
+  //                         : Image.file(
+  //                             File(_capturedFile!.path),
+  //                             width: double.infinity,
+  //                             height: 160,
+  //                             fit: BoxFit.cover,
+  //                             errorBuilder: (_, __, ___) => _errorContainer(),
+  //                           ),
+  //                   ),
+  //                   const SizedBox(height: 14),
+  //                 ],
+
+  //                 // Icon hasil
+  //                 Container(
+  //                   width: 64,
+  //                   height: 64,
+  //                   decoration: BoxDecoration(
+  //                     color: inRange
+  //                         ? AppColors.brandLime.withOpacity(0.15)
+  //                         : AppColors.danger.withOpacity(0.1),
+  //                     shape: BoxShape.circle,
+  //                   ),
+  //                   child: Icon(
+  //                     inRange
+  //                         ? Icons.check_circle_rounded
+  //                         : Icons.location_off_rounded,
+  //                     color:
+  //                         inRange ? AppColors.brandLimeDark : AppColors.danger,
+  //                     size: 36,
+  //                   ),
+  //                 ),
+  //                 const SizedBox(height: 14),
+
+  //                 Text(
+  //                   inRange
+  //                       ? 'Foto & Lokasi Terverifikasi'
+  //                       : 'Di Luar Area Kantor',
+  //                   style: GoogleFonts.inter(
+  //                       fontSize: 16,
+  //                       fontWeight: FontWeight.w800,
+  //                       color: AppColors.slate900),
+  //                   textAlign: TextAlign.center,
+  //                 ),
+  //                 const SizedBox(height: 10),
+
+  //                 // Detail box
+  //                 Container(
+  //                   padding: const EdgeInsets.all(12),
+  //                   decoration: BoxDecoration(
+  //                     color: AppColors.slate50,
+  //                     borderRadius: BorderRadius.circular(12),
+  //                   ),
+  //                   child: Column(
+  //                     crossAxisAlignment: CrossAxisAlignment.start,
+  //                     children: [
+  //                       _InfoRow(
+  //                         icon: Icons.access_time_rounded,
+  //                         color: AppColors.brandNavy,
+  //                         label: 'Waktu',
+  //                         value: _fmtTime(_now),
+  //                       ),
+  //                       const SizedBox(height: 6),
+  //                       _InfoRow(
+  //                         icon: Icons.location_on_rounded,
+  //                         color: inRange
+  //                             ? AppColors.brandLimeDark
+  //                             : AppColors.danger,
+  //                         label: 'Jarak ke kantor',
+  //                         value: '${_distanceMeters.toStringAsFixed(0)} m  '
+  //                             '(radius ${_officeRadiusMeters.toInt()} m)',
+  //                       ),
+  //                       const SizedBox(height: 6),
+  //                       _InfoRow(
+  //                         icon: Icons.place_rounded,
+  //                         color: AppColors.slate700,
+  //                         label: 'Lokasi saat ini',
+  //                         value: _currentAddress,
+  //                       ),
+  //                     ],
+  //                   ),
+  //                 ),
+
+  //                 if (!inRange) ...[
+  //                   const SizedBox(height: 10),
+  //                   Container(
+  //                     padding: const EdgeInsets.all(10),
+  //                     decoration: BoxDecoration(
+  //                       color: AppColors.danger.withOpacity(0.07),
+  //                       borderRadius: BorderRadius.circular(10),
+  //                       border: Border.all(
+  //                           color: AppColors.danger.withOpacity(0.2)),
+  //                     ),
+  //                     child: Text(
+  //                       'Kamu berada di luar radius kantor. Foto ulang dari '
+  //                       'lokasi yang benar, atau hubungi HRD jika ini kesalahan.',
+  //                       style: GoogleFonts.inter(
+  //                           fontSize: 11,
+  //                           color: AppColors.danger,
+  //                           fontWeight: FontWeight.w500),
+  //                       textAlign: TextAlign.center,
+  //                     ),
+  //                   ),
+  //                 ],
+
+  //                 const SizedBox(height: 18),
+  //                 Row(
+  //                   children: [
+  //                     Expanded(
+  //                       child: OutlinedButton.icon(
+  //                         onPressed: _retake,
+  //                         icon: const Icon(Icons.replay_rounded, size: 16),
+  //                         label: const Text('Foto Ulang'),
+  //                         style: OutlinedButton.styleFrom(
+  //                           padding: const EdgeInsets.symmetric(vertical: 12),
+  //                           side: BorderSide(color: AppColors.slate300),
+  //                           foregroundColor: AppColors.slate700,
+  //                           shape: RoundedRectangleBorder(
+  //                               borderRadius: BorderRadius.circular(12)),
+  //                         ),
+  //                       ),
+  //                     ),
+  //                     const SizedBox(width: 10),
+  //                     Expanded(
+  //                       child: ElevatedButton.icon(
+  //                         onPressed: inRange ? _confirm : null,
+  //                         icon: const Icon(Icons.check_rounded, size: 16),
+  //                         label: Text(
+  //                           inRange ? 'Konfirmasi' : 'Di Luar Area',
+  //                           style: const TextStyle(fontSize: 13),
+  //                         ),
+  //                         style: ElevatedButton.styleFrom(
+  //                           backgroundColor:
+  //                               inRange ? _actionColor : AppColors.slate300,
+  //                           foregroundColor: Colors.white,
+  //                           padding: const EdgeInsets.symmetric(vertical: 12),
+  //                           shape: RoundedRectangleBorder(
+  //                               borderRadius: BorderRadius.circular(12)),
+  //                           elevation: 0,
+  //                         ),
+  //                       ),
+  //                     ),
+  //                   ],
+  //                 ),
+  //               ],
+  //             ),
+  //           ),
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
+  Widget _buildConfirmOverlay() {
+  final inRange = _locationInRange;
+
+  return Positioned.fill(
+    child: Container(
+      color: Colors.black.withOpacity(0.74),
+      child: Center(
+        child: ScaleTransition(
+          scale: _resultScale,
+          child: Container(
+            // Menggunakan constraints maksimum agar dialog tidak terlalu melar di layar tablet/lebar
+            constraints: const BoxConstraints(maxWidth: 550),
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.all(20), // Sedikit diperkecil dari 24 agar hemat ruang
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: IntrinsicHeight( // SINKRONISASI TINGGI: Memaksa tinggi kiri dan kanan sama besar
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch, // Mengisi ruang vertikal secara seimbang
                 children: [
-                  // ── Preview foto yang diambil ─────────────
+                  // ── BAGIAN KIRI: Preview foto yang diambil ──
                   if (_capturedFile != null) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: kIsWeb
-                          ? Image.network(
-                              _capturedFile!.path,
-                              width: double.infinity,
-                              height: 160,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _errorContainer(),
-                            )
-                          : Image.file(
-                              File(_capturedFile!.path),
-                              width: double.infinity,
-                              height: 160,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _errorContainer(),
-                            ),
+                    Expanded(
+                      flex: 4,
+                      child: Center( // <── KUNCINYA: Menahan agar AspectRatio tidak dipaksa stretch vertikal
+                        child: AspectRatio(
+                          aspectRatio: 3 / 5, // Mengunci rasio foto HP portrait biar tidak kemolo/panjang
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: kIsWeb
+                                ? Image.network(
+                                    _capturedFile!.path,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => _errorContainer(),
+                                  )
+                                : Image.file(
+                                    File(_capturedFile!.path),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => _errorContainer(),
+                                  ),
+                          ),
+                        ),
+                      ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(width: 16),
                   ],
 
-                  // Icon hasil
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: inRange
-                          ? AppColors.brandLime.withOpacity(0.15)
-                          : AppColors.danger.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      inRange
-                          ? Icons.check_circle_rounded
-                          : Icons.location_off_rounded,
-                      color:
-                          inRange ? AppColors.brandLimeDark : AppColors.danger,
-                      size: 36,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  Text(
-                    inRange
-                        ? 'Foto & Lokasi Terverifikasi'
-                        : 'Di Luar Area Kantor',
-                    style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.slate900),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Detail box
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.slate50,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                  // ── BAGIAN KANAN: Keterangan & Action Buttons ──
+                  Expanded(
+                    flex: 5,
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      // Menggunakan MainAxisAlignment.spaceBetween jika ingin tombol selalu presisi di bawah sejajar foto
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        _InfoRow(
-                          icon: Icons.access_time_rounded,
-                          color: AppColors.brandNavy,
-                          label: 'Waktu',
-                          value: _fmtTime(_now),
+                        // Kelompok Informasi Atas
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Icon hasil
+                            Container(
+                              width: 48, // Diperkecil dari 56 agar lebih hemat space vertikal
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: inRange
+                                    ? AppColors.brandLime.withOpacity(0.15)
+                                    : AppColors.danger.withOpacity(0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                inRange
+                                    ? Icons.check_circle_rounded
+                                    : Icons.location_off_rounded,
+                                color: inRange
+                                    ? AppColors.brandLimeDark
+                                    : AppColors.danger,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+
+                            Text(
+                              inRange
+                                  ? 'Foto & Lokasi Terverifikasi'
+                                  : 'Di Luar Area Kantor',
+                              style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.slate900),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Detail box
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: AppColors.slate50,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _InfoRow(
+                                    icon: Icons.access_time_rounded,
+                                    color: AppColors.brandNavy,
+                                    label: 'Waktu',
+                                    value: _fmtTime(_now),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _InfoRow(
+                                    icon: Icons.location_on_rounded,
+                                    color: inRange
+                                        ? AppColors.brandLimeDark
+                                        : AppColors.danger,
+                                    label: 'Jarak',
+                                    value: '${_distanceMeters.toStringAsFixed(0)}m (r:${_officeRadiusMeters.toInt()}m)',
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _InfoRow(
+                                    icon: Icons.place_rounded,
+                                    color: AppColors.slate700,
+                                    label: 'Lokasi',
+                                    value: _currentAddress,
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            if (!inRange) ...[
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.danger.withOpacity(0.07),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: AppColors.danger.withOpacity(0.2)),
+                                ),
+                                child: Text(
+                                  'Kamu di luar radius kantor. Silakan foto ulang.',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      color: AppColors.danger,
+                                      fontWeight: FontWeight.w500),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                        const SizedBox(height: 6),
-                        _InfoRow(
-                          icon: Icons.location_on_rounded,
-                          color: inRange
-                              ? AppColors.brandLimeDark
-                              : AppColors.danger,
-                          label: 'Jarak ke kantor',
-                          value: '${_distanceMeters.toStringAsFixed(0)} m  '
-                              '(radius ${_officeRadiusMeters.toInt()} m)',
-                        ),
-                        const SizedBox(height: 6),
-                        _InfoRow(
-                          icon: Icons.place_rounded,
-                          color: AppColors.slate700,
-                          label: 'Lokasi saat ini',
-                          value: _currentAddress,
+                        
+                        const SizedBox(height: 12),
+                        
+                        // Tombol Action (Dibuat Row berdampingan agar hemat space vertikal)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _retake,
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  side: BorderSide(color: AppColors.slate300),
+                                  foregroundColor: AppColors.slate700,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                ),
+                                child: const Icon(Icons.replay_rounded, size: 16),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              flex: 2, // Tombol konfirmasi dibuat lebih lebar
+                              child: ElevatedButton.icon(
+                                onPressed: inRange ? _confirm : null,
+                                icon: const Icon(Icons.check_rounded, size: 16),
+                                label: Text(
+                                  inRange ? 'Konfirmasi' : 'Di Luar Area',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: inRange
+                                      ? _actionColor
+                                      : AppColors.slate300,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                  elevation: 0,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ),
-
-                  if (!inRange) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.danger.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: AppColors.danger.withOpacity(0.2)),
-                      ),
-                      child: Text(
-                        'Kamu berada di luar radius kantor. Foto ulang dari '
-                        'lokasi yang benar, atau hubungi HRD jika ini kesalahan.',
-                        style: GoogleFonts.inter(
-                            fontSize: 11,
-                            color: AppColors.danger,
-                            fontWeight: FontWeight.w500),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _retake,
-                          icon: const Icon(Icons.replay_rounded, size: 16),
-                          label: const Text('Foto Ulang'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            side: BorderSide(color: AppColors.slate300),
-                            foregroundColor: AppColors.slate700,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: inRange ? _confirm : null,
-                          icon: const Icon(Icons.check_rounded, size: 16),
-                          label: Text(
-                            inRange ? 'Konfirmasi' : 'Di Luar Area',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                inRange ? _actionColor : AppColors.slate300,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            elevation: 0,
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               ),
@@ -1471,8 +1679,9 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 // ── Info Row ────────────────────────────────────────────────────────

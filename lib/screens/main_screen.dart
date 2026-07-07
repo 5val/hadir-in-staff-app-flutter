@@ -192,7 +192,7 @@ class _MainScreenState extends State<MainScreen> {
 
   // ── Staff/Supervisor Layout ───────────────────────────────────
   Widget _buildStaffLayout() {
-    final isManager = AppSession.currentUser.role == UserRole.supervisor;
+    final isManager = AppSession.currentUser.role == UserRole.admin;
     return InheritedAttendance(
       provider: _attendance,
       child: Scaffold(
