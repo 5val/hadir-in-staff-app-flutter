@@ -16,15 +16,13 @@ App mobile staff Hadir-In (absensi). Flutter/Dart. Konsumen `hadir-in-api-backen
 ```
 lib/
 ├── models/       # attendance.dart, user.dart (stub kosong) — domain real ada di models.dart (SampleData hardcode)
-├── providers/    # ⚠ dead — superseded oleh services/attendance_provider.dart
 ├── services/     # attendance_provider.dart (ChangeNotifier), google_drive_service.dart, session_service.dart
 ├── screens/      # UI screens
-├── screens copy/ # ⚠ dead/backup — jangan edit, kandidat hapus di Fase 1
 ├── theme/        # design tokens
 ├── widgets/      # komponen reusable
 assets/images/    # logo & maskot Hadir-In
 ```
-`pubspec copy.yaml`, `lib/main copy.dart`, `lib/app_flutter.zip` — dead/backup files, kandidat hapus di Fase 1.
+> Fase 1 cleanup selesai: `lib/screens copy/`, `lib/main copy.dart`, `pubspec copy.yaml`, `lib/app_flutter.zip`, dan `lib/providers/` (dead duplicate) sudah dihapus.
 
 ## Konvensi
 - Linter: `package:flutter_lints/flutter.yaml` (`analysis_options.yaml`), belum ada override kustom.
