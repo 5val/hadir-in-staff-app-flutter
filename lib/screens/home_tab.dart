@@ -445,63 +445,65 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Check-In Detail Card ───────────────────────────────────────
   Widget _buildCheckInDetailCard() {
-    final time = _checkInDisplayTime;
-    if (time == null) return const SizedBox.shrink();
-    final timeStr =
-        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    final dateStr = DateFormat('EEEE, d MMMM yyyy', 'id_ID').format(time);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.brandLime.withOpacity(0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.brandLime.withOpacity(0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: AppColors.brandLime.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.check_circle_rounded,
-                    color: AppColors.brandLimeDark, size: 16),
+  final time = _checkInDisplayTime;
+  if (time == null) return const SizedBox.shrink();
+  final timeStr =
+      '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  final dateStr = DateFormat('EEEE, d MMMM yyyy', 'id_ID').format(time);
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppColors.brandLime.withOpacity(0.5)),
+      boxShadow: [
+        BoxShadow(
+          color: AppColors.brandLime.withOpacity(0.15),
+          blurRadius: 8,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: AppColors.brandLime.withOpacity(0.2),
+                shape: BoxShape.circle,
               ),
-              const SizedBox(width: 8),
-              Text('DETAIL CHECK-IN',
-                  style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.brandLimeDark,
-                      letterSpacing: 1.0)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Foto preview
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: AppColors.slate100,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.slate200),
-                ),
+              child: const Icon(Icons.check_circle_rounded,
+                  color: AppColors.brandLimeDark, size: 16),
+            ),
+            const SizedBox(width: 8),
+            Text('DETAIL CHECK-IN',
+                style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.brandLimeDark,
+                    letterSpacing: 1.0)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── FOTO PREVIEW (Rasio Dikunci ke 3/4) ──
+            Container(
+              width: 72, // Lebar tetap 72
+              // height dihapus agar tingginya ditentukan secara alami oleh AspectRatio (72 * 4/3 = 96)
+              decoration: BoxDecoration(
+                color: AppColors.slate100,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.slate200),
+              ),
+              child: AspectRatio(
+                aspectRatio: 3 / 4, // <── KUNCINYA: Mengunci rasio portrait foto HP
                 child: _checkInPhotoPath != null
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(10),
@@ -526,75 +528,76 @@ class _HomeTabState extends State<HomeTab> {
                     : const Icon(Icons.person_rounded,
                         color: AppColors.slate400, size: 32),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Waktu
-                    Row(
-                      children: [
-                        const Icon(Icons.access_time_rounded,
-                            size: 13, color: AppColors.slate400),
-                        const SizedBox(width: 5),
-                        Text('$timeStr · $dateStr',
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.slate700)),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    // Lokasi
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.location_on_rounded,
-                            size: 13, color: AppColors.slate400),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(_officeName,
-                                  style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: AppColors.slate800)),
-                              Text(_checkInLocation ?? _officeAddress,
-                                  style: GoogleFonts.inter(
-                                      fontSize: 10, color: AppColors.slate700),
-                                  overflow: TextOverflow.ellipsis),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    // Status badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppColors.brandLime.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('✓  TERVERIFIKASI',
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Waktu
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time_rounded,
+                          size: 13, color: AppColors.slate400),
+                      const SizedBox(width: 5),
+                      Text('$timeStr · $dateStr',
                           style: GoogleFonts.inter(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.brandLimeDark,
-                              letterSpacing: 0.5)),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.slate700)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Lokasi
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on_rounded,
+                          size: 13, color: AppColors.slate400),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_officeName,
+                                style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.slate800)),
+                            Text(_checkInLocation ?? _officeAddress,
+                                style: GoogleFonts.inter(
+                                    fontSize: 10, color: AppColors.slate700),
+                                overflow: TextOverflow.ellipsis),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.brandLime.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ],
-                ),
+                    child: Text('✓  TERVERIFIKASI',
+                        style: GoogleFonts.inter(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.brandLimeDark,
+                            letterSpacing: 0.5)),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
   // ── AppBar ─────────────────────────────────────────────────────
   Widget _buildAppBar() {

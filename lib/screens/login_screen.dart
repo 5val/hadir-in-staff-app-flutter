@@ -657,29 +657,29 @@ class _LoginScreenState extends State<LoginScreen>
               return null;
             },
           ),
-          const SizedBox(height: 8),
+          // const SizedBox(height: 8),
           // Info hint
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.brandNavy.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 14, color: AppColors.brandNavy),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Login pertama: OTP akan dikirim ke WhatsApp Anda.\nLogin berikutnya: langsung gunakan passcode.',
-                    style: GoogleFonts.inter(
-                        fontSize: 11, color: AppColors.slate600),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // Container(
+          //   padding: const EdgeInsets.all(10),
+          //   decoration: BoxDecoration(
+          //     color: AppColors.brandNavy.withOpacity(0.06),
+          //     borderRadius: BorderRadius.circular(10),
+          //   ),
+          //   child: Row(
+          //     children: [
+          //       const Icon(Icons.info_outline_rounded,
+          //           size: 14, color: AppColors.brandNavy),
+          //       const SizedBox(width: 8),
+          //       Expanded(
+          //         child: Text(
+          //           'Login pertama: OTP akan dikirim ke WhatsApp Anda.\nLogin berikutnya: langsung gunakan passcode.',
+          //           style: GoogleFonts.inter(
+          //               fontSize: 11, color: AppColors.slate600),
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
           const SizedBox(height: 24),
           GradientButton(
             label: "LANJUTKAN",
