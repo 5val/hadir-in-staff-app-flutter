@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -16,8 +17,18 @@ class _NotificationScreenState extends State<NotificationScreen>
   late final AnimationController _listController;
   late List<AppNotification> _notifications;
   String _filter = 'Semua';
+  String _scope = 'Diri Sendiri';
 
-  static const _filters = ['Semua', 'Belum Dibaca', 'Disetujui', 'Ditolak', 'Pengingat', 'Info'];
+  bool get _isSupervisor => AppSession.isSupervisor;
+
+  static const _filters = [
+    'Semua',
+    'Belum Dibaca',
+    'Disetujui',
+    'Ditolak',
+    'Pengingat',
+    'Info'
+  ];
 
   @override
   void initState() {
@@ -45,6 +56,7 @@ class _NotificationScreenState extends State<NotificationScreen>
           type: NotificationType.rejection,
           createdAt: DateTime.now().subtract(const Duration(days: 2)),
           isRead: true,
+          isTeam: false,
         ),
         AppNotification(
           id: 'N005',
@@ -54,6 +66,7 @@ class _NotificationScreenState extends State<NotificationScreen>
           type: NotificationType.info,
           createdAt: DateTime.now().subtract(const Duration(days: 3)),
           isRead: true,
+          isTeam: false,
         ),
         AppNotification(
           id: 'N006',
@@ -63,48 +76,95 @@ class _NotificationScreenState extends State<NotificationScreen>
           type: NotificationType.approval,
           createdAt: DateTime.now().subtract(const Duration(days: 4)),
           isRead: true,
+          isTeam: false,
+        ),
+        AppNotification(
+          id: 'NT001',
+          title: 'Pengajuan Cuti Karyawan',
+          message:
+              'Ahmad Rizki mengajukan Cuti Tahunan untuk tanggal 19-21 Juli.',
+          type: NotificationType.info,
+          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
+          isRead: false,
+          isTeam: true,
+        ),
+        AppNotification(
+          id: 'NT002',
+          title: 'Izin Sakit Karyawan',
+          message:
+              'Budi Santoso mengajukan Izin Sakit dengan lampiran Surat Dokter.',
+          type: NotificationType.info,
+          createdAt: DateTime.now().subtract(const Duration(hours: 5)),
+          isRead: false,
+          isTeam: true,
+        ),
+        AppNotification(
+          id: 'NT003',
+          title: 'Pengajuan Cuti Disetujui',
+          message: 'Pengajuan cuti tahunan oleh Ahmad Rizki telah disetujui.',
+          type: NotificationType.approval,
+          createdAt: DateTime.now().subtract(const Duration(days: 1)),
+          isRead: true,
+          isTeam: true,
         ),
       ];
 
   List<AppNotification> get _filtered {
+    List<AppNotification> list = _notifications;
+    if (_isSupervisor) {
+      if (_scope == 'Diri Sendiri') {
+        list = list.where((n) => !n.isTeam).toList();
+      } else {
+        list = list.where((n) => n.isTeam).toList();
+      }
+    }
+
     switch (_filter) {
       case 'Belum Dibaca':
-        return _notifications.where((n) => !n.isRead).toList();
+        return list.where((n) => !n.isRead).toList();
       case 'Disetujui':
-        return _notifications
-            .where((n) => n.type == NotificationType.approval)
-            .toList();
+        return list.where((n) => n.type == NotificationType.approval).toList();
       case 'Ditolak':
-        return _notifications
-            .where((n) => n.type == NotificationType.rejection)
-            .toList();
+        return list.where((n) => n.type == NotificationType.rejection).toList();
       case 'Pengingat':
-        return _notifications
-            .where((n) => n.type == NotificationType.reminder)
-            .toList();
+        return list.where((n) => n.type == NotificationType.reminder).toList();
       case 'Info':
-        return _notifications
-            .where((n) => n.type == NotificationType.info)
-            .toList();
+        return list.where((n) => n.type == NotificationType.info).toList();
       default:
-        return _notifications;
+        return list;
     }
   }
 
-  int get _unreadCount => _notifications.where((n) => !n.isRead).length;
+  int get _unreadCount {
+    var list = _notifications;
+    if (_isSupervisor) {
+      if (_scope == 'Diri Sendiri') {
+        list = list.where((n) => !n.isTeam).toList();
+      } else {
+        list = list.where((n) => n.isTeam).toList();
+      }
+    }
+    return list.where((n) => !n.isRead).length;
+  }
 
   void _markAllRead() {
     setState(() {
-      _notifications = _notifications
-          .map((n) => AppNotification(
-                id: n.id,
-                title: n.title,
-                message: n.message,
-                type: n.type,
-                createdAt: n.createdAt,
-                isRead: true,
-              ))
-          .toList();
+      _notifications = _notifications.map((n) {
+        final matchesScope =
+            !_isSupervisor || (_scope == 'Diri Sendiri' ? !n.isTeam : n.isTeam);
+        if (matchesScope) {
+          return AppNotification(
+            id: n.id,
+            title: n.title,
+            message: n.message,
+            type: n.type,
+            createdAt: n.createdAt,
+            isRead: true,
+            isTeam: n.isTeam,
+          );
+        }
+        return n;
+      }).toList();
     });
   }
 
@@ -119,6 +179,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                   type: n.type,
                   createdAt: n.createdAt,
                   isRead: true,
+                  isTeam: n.isTeam,
                 )
               : n)
           .toList();
@@ -217,6 +278,78 @@ class _NotificationScreenState extends State<NotificationScreen>
       ),
       body: Column(
         children: [
+          if (_isSupervisor) ...[
+            Container(
+              color: AppColors.white,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.slate100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _scope = 'Diri Sendiri';
+                          _filter = 'Semua';
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _scope == 'Diri Sendiri'
+                                ? AppColors.brandNavy
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Diri Sendiri',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _scope == 'Diri Sendiri'
+                                  ? Colors.white
+                                  : AppColors.slate700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _scope = 'Team Saya';
+                          _filter = 'Semua';
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _scope == 'Team Saya'
+                                ? AppColors.brandNavy
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Team Saya',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _scope == 'Team Saya'
+                                  ? Colors.white
+                                  : AppColors.slate700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           // ── Filter chips ──────────────────────────────────────────
           Container(
             color: AppColors.white,
@@ -243,11 +376,9 @@ class _NotificationScreenState extends State<NotificationScreen>
                         child: Text(
                           f,
                           style: AppText.caption.copyWith(
-                            color:
-                                selected ? Colors.white : AppColors.slate600,
-                            fontWeight: selected
-                                ? FontWeight.w700
-                                : FontWeight.w500,
+                            color: selected ? Colors.white : AppColors.slate600,
+                            fontWeight:
+                                selected ? FontWeight.w700 : FontWeight.w500,
                           ),
                         ),
                       ),
@@ -286,8 +417,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 size: 64, color: AppColors.slate600.withOpacity(0.4)),
             const SizedBox(height: 16),
             Text('Tidak ada notifikasi',
-                style: AppText.body1
-                    .copyWith(color: AppColors.slate600)),
+                style: AppText.body1.copyWith(color: AppColors.slate600)),
           ],
         ),
       );
@@ -335,8 +465,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               borderRadius: BorderRadius.circular(16),
               border: n.isRead
                   ? null
-                  : Border.all(
-                      color: color.withOpacity(0.3), width: 1),
+                  : Border.all(color: color.withOpacity(0.3), width: 1),
             ),
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -406,8 +535,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                             const SizedBox(width: 8),
                             Text(_formatTime(n.createdAt),
                                 style: AppText.caption.copyWith(
-                                    color: AppColors.slate600,
-                                    fontSize: 11)),
+                                    color: AppColors.slate600, fontSize: 11)),
                           ],
                         ),
                       ],
@@ -466,8 +594,8 @@ class _NotificationScreenState extends State<NotificationScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(n.title,
-                          style: AppText.headline3
-                              .copyWith(fontSize: 16, color: AppColors.slate900)),
+                          style: AppText.headline3.copyWith(
+                              fontSize: 16, color: AppColors.slate900)),
                       const SizedBox(height: 2),
                       Text(_typeLabel(n.type),
                           style: AppText.caption.copyWith(color: color)),
@@ -480,8 +608,8 @@ class _NotificationScreenState extends State<NotificationScreen>
             const AppDivider(),
             const SizedBox(height: 16),
             Text(n.message,
-                style: AppText.body1.copyWith(
-                    color: AppColors.slate600, height: 1.6)),
+                style: AppText.body1
+                    .copyWith(color: AppColors.slate600, height: 1.6)),
             const SizedBox(height: 16),
             Row(
               children: [
@@ -491,8 +619,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 Text(
                   DateFormat('EEEE, dd MMMM yyyy · HH:mm', 'id_ID')
                       .format(n.createdAt),
-                  style:
-                      AppText.caption.copyWith(color: AppColors.slate600),
+                  style: AppText.caption.copyWith(color: AppColors.slate600),
                 ),
               ],
             ),

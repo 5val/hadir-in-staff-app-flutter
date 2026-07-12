@@ -546,7 +546,8 @@ class _LoginScreenState extends State<LoginScreen>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
                                     "WhatsApp • Hadir-In OTP",
@@ -591,7 +592,7 @@ class _LoginScreenState extends State<LoginScreen>
   String _getStepTitle() {
     switch (_currentStep) {
       case LoginStep.phone:
-        return "Masuk";
+        return "Login";
       case LoginStep.otp:
         return "Verifikasi OTP WA";
       case LoginStep.enterPasscode:
@@ -720,9 +721,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ],
         ),
-
         const SizedBox(height: 32),
-
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -753,15 +752,12 @@ class _LoginScreenState extends State<LoginScreen>
               ),
           ],
         ),
-
         const SizedBox(height: 16),
-
         GradientButton(
           label: "Verifikasi OTP",
           isLoading: _isLoading,
           onTap: _verifyOtp,
         ),
-
         const SizedBox(height: 12),
         TextButton(
           onPressed: () {
@@ -835,7 +831,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 36),
         GradientButton(
-          label: "MASUK",
+          label: "LOGIN",
           isLoading: _isLoading,
           onTap: _verifyEnterPasscode,
         ),

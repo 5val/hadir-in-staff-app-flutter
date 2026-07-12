@@ -8,6 +8,7 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import 'all_leave_history_screen.dart';
 import 'all_subordinate_leave_history_screen.dart';
+import 'subordinate_requests_screen.dart';
 
 /// Leave & Time Off tab — tampil langsung di MainScreen.
 /// Tanpa re-verifikasi. Tab selector untuk: Pengajuan Karyawan (supervisor),
@@ -40,18 +41,11 @@ class _LeaveTabState extends State<LeaveTab> {
     return list;
   }
 
-  List<_TabDef> get _tabs => _isSupervisor
-      ? const [
-          _TabDef(Icons.supervisor_account_rounded, 'Karyawan'),
-          _TabDef(Icons.beach_access_rounded,       'Cuti'),
-          _TabDef(Icons.medical_services_rounded,   'Izin'),
-          _TabDef(Icons.history_rounded,             'Riwayat'),
-        ]
-      : const [
-          _TabDef(Icons.beach_access_rounded,     'Cuti'),
-          _TabDef(Icons.medical_services_rounded, 'Izin'),
-          _TabDef(Icons.history_rounded,           'Riwayat'),
-        ];
+  List<_TabDef> get _tabs => const [
+        _TabDef(Icons.beach_access_rounded,     'Cuti'),
+        _TabDef(Icons.medical_services_rounded, 'Izin'),
+        _TabDef(Icons.history_rounded,           'Riwayat'),
+      ];
 
   void _showActionDialog(bool approve, String name) {
     showDialog(
@@ -109,6 +103,7 @@ class _LeaveTabState extends State<LeaveTab> {
       color: AppColors.brandNavy,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,7 +119,75 @@ class _LeaveTabState extends State<LeaveTab> {
                   style: AppText.headline2.copyWith(color: AppColors.white)),
             ],
           ),
+          if (_isSupervisor) _buildSeeMyTeamButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSeeMyTeamButton() {
+    final pendingCount = SampleData.subordinateLeaveRequests
+        .where((r) => r.status == RequestStatus.pending)
+        .length;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const SubordinateRequestsScreen(),
+            ),
+          );
+          if (mounted) setState(() {});
+        },
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: AppColors.white.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.white.withOpacity(0.25)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.people_alt_rounded,
+                color: AppColors.white,
+                size: 16,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'See My Team',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.white,
+                ),
+              ),
+              if (pendingCount > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: const BoxDecoration(
+                    color: AppColors.brandOrange,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '$pendingCount',
+                    style: GoogleFonts.inter(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -228,19 +291,10 @@ class _LeaveTabState extends State<LeaveTab> {
 
   // ── Tab Content ──────────────────────────────────────────
   Widget _buildTabContent() {
-    if (_isSupervisor) {
-      switch (_selectedTab) {
-        case 0: return _buildEmployeeTab();
-        case 1: return _buildCutiTab();
-        case 2: return _buildIzinTab();
-        case 3: return _buildRiwayatTab();
-      }
-    } else {
-      switch (_selectedTab) {
-        case 0: return _buildCutiTab();
-        case 1: return _buildIzinTab();
-        case 2: return _buildRiwayatTab();
-      }
+    switch (_selectedTab) {
+      case 0: return _buildCutiTab();
+      case 1: return _buildIzinTab();
+      case 2: return _buildRiwayatTab();
     }
     return const SizedBox();
   }
@@ -709,10 +763,10 @@ class _EmployeeAppTile extends StatelessWidget {
 
   String _allowanceLabel(AllowanceType a) {
     switch (a) {
-      case AllowanceType.health:        return '+ Tunjangan Kesehatan';
-      case AllowanceType.accommodation: return '+ Tunjangan Akomodasi';
-      case AllowanceType.transport:     return '+ Tunjangan Transport';
-      case AllowanceType.spp:           return '+ Tunjangan SPP';
+      case AllowanceType.health:        return 'Surat Dokter';
+      case AllowanceType.accommodation: return 'Resep';
+      case AllowanceType.transport:     return 'Nota Transportasi';
+      case AllowanceType.spp:           return 'Konsumsi';
     }
   }
 
@@ -1622,10 +1676,10 @@ class _IzinFormState extends State<_IzinForm> {
 
   String _allowanceName(AllowanceType a) {
     switch (a) {
-      case AllowanceType.health:        return 'Tunjangan Kesehatan';
-      case AllowanceType.accommodation: return 'Tunjangan Akomodasi';
-      case AllowanceType.transport:     return 'Tunjangan Transport';
-      case AllowanceType.spp:           return 'Tunjangan SPP';
+      case AllowanceType.health:        return 'Surat Dokter';
+      case AllowanceType.accommodation: return 'Resep';
+      case AllowanceType.transport:     return 'Nota Transportasi';
+      case AllowanceType.spp:           return 'Konsumsi';
     }
   }
 }

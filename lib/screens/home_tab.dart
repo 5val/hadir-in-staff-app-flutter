@@ -350,18 +350,18 @@ class _HomeTabState extends State<HomeTab> {
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.danger,
+              backgroundColor: const Color(0xFF25D366),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
             icon: const Icon(Icons.call_rounded, size: 16),
-            label: Text('Hubungi Sekarang',
+            label: Text('Hubungi WhatsApp',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
             onPressed: () {
               Navigator.pop(context);
-              _showSnackbar('📞 Menghubungi atasan...',
-                  color: AppColors.danger);
+              _showSnackbar('🟢 Menghubungi via WhatsApp...',
+                  color: const Color(0xFF25D366));
             },
           ),
         ],

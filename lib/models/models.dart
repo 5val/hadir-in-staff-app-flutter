@@ -399,6 +399,7 @@ class AppNotification {
   final NotificationType type;
   final DateTime createdAt;
   final bool isRead;
+  final bool isTeam;
 
   const AppNotification({
     required this.id,
@@ -407,6 +408,7 @@ class AppNotification {
     required this.type,
     required this.createdAt,
     this.isRead = false,
+    this.isTeam = false,
   });
 }
 

@@ -237,24 +237,8 @@ class _AccountTabState extends State<AccountTab> {
                         icon: Icons.lock_outline_rounded,
                         label: 'Ubah Passcode',
                         subtitle: 'Ganti passcode pengaman sesi Anda',
-                        onTap: () => _showChangePasscode(),
-                      ),
-                      _MenuItem(
-                        icon: Icons.pin_outlined,
-                        label: 'Kunci Aplikasi',
-                        subtitle: 'Simulasikan sesi habis / aplikasi terkunci',
                         showDivider: false,
-                        onTap: () async {
-                          await SessionService.lockSession();
-                          if (mounted) {
-                            Navigator.pushAndRemoveUntil(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AuthWrapper()),
-                              (r) => false,
-                            );
-                          }
-                        },
+                        onTap: () => _showChangePasscode(),
                       ),
                     ],
                   ),
@@ -462,10 +446,13 @@ class _AccountTabState extends State<AccountTab> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _StatChip(
-                label: 'ID Karyawan',
-                value: user.employeeId,
-                icon: Icons.badge_outlined,
+              GestureDetector(
+                onTap: () => _showQrCodeDialog(context, user.employeeId),
+                child: const _StatChip(
+                  label: 'Scan ID',
+                  value: 'QR Code',
+                  icon: Icons.qr_code_2_rounded,
+                ),
               ),
               if (user.role != UserRole.admin) ...[
                 Container(width: 1, height: 36, color: AppColors.slate200),
@@ -686,7 +673,7 @@ class _AccountTabState extends State<AccountTab> {
             const SizedBox(height: 16),
             _InfoRow(Icons.person_outline_rounded, 'Nama Lengkap', user.name),
             const AppDivider(),
-            _InfoRow(Icons.badge_outlined, 'ID Karyawan', user.employeeId),
+            _EmployeeQrCard(employeeId: user.employeeId),
             const AppDivider(),
             _InfoRow(Icons.email_outlined, 'Email', user.email),
             const AppDivider(),
@@ -875,6 +862,63 @@ class _AccountTabState extends State<AccountTab> {
       ),
     );
   }
+
+  void _showQrCodeDialog(BuildContext context, String employeeId) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2_rounded, color: AppColors.brandNavy),
+            const SizedBox(width: 8),
+            Text(
+              'QR Code Karyawan',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.slate900,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.slate200),
+              ),
+              child: CustomPaint(
+                size: const Size(200, 200),
+                painter: _EmployeeQrPainter(employeeId),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              employeeId,
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.brandNavy,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Helper Widgets ────────────────────────────────────────────
@@ -1041,4 +1085,194 @@ class _PasscodeFieldState extends State<_PasscodeField> {
       ],
     );
   }
+}
+
+class _EmployeeQrCard extends StatelessWidget {
+  final String employeeId;
+  const _EmployeeQrCard({required this.employeeId});
+
+  void _showQrCodeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2_rounded, color: AppColors.brandNavy),
+            const SizedBox(width: 8),
+            Text(
+              'QR Code Karyawan',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.slate900,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.slate200),
+              ),
+              child: CustomPaint(
+                size: const Size(200, 200),
+                painter: _EmployeeQrPainter(employeeId),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              employeeId,
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.brandNavy,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Tutup'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _showQrCodeDialog(context),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.slate200),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.qr_code_2_rounded, color: AppColors.brandNavy, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'QR Code Karyawan',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.slate900,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.slate200),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.brandNavy.withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: CustomPaint(
+                size: const Size(140, 140),
+                painter: _EmployeeQrPainter(employeeId),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  employeeId,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.brandNavy,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.zoom_in_rounded, size: 16, color: AppColors.brandNavy),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmployeeQrPainter extends CustomPainter {
+  final String data;
+  _EmployeeQrPainter(this.data);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = Colors.black;
+    final cellSize = size.width / 21;
+
+    void drawFinder(double x, double y) {
+      canvas.drawRect(Rect.fromLTWH(x, y, cellSize * 7, cellSize * 7), paint);
+      canvas.drawRect(
+        Rect.fromLTWH(x + cellSize, y + cellSize, cellSize * 5, cellSize * 5),
+        Paint()..color = Colors.white,
+      );
+      canvas.drawRect(
+        Rect.fromLTWH(x + cellSize * 2, y + cellSize * 2, cellSize * 3, cellSize * 3),
+        paint,
+      );
+    }
+
+    drawFinder(0, 0);
+    drawFinder(cellSize * 14, 0);
+    drawFinder(0, cellSize * 14);
+
+    for (int r = 0; r < 21; r++) {
+      for (int c = 0; c < 21; c++) {
+        bool isTopLeft = r < 8 && c < 8;
+        bool isTopRight = r < 8 && c >= 13;
+        bool isBottomLeft = r >= 13 && c < 8;
+        if (isTopLeft || isTopRight || isBottomLeft) continue;
+
+        bool isAlignment = r >= 14 && r <= 18 && c >= 14 && c <= 18;
+        if (isAlignment) {
+          int relR = r - 14;
+          int relC = c - 14;
+          bool fill = (relR == 0 || relR == 4 || relC == 0 || relC == 4 || (relR == 2 && relC == 2));
+          if (fill) {
+            canvas.drawRect(Rect.fromLTWH(c * cellSize, r * cellSize, cellSize, cellSize), paint);
+          }
+          continue;
+        }
+
+        final hash = (data.hashCode ^ (r * 73) ^ (c * 19)) & 0xFFFF;
+        if (hash % 2 == 0) {
+          canvas.drawRect(Rect.fromLTWH(c * cellSize, r * cellSize, cellSize, cellSize), paint);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

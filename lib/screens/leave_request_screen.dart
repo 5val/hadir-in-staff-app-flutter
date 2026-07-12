@@ -136,10 +136,10 @@ class _LeaveRequestScreenState extends State<LeaveRequestScreen>
 
   String _allowanceLabel(AllowanceType a) {
     switch (a) {
-      case AllowanceType.health:        return 'Tunjangan Kesehatan';
-      case AllowanceType.accommodation: return 'Tunjangan Akomodasi';
-      case AllowanceType.transport:     return 'Tunjangan Transportasi';
-      case AllowanceType.spp:           return 'Tunjangan SPP (One-time)';
+      case AllowanceType.health:        return 'Surat Dokter';
+      case AllowanceType.accommodation: return 'Resep';
+      case AllowanceType.transport:     return 'Nota Transportasi';
+      case AllowanceType.spp:           return 'Konsumsi';
     }
   }
 
@@ -621,7 +621,7 @@ class _LeaveRequestScreenState extends State<LeaveRequestScreen>
                   children: [
                     Icon(_permTypeIcon(_permType), color: typeColor, size: 15),
                     const SizedBox(width: 6),
-                    Text('Tunjangan yang Diperoleh',
+                    Text('Dokumen yang Diperlukan',
                         style: AppText.label.copyWith(color: typeColor)),
                   ],
                 ),
@@ -719,10 +719,10 @@ class _LeaveRequestScreenState extends State<LeaveRequestScreen>
           const SizedBox(height: 4),
           Text(
             _isSick
-                ? 'Wajib upload surat dokter (1 foto)'
+                ? 'Wajib upload Surat Dokter (1 foto)'
                 : _isSeminar
-                    ? 'Upload bukti pendaftaran & akomodasi (maks 2 foto)'
-                    : 'Upload bukti tagihan SPP (1 foto)',
+                    ? 'Upload bukti Resep & Nota Transportasi (maks 2 foto)'
+                    : 'Upload bukti Konsumsi (1 foto)',
             style: AppText.body2,
           ),
           const SizedBox(height: 8),
