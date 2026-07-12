@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Secrets — platform config with API keys/client IDs, never commit
+/android/app/google-services.json
+/ios/Runner/GoogleService-Info.plist
+
