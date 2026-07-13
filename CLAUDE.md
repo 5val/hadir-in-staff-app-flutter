@@ -26,7 +26,7 @@ assets/images/    # logo & maskot Hadir-In
 
 ## Konvensi
 - Linter: `package:flutter_lints/flutter.yaml` (`analysis_options.yaml`), belum ada override kustom.
-- Baca `APP-UI-GUIDELINE.md`, `UI-DESIGN-GUIDE.md`, `COLOR-PALETTE.md` di root sebelum bikin UI baru — desain sistem sudah didefinisikan di situ.
+- Baca `docs/APP-UI-GUIDELINE.md`, `docs/UI-DESIGN-GUIDE.md`, `docs/COLOR-PALETTE.md` sebelum bikin UI baru — desain sistem sudah didefinisikan di situ.
 - Sesi login pakai `SessionService` (local `shared_preferences` saja — phone/employeeId/passcode), tidak ada token server. Jangan asumsikan ada auth backend sampai integrasi API dikerjakan.
 
 ## Commands

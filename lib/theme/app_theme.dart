@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 // ─────────────────────────────────────────────────────────────
-//  HADIR-IN BRAND COLORS  (from COLOR-PALETTE.md)
+//  HADIR-IN BRAND COLORS  (from docs/COLOR-PALETTE.md)
 // ─────────────────────────────────────────────────────────────
 class AppColors {
   // ── Brand primaries ──────────────────────────────────────
