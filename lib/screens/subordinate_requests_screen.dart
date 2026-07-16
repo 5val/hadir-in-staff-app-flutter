@@ -511,10 +511,10 @@ class _DetailRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
-        crossAxisAlignment:
-            isMultiLine ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+            // isMultiLine ? CrossAxisAlignment.start : CrossAxisAlignment.center,
         children: [
-          Spacer(),
+          // Spacer(),
           SizedBox(
             width: 100,
             child: Text(label, style: AppText.caption),
@@ -528,7 +528,7 @@ class _DetailRow extends StatelessWidget {
                 fontWeight: FontWeight.w700,
                 color: AppColors.slate900,
               ),
-              textAlign: TextAlign.right,
+              textAlign: TextAlign.left,
             ),
           ),
         ],

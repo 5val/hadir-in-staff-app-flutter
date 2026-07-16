@@ -2031,11 +2031,12 @@ class _DetailRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 110,
-            child: Text(label, style: AppText.body2),
+            child: Text(label, style: AppText.body2, textAlign: TextAlign.start,),
           ),
           Expanded(
             child: Text(
               value,
+              textAlign: TextAlign.start,
               style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
