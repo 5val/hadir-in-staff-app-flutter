@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/models.dart';
+import 'attendance_service.dart';
+
 /// Status kehadiran karyawan hari ini
 enum AttendanceProviderStatus {
   notCheckedIn, // Belum check-in sama sekali
@@ -178,6 +181,44 @@ class AttendanceProvider extends ChangeNotifier {
     _checkOutTime = null;
     _breakStartTime = null;
     _breakEndTime = null;
+    notifyListeners();
+  }
+
+  // ── Integrasi backend ─────────────────────────────────────────────
+  /// Sinkronkan status dari record absensi hari ini (backend). Dipanggil saat
+  /// app dibuka agar FAB & Home mencerminkan kondisi nyata.
+  void hydrateFromToday(AttendanceRecord? rec) {
+    if (rec == null) {
+      _status = AttendanceProviderStatus.notCheckedIn;
+      _checkInTime = null;
+      _checkOutTime = null;
+    } else {
+      _checkInTime = rec.checkIn;
+      _checkOutTime = rec.checkOut;
+      if (rec.checkOut != null) {
+        _status = AttendanceProviderStatus.checkedOut;
+      } else if (rec.checkIn != null) {
+        _status = AttendanceProviderStatus.checkedIn;
+      } else {
+        _status = AttendanceProviderStatus.notCheckedIn;
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Check-in ke backend lalu update state. Melempar [ApiException] bila gagal.
+  Future<void> checkInRemote({String? lokasi, String? fotoPath}) async {
+    final rec = await AttendanceService.checkIn(lokasi: lokasi, fotoMasuk: fotoPath);
+    _status = AttendanceProviderStatus.checkedIn;
+    _checkInTime = rec.checkIn ?? DateTime.now();
+    notifyListeners();
+  }
+
+  /// Check-out ke backend lalu update state. Melempar [ApiException] bila gagal.
+  Future<void> checkOutRemote({String? fotoPath}) async {
+    final rec = await AttendanceService.checkOut(fotoKeluar: fotoPath);
+    _status = AttendanceProviderStatus.checkedOut;
+    _checkOutTime = rec.checkOut ?? DateTime.now();
     notifyListeners();
   }
 }

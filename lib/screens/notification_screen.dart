@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
+import '../services/notification_service.dart';
+import '../services/api_client.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class NotificationScreen extends StatefulWidget {
@@ -15,7 +17,9 @@ class NotificationScreen extends StatefulWidget {
 class _NotificationScreenState extends State<NotificationScreen>
     with TickerProviderStateMixin {
   late final AnimationController _listController;
-  late List<AppNotification> _notifications;
+  List<AppNotification> _notifications = [];
+  bool _loading = true;
+  String? _error;
   String _filter = 'Semua';
   String _scope = 'Diri Sendiri';
 
@@ -33,12 +37,11 @@ class _NotificationScreenState extends State<NotificationScreen>
   @override
   void initState() {
     super.initState();
-    _notifications = List.from(SampleData.notifications)
-      ..addAll(_extraSampleNotifications());
     _listController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
-    )..forward();
+    );
+    _load();
   }
 
   @override
@@ -47,67 +50,27 @@ class _NotificationScreenState extends State<NotificationScreen>
     super.dispose();
   }
 
-  List<AppNotification> _extraSampleNotifications() => [
-        AppNotification(
-          id: 'N004',
-          title: 'Cuti Ditolak',
-          message:
-              'Pengajuan cuti Anda tanggal 20 Mar ditolak. Alasan: Kuota cuti habis untuk bulan ini.',
-          type: NotificationType.rejection,
-          createdAt: DateTime.now().subtract(const Duration(days: 2)),
-          isRead: true,
-          isTeam: false,
-        ),
-        AppNotification(
-          id: 'N005',
-          title: 'Slip Gaji Tersedia',
-          message:
-              'Slip gaji periode Maret 2026 sudah dapat diunduh di menu Slip Gaji.',
-          type: NotificationType.info,
-          createdAt: DateTime.now().subtract(const Duration(days: 3)),
-          isRead: true,
-          isTeam: false,
-        ),
-        AppNotification(
-          id: 'N006',
-          title: 'Izin Seminar Disetujui',
-          message:
-              'Izin seminar tanggal 15 Mar telah disetujui. Tunjangan akomodasi & transportasi akan diproses.',
-          type: NotificationType.approval,
-          createdAt: DateTime.now().subtract(const Duration(days: 4)),
-          isRead: true,
-          isTeam: false,
-        ),
-        AppNotification(
-          id: 'NT001',
-          title: 'Pengajuan Cuti Karyawan',
-          message:
-              'Ahmad Rizki mengajukan Cuti Tahunan untuk tanggal 19-21 Juli.',
-          type: NotificationType.info,
-          createdAt: DateTime.now().subtract(const Duration(hours: 1)),
-          isRead: false,
-          isTeam: true,
-        ),
-        AppNotification(
-          id: 'NT002',
-          title: 'Izin Sakit Karyawan',
-          message:
-              'Budi Santoso mengajukan Izin Sakit dengan lampiran Surat Dokter.',
-          type: NotificationType.info,
-          createdAt: DateTime.now().subtract(const Duration(hours: 5)),
-          isRead: false,
-          isTeam: true,
-        ),
-        AppNotification(
-          id: 'NT003',
-          title: 'Pengajuan Cuti Disetujui',
-          message: 'Pengajuan cuti tahunan oleh Ahmad Rizki telah disetujui.',
-          type: NotificationType.approval,
-          createdAt: DateTime.now().subtract(const Duration(days: 1)),
-          isRead: true,
-          isTeam: true,
-        ),
-      ];
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final res = await NotificationService.myNotifications();
+      if (!mounted) return;
+      setState(() {
+        _notifications = res.items;
+        _loading = false;
+      });
+      _listController.forward(from: 0);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
 
   List<AppNotification> get _filtered {
     List<AppNotification> list = _notifications;
@@ -147,28 +110,39 @@ class _NotificationScreenState extends State<NotificationScreen>
     return list.where((n) => !n.isRead).length;
   }
 
-  void _markAllRead() {
+  Future<void> _markAllRead() async {
+    try {
+      await NotificationService.markAllRead();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+      return;
+    }
+    if (!mounted) return;
     setState(() {
-      _notifications = _notifications.map((n) {
-        final matchesScope =
-            !_isSupervisor || (_scope == 'Diri Sendiri' ? !n.isTeam : n.isTeam);
-        if (matchesScope) {
-          return AppNotification(
-            id: n.id,
-            title: n.title,
-            message: n.message,
-            type: n.type,
-            createdAt: n.createdAt,
-            isRead: true,
-            isTeam: n.isTeam,
-          );
-        }
-        return n;
-      }).toList();
+      _notifications = _notifications
+          .map((n) => AppNotification(
+                id: n.id,
+                title: n.title,
+                message: n.message,
+                type: n.type,
+                createdAt: n.createdAt,
+                isRead: true,
+                isTeam: n.isTeam,
+              ))
+          .toList();
     });
   }
 
-  void _markRead(String id) {
+  Future<void> _markRead(String id) async {
+    try {
+      await NotificationService.markRead(id);
+    } on ApiException catch (_) {
+      // Diamkan; tandai lokal saja bila gagal.
+    }
+    if (!mounted) return;
     setState(() {
       _notifications = _notifications
           .map((n) => n.id == id
@@ -393,21 +367,52 @@ class _NotificationScreenState extends State<NotificationScreen>
 
           // ── List ─────────────────────────────────────────────────
           Expanded(
-            child: filtered.isEmpty
-                ? _buildEmpty()
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: filtered.length,
-                    itemBuilder: (ctx, i) {
-                      final n = filtered[i];
-                      return _buildCard(n, i);
-                    },
-                  ),
+            child: _loading
+                ? const Center(
+                    child:
+                        CircularProgressIndicator(color: AppColors.brandNavy))
+                : _error != null
+                    ? _buildErrorState()
+                    : filtered.isEmpty
+                        ? _buildEmpty()
+                        : RefreshIndicator(
+                            onRefresh: _load,
+                            child: ListView.builder(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: filtered.length,
+                              itemBuilder: (ctx, i) {
+                                final n = filtered[i];
+                                return _buildCard(n, i);
+                              },
+                            ),
+                          ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildErrorState() => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded,
+                  size: 48, color: AppColors.slate400),
+              const SizedBox(height: 12),
+              Text(_error ?? 'Gagal memuat notifikasi',
+                  textAlign: TextAlign.center, style: AppText.body2),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Coba Lagi'),
+              ),
+            ],
+          ),
+        ),
+      );
 
   Widget _buildEmpty() => Center(
         child: Column(

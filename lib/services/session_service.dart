@@ -7,6 +7,30 @@ class SessionService {
   static const _keyPhone         = 'hadir_in_phone';
   static const _keyPasscode      = 'hadir_in_passcode';
   static const _keySessionActive = 'hadir_in_session_active';
+  // Kredensial backend (diisi setelah login API berhasil di Tahap 1).
+  static const _keyToken         = 'hadir_in_token';
+  static const _keyStaffId       = 'hadir_in_staff_id';
+
+  // ── Kredensial backend (JWT staff + id staff asli dari database) ──────
+  static Future<void> saveToken(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyToken, token);
+  }
+
+  static Future<String?> getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyToken);
+  }
+
+  static Future<void> saveStaffId(String staffId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyStaffId, staffId);
+  }
+
+  static Future<String?> getStaffId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyStaffId);
+  }
 
   static Future<bool> isLoggedIn() async {
     final prefs = await SharedPreferences.getInstance();
@@ -77,6 +101,8 @@ class SessionService {
     await prefs.remove(_keyEmployeeId);
     await prefs.remove(_keyPasscode);
     await prefs.remove(_keySessionActive);
+    await prefs.remove(_keyToken);
+    await prefs.remove(_keyStaffId);
     AppSession.clearUser();
   }
 

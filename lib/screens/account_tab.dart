@@ -458,7 +458,7 @@ class _AccountTabState extends State<AccountTab> {
                 Container(width: 1, height: 36, color: AppColors.slate200),
                 _StatChip(
                   label: 'Sisa Cuti',
-                  value: '9 hari',
+                  value: '${AppSession.staff?.sisaCuti ?? 0} hari',
                   icon: Icons.beach_access_rounded,
                 ),
                 Container(width: 1, height: 36, color: AppColors.slate200),
@@ -677,7 +677,7 @@ class _AccountTabState extends State<AccountTab> {
             const AppDivider(),
             _InfoRow(Icons.email_outlined, 'Email', user.email),
             const AppDivider(),
-            _InfoRow(Icons.business_outlined, 'Divisi', 'Marketing'),
+            _InfoRow(Icons.business_outlined, 'Divisi', AppSession.staff?.divisiNama ?? '-'),
             if (user.role != UserRole.admin) ...[
               const AppDivider(),
               _InfoRow(Icons.schedule_outlined, 'Shift',

@@ -6,9 +6,12 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/leave_service.dart';
+import '../services/api_client.dart';
 import 'all_leave_history_screen.dart';
 import 'all_subordinate_leave_history_screen.dart';
 import 'subordinate_requests_screen.dart';
+import 'overtime_history_screen.dart';
 
 /// Leave & Time Off tab — tampil langsung di MainScreen.
 /// Tanpa re-verifikasi. Tab selector untuk: Pengajuan Karyawan (supervisor),
@@ -26,25 +29,61 @@ class _LeaveTabState extends State<LeaveTab> {
   //   non-supervisor: 0=Ajukan Cuti, 1=Ajukan Izin, 2=Riwayat
   int _selectedTab = 0;
 
-  final bool _isSupervisor =
-      SampleData.currentUser.role == UserRole.supervisor;
+  final bool _isSupervisor = SampleData.currentUser.role == UserRole.supervisor;
 
   bool _showAllHistory = false;
   LeaveType? _filterType;
   RequestStatus? _filterStatus;
+  DateTime? _overtimeStartDate;
+  DateTime? _overtimeEndDate;
+
+  // Riwayat pengajuan cuti/izin milik staff (dari backend).
+  List<LeaveRequest> _myLeaves = [];
+  bool _loadingLeaves = true;
+  String? _leaveError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLeaves();
+  }
+
+  Future<void> _loadLeaves() async {
+    setState(() {
+      _loadingLeaves = true;
+      _leaveError = null;
+    });
+    try {
+      final list = await LeaveService.myLeaves();
+      if (!mounted) return;
+      setState(() {
+        _myLeaves = list;
+        _loadingLeaves = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _leaveError = e.message;
+        _loadingLeaves = false;
+      });
+    }
+  }
 
   List<LeaveRequest> get _filtered {
-    var list = List<LeaveRequest>.from(SampleData.leaveRequests);
-    if (_filterType != null) list = list.where((r) => r.type == _filterType).toList();
-    if (_filterStatus != null) list = list.where((r) => r.status == _filterStatus).toList();
+    var list = List<LeaveRequest>.from(_myLeaves);
+    if (_filterType != null)
+      list = list.where((r) => r.type == _filterType).toList();
+    if (_filterStatus != null)
+      list = list.where((r) => r.status == _filterStatus).toList();
     list.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
     return list;
   }
 
   List<_TabDef> get _tabs => const [
-        _TabDef(Icons.beach_access_rounded,     'Cuti'),
+        _TabDef(Icons.beach_access_rounded, 'Cuti'),
         _TabDef(Icons.medical_services_rounded, 'Izin'),
-        _TabDef(Icons.history_rounded,           'Riwayat'),
+        _TabDef(Icons.history_rounded, 'Riwayat'),
+        _TabDef(Icons.more_time_rounded, 'Lembur'),
       ];
 
   void _showActionDialog(bool approve, String name) {
@@ -170,7 +209,8 @@ class _LeaveTabState extends State<LeaveTab> {
               if (pendingCount > 0) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: const BoxDecoration(
                     color: AppColors.brandOrange,
                     shape: BoxShape.circle,
@@ -199,11 +239,11 @@ class _LeaveTabState extends State<LeaveTab> {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
       child: Row(
         children: _tabs.asMap().entries.map((e) {
-          final idx      = e.key;
-          final tab      = e.value;
+          final idx = e.key;
+          final tab = e.value;
           final selected = idx == _selectedTab;
 
-          // Show pending badge on "Karyawan" tab for supervisor
+          // Show pending badge on "Cuti" tab for supervisor (since Cuti is now idx == 0)
           final pendingCount = (_isSupervisor && idx == 0)
               ? SampleData.subordinateLeaveRequests
                   .where((r) => r.status == RequestStatus.pending)
@@ -271,9 +311,8 @@ class _LeaveTabState extends State<LeaveTab> {
                       tab.label,
                       style: GoogleFonts.inter(
                         fontSize: 10,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
                         color: selected
                             ? AppColors.white
                             : AppColors.white.withOpacity(0.55),
@@ -292,9 +331,14 @@ class _LeaveTabState extends State<LeaveTab> {
   // ── Tab Content ──────────────────────────────────────────
   Widget _buildTabContent() {
     switch (_selectedTab) {
-      case 0: return _buildCutiTab();
-      case 1: return _buildIzinTab();
-      case 2: return _buildRiwayatTab();
+      case 0:
+        return _buildCutiTab();
+      case 1:
+        return _buildIzinTab();
+      case 2:
+        return _buildRiwayatTab();
+      case 3:
+        return _buildLemburTab();
     }
     return const SizedBox();
   }
@@ -317,8 +361,8 @@ class _LeaveTabState extends State<LeaveTab> {
                 MaterialPageRoute(
                     builder: (_) => const AllSubordinateLeaveHistoryScreen()),
               ),
-              icon: const Icon(Icons.history_rounded, size: 14,
-                  color: AppColors.brandNavy),
+              icon: const Icon(Icons.history_rounded,
+                  size: 14, color: AppColors.brandNavy),
               label: Text('Semua Riwayat',
                   style: GoogleFonts.inter(
                       fontSize: 11,
@@ -337,8 +381,7 @@ class _LeaveTabState extends State<LeaveTab> {
                   children: [
                     const Text('✅', style: TextStyle(fontSize: 40)),
                     const SizedBox(height: 8),
-                    Text('Tidak ada pengajuan masuk',
-                        style: AppText.body2),
+                    Text('Tidak ada pengajuan masuk', style: AppText.body2),
                   ],
                 ),
               ),
@@ -346,23 +389,497 @@ class _LeaveTabState extends State<LeaveTab> {
           )
         else
           ...apps.asMap().entries.map((e) {
-            final app    = e.value;
+            final app = e.value;
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: SectionCard(
                 padding: EdgeInsets.zero,
                 child: _EmployeeAppTile(
                   app: app,
-                  onApprove: () =>
-                      _showActionDialog(true, app.employeeName!),
-                  onReject: () =>
-                      _showActionDialog(false, app.employeeName!),
+                  onApprove: () => _showActionDialog(true, app.employeeName!),
+                  onReject: () => _showActionDialog(false, app.employeeName!),
                 ),
               ),
             );
           }),
       ],
     );
+  }
+
+  // ── Lembur Tab ───────────────────────────────────────────
+  Future<void> _pickOvertimeStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _overtimeStartDate ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.brandNavy,
+              onPrimary: Colors.white,
+              onSurface: AppColors.slate900,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _overtimeStartDate = picked;
+        if (_overtimeEndDate != null &&
+            _overtimeEndDate!.isBefore(_overtimeStartDate!)) {
+          _overtimeEndDate = null;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickOvertimeEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _overtimeEndDate ?? _overtimeStartDate ?? DateTime.now(),
+      firstDate: _overtimeStartDate ??
+          DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.brandNavy,
+              onPrimary: Colors.white,
+              onSurface: AppColors.slate900,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() => _overtimeEndDate = picked);
+    }
+  }
+
+  Widget _buildDateInput({
+    required String label,
+    required DateTime? value,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.slate100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.slate300),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.calendar_today_rounded,
+                  size: 14, color: AppColors.slate600),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: AppColors.slate700,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value == null
+                          ? '-'
+                          : DateFormat('dd/MM/yyyy').format(value),
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: value == null
+                            ? AppColors.slate400
+                            : AppColors.slate800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Lembur Tab ───────────────────────────────────────────
+  Widget _buildLemburTab() {
+    final user = SampleData.currentUser;
+    final userShift = user.currentShift;
+    final shiftEndTime = userShift.endTime;
+    final shiftEndMinutes = shiftEndTime.hour * 60 + shiftEndTime.minute;
+
+    // Filter absensi yang check out-nya melebihi jam pulang normal dan belum diajukan lembur
+    var readyToApply = SampleData.recentAttendance.where((r) {
+      if (r.checkOut == null) return false;
+      if (r.overtimeApplied) return false;
+      final checkoutMinutes = r.checkOut!.hour * 60 + r.checkOut!.minute;
+      return checkoutMinutes > shiftEndMinutes;
+    }).toList();
+
+    // Filter range tanggal
+    if (_overtimeStartDate != null) {
+      readyToApply = readyToApply.where((r) {
+        final recordDateOnly = DateTime(r.date.year, r.date.month, r.date.day);
+        final startDateOnly = DateTime(_overtimeStartDate!.year,
+            _overtimeStartDate!.month, _overtimeStartDate!.day);
+        return recordDateOnly.isAfter(startDateOnly) ||
+            recordDateOnly.isAtSameMomentAs(startDateOnly);
+      }).toList();
+    }
+
+    if (_overtimeEndDate != null) {
+      readyToApply = readyToApply.where((r) {
+        final recordDateOnly = DateTime(r.date.year, r.date.month, r.date.day);
+        final endDateOnly = DateTime(_overtimeEndDate!.year,
+            _overtimeEndDate!.month, _overtimeEndDate!.day);
+        return recordDateOnly.isBefore(endDateOnly) ||
+            recordDateOnly.isAtSameMomentAs(endDateOnly);
+      }).toList();
+    }
+
+    // Sort by date descending
+    readyToApply.sort((a, b) => b.date.compareTo(a.date));
+
+    final df = DateFormat('EEEE, dd MMMM yyyy', 'id_ID');
+    final tf = DateFormat('HH:mm');
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        // Info card at the top displaying maximum overtime limit
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppColors.brandNavy,
+                AppColors.brandNavy.withOpacity(0.85),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.brandNavy.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.more_time_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Batas Maksimal Lembur Anda',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white.withOpacity(0.8),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${user.maxOvertimeHours} Jam / Pengajuan',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // --- FILTER & HISTORY NAVIGATION ROW ---
+        Row(
+          children: [
+            _buildDateInput(
+              label: 'Mulai',
+              value: _overtimeStartDate,
+              onTap: _pickOvertimeStartDate,
+            ),
+            const SizedBox(width: 8),
+            Text('-',
+                style:
+                    GoogleFonts.inter(fontSize: 12, color: AppColors.slate700)),
+            const SizedBox(width: 8),
+            _buildDateInput(
+              label: 'Selesai',
+              value: _overtimeEndDate,
+              onTap: _pickOvertimeEndDate,
+            ),
+            if (_overtimeStartDate != null || _overtimeEndDate != null) ...[
+              const SizedBox(width: 6),
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded,
+                    color: AppColors.slate700, size: 20),
+                onPressed: () => setState(() {
+                  _overtimeStartDate = null;
+                  _overtimeEndDate = null;
+                }),
+                tooltip: 'Reset Filter',
+              ),
+            ],
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.history_rounded, size: 16),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.brandNavy,
+                side: const BorderSide(color: AppColors.brandNavy),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              label: Text(
+                'Riwayat',
+                style: GoogleFonts.inter(
+                    fontSize: 11, fontWeight: FontWeight.w700),
+              ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const OvertimeHistoryScreen()),
+                ).then((_) {
+                  if (mounted) setState(() {});
+                });
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+
+        // --- SECTION Header ---
+        Row(
+          children: [
+            Text(
+              'Absensi Siap Lembur',
+              style: AppText.headline3.copyWith(color: AppColors.slate900),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.brandOrange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '${readyToApply.length}',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.brandOrange,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        if (readyToApply.isEmpty)
+          SectionCard(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  const Text('✅', style: TextStyle(fontSize: 32)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tidak ada absensi baru yang memenuhi kriteria filter.',
+                    textAlign: TextAlign.center,
+                    style: AppText.body2.copyWith(color: AppColors.slate600),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ...readyToApply.map((record) {
+            // Hitung kelebihan waktu
+            final diff = record.checkOut!.difference(
+              DateTime(
+                record.checkOut!.year,
+                record.checkOut!.month,
+                record.checkOut!.day,
+                shiftEndTime.hour,
+                shiftEndTime.minute,
+              ),
+            );
+            final hours = diff.inHours;
+            final minutes = diff.inMinutes % 60;
+            final diffStr =
+                hours > 0 ? '$hours jam $minutes menit' : '$minutes menit';
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: SectionCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Date
+                    Text(
+                      df.format(record.date),
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.slate800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const AppDivider(),
+                    const SizedBox(height: 10),
+
+                    // Info Row
+                    Row(
+                      children: [
+                        const Icon(Icons.login_rounded,
+                            size: 16, color: AppColors.slate700),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Check-in: ${record.checkIn != null ? tf.format(record.checkIn!) : '-'}',
+                          style: AppText.body2,
+                        ),
+                        const SizedBox(width: 16),
+                        const Icon(Icons.logout_rounded,
+                            size: 16, color: AppColors.slate700),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Check-out: ${tf.format(record.checkOut!)}',
+                          style: AppText.body2,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    Row(
+                      children: [
+                        const Icon(Icons.schedule_rounded,
+                            size: 16, color: AppColors.slate700),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Pulang Normal: ${userShift.endTimeStr}',
+                          style: AppText.body2,
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Kelebihan: $diffStr',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.brandOrange,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    GradientButton(
+                      label: 'Ajukan Lembur',
+                      height: 40,
+                      color: AppColors.brandNavy,
+                      onTap: () => _showOvertimeDialog(record,
+                          user.maxOvertimeHours, df.format(record.date)),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  void _showOvertimeDialog(
+      AttendanceRecord record, double maxHours, String dateStr) async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) =>
+          _OvertimeRequestDialog(maxOvertimeHours: maxHours, dateStr: dateStr),
+    );
+
+    if (result == null) return;
+
+    final hours = result['hours'] as double;
+    final reason = result['reason'] as String;
+
+    final idx =
+        SampleData.recentAttendance.indexWhere((r) => r.id == record.id);
+    if (idx != -1) {
+      setState(() {
+        SampleData.recentAttendance[idx] =
+            SampleData.recentAttendance[idx].copyWith(
+          overtimeMinutes: (hours * 60).round(),
+          overtimeReason: reason,
+          overtimeApplied: true,
+          overtimeStatus: RequestStatus.pending,
+        );
+      });
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            icon: Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                  color: AppColors.brandLimeDark, shape: BoxShape.circle),
+              child: const Icon(Icons.check_rounded,
+                  color: Colors.white, size: 24),
+            ),
+            title:
+                const Text('Pengajuan Berhasil!', textAlign: TextAlign.center),
+            content: Text('Pengajuan lembur telah dikirim.',
+                style: AppText.body2, textAlign: TextAlign.center),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'))
+            ],
+          ),
+        );
+      }
+    }
   }
 
   // ── Cuti Tab ─────────────────────────────────────────────
@@ -378,8 +895,7 @@ class _LeaveTabState extends State<LeaveTab> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(color: AppColors.slate100)),
+                  border: Border(bottom: BorderSide(color: AppColors.slate100)),
                 ),
                 child: Row(
                   children: [
@@ -409,7 +925,7 @@ class _LeaveTabState extends State<LeaveTab> {
                   ],
                 ),
               ),
-              const _CutiForm(),
+              _CutiForm(onSubmitted: _loadLeaves),
             ],
           ),
         ),
@@ -430,8 +946,7 @@ class _LeaveTabState extends State<LeaveTab> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(
-                  border: Border(
-                      bottom: BorderSide(color: AppColors.slate100)),
+                  border: Border(bottom: BorderSide(color: AppColors.slate100)),
                 ),
                 child: Row(
                   children: [
@@ -461,7 +976,7 @@ class _LeaveTabState extends State<LeaveTab> {
                   ],
                 ),
               ),
-              const _IzinForm(),
+              _IzinForm(onSubmitted: _loadLeaves),
             ],
           ),
         ),
@@ -471,6 +986,33 @@ class _LeaveTabState extends State<LeaveTab> {
 
   // ── Riwayat Tab ──────────────────────────────────────────
   Widget _buildRiwayatTab() {
+    if (_loadingLeaves) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.brandNavy));
+    }
+    if (_leaveError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.cloud_off_rounded,
+                  size: 48, color: AppColors.slate400),
+              const SizedBox(height: 12),
+              Text(_leaveError!,
+                  textAlign: TextAlign.center, style: AppText.body2),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _loadLeaves,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Coba Lagi'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (_showAllHistory) {
       return Column(
         children: [
@@ -480,7 +1022,8 @@ class _LeaveTabState extends State<LeaveTab> {
                 icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
                 onPressed: () => setState(() => _showAllHistory = false),
               ),
-              Text('Semua Riwayat', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+              Text('Semua Riwayat',
+                  style: AppText.headline3.copyWith(color: AppColors.slate900)),
             ],
           ),
           // ── Filter chips: Jenis ───────────────────────────
@@ -510,28 +1053,40 @@ class _LeaveTabState extends State<LeaveTab> {
                         label: 'Cuti',
                         icon: Icons.beach_access_rounded,
                         selected: _filterType == LeaveType.annual,
-                        onTap: () => setState(() => _filterType = _filterType == LeaveType.annual ? null : LeaveType.annual),
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.annual
+                                ? null
+                                : LeaveType.annual),
                       ),
                       const SizedBox(width: 6),
                       _FilterChip(
                         label: 'Sakit',
                         icon: Icons.local_hospital_rounded,
                         selected: _filterType == LeaveType.sick,
-                        onTap: () => setState(() => _filterType = _filterType == LeaveType.sick ? null : LeaveType.sick),
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.sick
+                                ? null
+                                : LeaveType.sick),
                       ),
                       const SizedBox(width: 6),
                       _FilterChip(
                         label: 'Seminar',
                         icon: Icons.school_rounded,
                         selected: _filterType == LeaveType.seminar,
-                        onTap: () => setState(() => _filterType = _filterType == LeaveType.seminar ? null : LeaveType.seminar),
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.seminar
+                                ? null
+                                : LeaveType.seminar),
                       ),
                       const SizedBox(width: 6),
                       _FilterChip(
                         label: 'Lainnya',
                         icon: Icons.event_note_rounded,
                         selected: _filterType == LeaveType.school,
-                        onTap: () => setState(() => _filterType = _filterType == LeaveType.school ? null : LeaveType.school),
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.school
+                                ? null
+                                : LeaveType.school),
                       ),
                     ],
                   ),
@@ -567,21 +1122,30 @@ class _LeaveTabState extends State<LeaveTab> {
                         label: 'Menunggu',
                         color: AppColors.brandOrange,
                         selected: _filterStatus == RequestStatus.pending,
-                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.pending ? null : RequestStatus.pending),
+                        onTap: () => setState(() => _filterStatus =
+                            _filterStatus == RequestStatus.pending
+                                ? null
+                                : RequestStatus.pending),
                       ),
                       const SizedBox(width: 6),
                       _FilterChip(
                         label: 'Disetujui',
                         color: AppColors.brandLimeDark,
                         selected: _filterStatus == RequestStatus.approved,
-                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.approved ? null : RequestStatus.approved),
+                        onTap: () => setState(() => _filterStatus =
+                            _filterStatus == RequestStatus.approved
+                                ? null
+                                : RequestStatus.approved),
                       ),
                       const SizedBox(width: 6),
                       _FilterChip(
                         label: 'Ditolak',
                         color: AppColors.danger,
                         selected: _filterStatus == RequestStatus.rejected,
-                        onTap: () => setState(() => _filterStatus = _filterStatus == RequestStatus.rejected ? null : RequestStatus.rejected),
+                        onTap: () => setState(() => _filterStatus =
+                            _filterStatus == RequestStatus.rejected
+                                ? null
+                                : RequestStatus.rejected),
                       ),
                     ],
                   ),
@@ -598,13 +1162,31 @@ class _LeaveTabState extends State<LeaveTab> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _SummaryChip(label: 'Total', count: _filtered.length, color: AppColors.brandNavy),
+                  _SummaryChip(
+                      label: 'Total',
+                      count: _filtered.length,
+                      color: AppColors.brandNavy),
                   const SizedBox(width: 8),
-                  _SummaryChip(label: 'Disetujui', count: _filtered.where((r) => r.status == RequestStatus.approved).length, color: AppColors.brandLimeDark),
+                  _SummaryChip(
+                      label: 'Disetujui',
+                      count: _filtered
+                          .where((r) => r.status == RequestStatus.approved)
+                          .length,
+                      color: AppColors.brandLimeDark),
                   const SizedBox(width: 8),
-                  _SummaryChip(label: 'Menunggu', count: _filtered.where((r) => r.status == RequestStatus.pending).length, color: AppColors.brandOrange),
+                  _SummaryChip(
+                      label: 'Menunggu',
+                      count: _filtered
+                          .where((r) => r.status == RequestStatus.pending)
+                          .length,
+                      color: AppColors.brandOrange),
                   const SizedBox(width: 8),
-                  _SummaryChip(label: 'Ditolak', count: _filtered.where((r) => r.status == RequestStatus.rejected).length, color: AppColors.danger),
+                  _SummaryChip(
+                      label: 'Ditolak',
+                      count: _filtered
+                          .where((r) => r.status == RequestStatus.rejected)
+                          .length,
+                      color: AppColors.danger),
                 ],
               ),
             ),
@@ -617,9 +1199,12 @@ class _LeaveTabState extends State<LeaveTab> {
                       children: [
                         const Text('📭', style: TextStyle(fontSize: 48)),
                         const SizedBox(height: 12),
-                        Text('Tidak ada pengajuan', style: AppText.headline3.copyWith(color: AppColors.slate900)),
+                        Text('Tidak ada pengajuan',
+                            style: AppText.headline3
+                                .copyWith(color: AppColors.slate900)),
                         const SizedBox(height: 4),
-                        Text('Coba ubah filter pencarian', style: AppText.body2),
+                        Text('Coba ubah filter pencarian',
+                            style: AppText.body2),
                       ],
                     ),
                   )
@@ -642,7 +1227,7 @@ class _LeaveTabState extends State<LeaveTab> {
       );
     }
 
-    final requests = SampleData.leaveRequests
+    final requests = _myLeaves
         .where((r) => r.submittedAt
             .isAfter(DateTime.now().subtract(const Duration(days: 7))))
         .toList();
@@ -653,8 +1238,7 @@ class _LeaveTabState extends State<LeaveTab> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Riwayat Pengajuanmu',
-                style:
-                    AppText.headline3.copyWith(color: AppColors.slate900)),
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
             TextButton(
               onPressed: () => setState(() {
                 _filterType = null;
@@ -686,7 +1270,7 @@ class _LeaveTabState extends State<LeaveTab> {
             padding: EdgeInsets.zero,
             child: Column(
               children: requests.asMap().entries.map((e) {
-                final req    = e.value;
+                final req = e.value;
                 final isLast = e.key == requests.length - 1;
                 return Column(
                   children: [
@@ -705,7 +1289,7 @@ class _LeaveTabState extends State<LeaveTab> {
 // ── Tab Definition ────────────────────────────────────────────
 class _TabDef {
   final IconData icon;
-  final String   label;
+  final String label;
   const _TabDef(this.icon, this.label);
 }
 
@@ -728,45 +1312,64 @@ class _EmployeeAppTile extends StatelessWidget {
 
   String get _typeLabel {
     switch (app.type) {
-      case LeaveType.annual:  return 'Cuti Tahunan';
-      case LeaveType.sick:    return 'Izin Sakit';
-      case LeaveType.seminar: return 'Izin Seminar';
-      case LeaveType.school:  return 'Izin Lainnya';
-      default:                return 'Izin Lainnya';
+      case LeaveType.annual:
+        return 'Cuti Tahunan';
+      case LeaveType.sick:
+        return 'Izin Sakit';
+      case LeaveType.seminar:
+        return 'Izin Seminar';
+      case LeaveType.school:
+        return 'Izin Lainnya';
+      default:
+        return 'Izin Lainnya';
     }
   }
 
   IconData get _typeIcon {
     switch (app.type) {
-      case LeaveType.annual:  return Icons.beach_access_rounded;
-      case LeaveType.sick:    return Icons.local_hospital_rounded;
-      case LeaveType.seminar: return Icons.school_rounded;
-      default:                return Icons.event_note_rounded;
+      case LeaveType.annual:
+        return Icons.beach_access_rounded;
+      case LeaveType.sick:
+        return Icons.local_hospital_rounded;
+      case LeaveType.seminar:
+        return Icons.school_rounded;
+      default:
+        return Icons.event_note_rounded;
     }
   }
 
   Color get _statusColor {
     switch (app.status) {
-      case RequestStatus.approved: return AppColors.brandLimeDark;
-      case RequestStatus.rejected: return AppColors.danger;
-      case RequestStatus.pending:  return AppColors.brandOrange;
+      case RequestStatus.approved:
+        return AppColors.brandLimeDark;
+      case RequestStatus.rejected:
+        return AppColors.danger;
+      case RequestStatus.pending:
+        return AppColors.brandOrange;
     }
   }
 
   String get _statusLabel {
     switch (app.status) {
-      case RequestStatus.approved: return 'DISETUJUI';
-      case RequestStatus.rejected: return 'DITOLAK';
-      case RequestStatus.pending:  return 'MENUNGGU';
+      case RequestStatus.approved:
+        return 'DISETUJUI';
+      case RequestStatus.rejected:
+        return 'DITOLAK';
+      case RequestStatus.pending:
+        return 'MENUNGGU';
     }
   }
 
   String _allowanceLabel(AllowanceType a) {
     switch (a) {
-      case AllowanceType.health:        return 'Surat Dokter';
-      case AllowanceType.accommodation: return 'Resep';
-      case AllowanceType.transport:     return 'Nota Transportasi';
-      case AllowanceType.spp:           return 'Konsumsi';
+      case AllowanceType.health:
+        return 'Surat Dokter';
+      case AllowanceType.accommodation:
+        return 'Resep';
+      case AllowanceType.transport:
+        return 'Nota Transportasi';
+      case AllowanceType.spp:
+        return 'Konsumsi';
     }
   }
 
@@ -837,8 +1440,7 @@ class _EmployeeAppTile extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 9, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
                   color: _statusColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -877,8 +1479,8 @@ class _EmployeeAppTile extends StatelessWidget {
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
                     color: AppColors.brandNavy.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(6),
@@ -922,8 +1524,8 @@ class _EmployeeAppTile extends StatelessWidget {
               runSpacing: 5,
               children: app.allowances.map((a) {
                 return Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 7, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                   decoration: BoxDecoration(
                     color: AppColors.brandCyanDark.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(6),
@@ -953,8 +1555,8 @@ class _EmployeeAppTile extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.brandNavy,
                   side: const BorderSide(color: AppColors.brandNavy, width: 1),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                   textStyle: GoogleFonts.inter(
                       fontSize: 12, fontWeight: FontWeight.w700),
                   shape: RoundedRectangleBorder(
@@ -986,7 +1588,7 @@ class _EmployeeAppTile extends StatelessWidget {
   }
 
   void _showDetail(BuildContext context) {
-    final f  = DateFormat('dd MMMM yyyy', 'id_ID');
+    final f = DateFormat('dd MMMM yyyy', 'id_ID');
     final ft = DateFormat('dd MMM yyyy, HH:mm');
 
     showModalBottomSheet(
@@ -1061,13 +1663,12 @@ class _EmployeeAppTile extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: _statusColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: _statusColor.withOpacity(0.3)),
+                    border: Border.all(color: _statusColor.withOpacity(0.3)),
                   ),
                   child: Text(
                     _statusLabel,
@@ -1133,16 +1734,17 @@ class _EmployeeAppTile extends StatelessWidget {
 // CUTI FORM
 // ═══════════════════════════════════════════════════════════
 class _CutiForm extends StatefulWidget {
-  const _CutiForm();
+  final VoidCallback? onSubmitted;
+  const _CutiForm({this.onSubmitted});
   @override
   State<_CutiForm> createState() => _CutiFormState();
 }
 
 class _CutiFormState extends State<_CutiForm> {
-  final user        = SampleData.currentUser;
+  final user = SampleData.currentUser;
   DateTime? _start, _end;
   final _reasonCtrl = TextEditingController();
-  bool _submitting  = false;
+  bool _submitting = false;
 
   @override
   void dispose() {
@@ -1150,13 +1752,10 @@ class _CutiFormState extends State<_CutiForm> {
     super.dispose();
   }
 
-  int get _usedLeave => SampleData.leaveRequests
-      .where((r) =>
-          r.type == LeaveType.annual &&
-          r.status != RequestStatus.rejected)
-      .fold(0, (s, r) => s + r.dayCount);
-
-  int get _remaining => user.position.annualLeaveQuota - _usedLeave;
+  // Sisa & jatah cuti dari profil backend (fallback ke quota jabatan dummy).
+  int get _quota =>
+      AppSession.staff?.totalCuti ?? user.position.annualLeaveQuota;
+  int get _remaining => AppSession.staff?.sisaCuti ?? _quota;
   int get _days => (_start == null || _end == null)
       ? 0
       : _end!.difference(_start!).inDays + 1;
@@ -1175,8 +1774,7 @@ class _CutiFormState extends State<_CutiForm> {
         DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
     final picked = await showDatePicker(
       context: context,
-      initialDate:
-          isStart ? (_start ?? minDate) : (_end ?? _start ?? minDate),
+      initialDate: isStart ? (_start ?? minDate) : (_end ?? _start ?? minDate),
       firstDate: minDate,
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
@@ -1194,14 +1792,31 @@ class _CutiFormState extends State<_CutiForm> {
   Future<void> _submit() async {
     if (!_canSubmit) return;
     setState(() => _submitting = true);
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      await LeaveService.create(
+        tipe: 'Cuti',
+        subTipe: 'Cuti Tahunan',
+        alasan: _reasonCtrl.text.trim(),
+        tanggalMulai: _start!,
+        tanggalSelesai: _end!,
+        jumlahHari: _days,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _submitting = false;
       _start = null;
-      _end   = null;
+      _end = null;
       _reasonCtrl.clear();
     });
+    widget.onSubmitted?.call();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -1210,8 +1825,7 @@ class _CutiFormState extends State<_CutiForm> {
           height: 48,
           decoration: const BoxDecoration(
               color: AppColors.brandLimeDark, shape: BoxShape.circle),
-          child: const Icon(Icons.check_rounded,
-              color: Colors.white, size: 24),
+          child: const Icon(Icons.check_rounded, color: Colors.white, size: 24),
         ),
         title: const Text('Pengajuan Berhasil!', textAlign: TextAlign.center),
         content: Text('Pengajuan cuti telah dikirim ke admin.',
@@ -1219,8 +1833,7 @@ class _CutiFormState extends State<_CutiForm> {
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'))
+              onPressed: () => Navigator.pop(context), child: const Text('OK'))
         ],
       ),
     );
@@ -1246,7 +1859,7 @@ class _CutiFormState extends State<_CutiForm> {
               children: [
                 Text('Sisa Cuti Kamu', style: AppText.body2),
                 Text(
-                  '$_remaining dari ${user.position.annualLeaveQuota} hari',
+                  '$_remaining dari $_quota hari',
                   style: GoogleFonts.inter(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
@@ -1320,23 +1933,24 @@ class _CutiFormState extends State<_CutiForm> {
 // Sekolah → Others (maks 1 foto)
 // ═══════════════════════════════════════════════════════════
 class _IzinForm extends StatefulWidget {
-  const _IzinForm();
+  final VoidCallback? onSubmitted;
+  const _IzinForm({this.onSubmitted});
   @override
   State<_IzinForm> createState() => _IzinFormState();
 }
 
 class _IzinFormState extends State<_IzinForm> {
-  String?   _type;
+  String? _type;
   DateTime? _startDate;
   DateTime? _endDate;
-  final _noteCtrl  = TextEditingController();
+  final _noteCtrl = TextEditingController();
   bool _submitting = false;
 
   // Photo slot: max 1 for Others, specific for Sakit/Seminar
   _PhotoSlot? _photoSlot;
 
   static const _types = [
-    ('Sakit',   Icons.local_hospital_rounded),
+    ('Sakit', Icons.local_hospital_rounded),
     ('Seminar', Icons.school_rounded),
     ('Lainnya', Icons.event_note_rounded),
   ];
@@ -1344,25 +1958,32 @@ class _IzinFormState extends State<_IzinForm> {
   // Returns null if no photo required for this type
   (String, IconData)? _slotDefFor(String type) {
     switch (type) {
-      case 'Sakit':   return ('Surat Dokter / Resep',    Icons.medical_information_rounded);
-      case 'Seminar': return ('Bukti Transportasi/Konsumsi', Icons.receipt_long_rounded);
-      case 'Lainnya': return ('Foto Pendukung', Icons.image_rounded);
-      default:        return null;
+      case 'Sakit':
+        return ('Surat Dokter / Resep', Icons.medical_information_rounded);
+      case 'Seminar':
+        return ('Bukti Transportasi/Konsumsi', Icons.receipt_long_rounded);
+      case 'Lainnya':
+        return ('Foto Pendukung', Icons.image_rounded);
+      default:
+        return null;
     }
   }
 
   List<AllowanceType> get _allowances {
     switch (_type) {
-      case 'Sakit':   return [AllowanceType.health];
-      case 'Seminar': return [AllowanceType.transport, AllowanceType.accommodation];
-      default:        return [];
+      case 'Sakit':
+        return [AllowanceType.health];
+      case 'Seminar':
+        return [AllowanceType.transport, AllowanceType.accommodation];
+      default:
+        return [];
     }
   }
 
   void _onTypeChanged(String type) {
     final def = _slotDefFor(type);
     setState(() {
-      _type      = type;
+      _type = type;
       _photoSlot = def != null ? _PhotoSlot(label: def.$1, icon: def.$2) : null;
     });
   }
@@ -1379,17 +2000,39 @@ class _IzinFormState extends State<_IzinForm> {
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
+    // Petakan jenis izin UI → tipe/subTipe backend.
+    final String tipe = _type == 'Sakit' ? 'Sakit' : 'Izin';
+    final String subTipe = _type == 'Sakit' ? '' : (_type ?? '');
+    final int jumlahHari = _endDate!.difference(_startDate!).inDays + 1;
+
     setState(() => _submitting = true);
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      await LeaveService.create(
+        tipe: tipe,
+        subTipe: subTipe,
+        alasan: _noteCtrl.text.trim(),
+        tanggalMulai: _startDate!,
+        tanggalSelesai: _endDate!,
+        jumlahHari: jumlahHari,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _submitting = false;
-      _type       = null;
-      _startDate  = null;
-      _endDate    = null;
-      _photoSlot  = null;
+      _type = null;
+      _startDate = null;
+      _endDate = null;
+      _photoSlot = null;
       _noteCtrl.clear();
     });
+    widget.onSubmitted?.call();
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -1398,8 +2041,7 @@ class _IzinFormState extends State<_IzinForm> {
           height: 48,
           decoration: const BoxDecoration(
               color: AppColors.brandCyanDark, shape: BoxShape.circle),
-          child: const Icon(Icons.check_rounded,
-              color: Colors.white, size: 24),
+          child: const Icon(Icons.check_rounded, color: Colors.white, size: 24),
         ),
         title: const Text('Pengajuan Terkirim!', textAlign: TextAlign.center),
         content: Text('Pengajuan izin kamu sedang diproses.',
@@ -1407,8 +2049,7 @@ class _IzinFormState extends State<_IzinForm> {
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'))
+              onPressed: () => Navigator.pop(context), child: const Text('OK'))
         ],
       ),
     );
@@ -1441,8 +2082,8 @@ class _IzinFormState extends State<_IzinForm> {
                 onTap: () => _onTypeChanged(t.$1),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: selected
                         ? AppColors.brandCyanDark.withOpacity(0.1)
@@ -1491,16 +2132,14 @@ class _IzinFormState extends State<_IzinForm> {
                     final picked = await showDatePicker(
                       context: context,
                       initialDate: _startDate ?? DateTime.now(),
-                      firstDate: DateTime.now()
-                          .subtract(const Duration(days: 7)),
-                      lastDate:
-                          DateTime.now().add(const Duration(days: 30)),
+                      firstDate:
+                          DateTime.now().subtract(const Duration(days: 7)),
+                      lastDate: DateTime.now().add(const Duration(days: 30)),
                     );
                     if (picked != null) {
                       setState(() {
                         _startDate = picked;
-                        if (_endDate != null &&
-                            _endDate!.isBefore(picked)) {
+                        if (_endDate != null && _endDate!.isBefore(picked)) {
                           _endDate = picked;
                         }
                       });
@@ -1516,13 +2155,10 @@ class _IzinFormState extends State<_IzinForm> {
                   onTap: () async {
                     final picked = await showDatePicker(
                       context: context,
-                      initialDate:
-                          _endDate ?? _startDate ?? DateTime.now(),
+                      initialDate: _endDate ?? _startDate ?? DateTime.now(),
                       firstDate: _startDate ??
-                          DateTime.now()
-                              .subtract(const Duration(days: 7)),
-                      lastDate:
-                          DateTime.now().add(const Duration(days: 30)),
+                          DateTime.now().subtract(const Duration(days: 7)),
+                      lastDate: DateTime.now().add(const Duration(days: 30)),
                     );
                     if (picked != null) {
                       setState(() => _endDate = picked);
@@ -1580,7 +2216,7 @@ class _IzinFormState extends State<_IzinForm> {
   }
 
   Widget _buildPhotoSection() {
-    final slot    = _photoSlot!;
+    final slot = _photoSlot!;
     final required = _type == 'Sakit' || _type == 'Seminar';
 
     return Column(
@@ -1592,8 +2228,7 @@ class _IzinFormState extends State<_IzinForm> {
             const SizedBox(width: 6),
             if (required)
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.danger.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(10),
@@ -1606,8 +2241,7 @@ class _IzinFormState extends State<_IzinForm> {
               )
             else
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 7, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.slate200,
                   borderRadius: BorderRadius.circular(10),
@@ -1626,7 +2260,6 @@ class _IzinFormState extends State<_IzinForm> {
           style: AppText.body2.copyWith(fontSize: 11),
         ),
         const SizedBox(height: 10),
-
         _PhotoUploadSlot(
           slot: slot,
           index: 1,
@@ -1641,7 +2274,6 @@ class _IzinFormState extends State<_IzinForm> {
             });
           },
         ),
-
         if (_allowances.isNotEmpty) ...[
           const SizedBox(height: 10),
           Container(
@@ -1649,8 +2281,8 @@ class _IzinFormState extends State<_IzinForm> {
             decoration: BoxDecoration(
               color: AppColors.brandCyanDark.withOpacity(0.06),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: AppColors.brandCyanDark.withOpacity(0.15)),
+              border:
+                  Border.all(color: AppColors.brandCyanDark.withOpacity(0.15)),
             ),
             child: Row(
               children: [
@@ -1676,22 +2308,25 @@ class _IzinFormState extends State<_IzinForm> {
 
   String _allowanceName(AllowanceType a) {
     switch (a) {
-      case AllowanceType.health:        return 'Surat Dokter';
-      case AllowanceType.accommodation: return 'Resep';
-      case AllowanceType.transport:     return 'Nota Transportasi';
-      case AllowanceType.spp:           return 'Konsumsi';
+      case AllowanceType.health:
+        return 'Surat Dokter';
+      case AllowanceType.accommodation:
+        return 'Resep';
+      case AllowanceType.transport:
+        return 'Nota Transportasi';
+      case AllowanceType.spp:
+        return 'Konsumsi';
     }
   }
 }
 
 // ── Photo Slot Model ─────────────────────────────────────────
 class _PhotoSlot {
-  final String   label;
+  final String label;
   final IconData icon;
-  final String?  filePath;
+  final String? filePath;
 
-  const _PhotoSlot({required this.label, required this.icon})
-      : filePath = null;
+  const _PhotoSlot({required this.label, required this.icon}) : filePath = null;
 
   const _PhotoSlot.uploaded(this.label, this.icon)
       : filePath = 'mock_photo_path';
@@ -1701,8 +2336,8 @@ class _PhotoSlot {
 
 // ── Photo Upload Slot Widget ──────────────────────────────────
 class _PhotoUploadSlot extends StatelessWidget {
-  final _PhotoSlot   slot;
-  final int          index;
+  final _PhotoSlot slot;
+  final int index;
   final VoidCallback onUpload;
   final VoidCallback onRemove;
 
@@ -1719,8 +2354,7 @@ class _PhotoUploadSlot extends StatelessWidget {
       onTap: slot.uploaded ? null : onUpload,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: slot.uploaded
               ? AppColors.brandLimeDark.withOpacity(0.06)
@@ -1744,9 +2378,7 @@ class _PhotoUploadSlot extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
-                slot.uploaded
-                    ? Icons.check_circle_rounded
-                    : slot.icon,
+                slot.uploaded ? Icons.check_circle_rounded : slot.icon,
                 size: 18,
                 color: slot.uploaded
                     ? AppColors.brandLimeDark
@@ -1799,8 +2431,8 @@ class _PhotoUploadSlot extends StatelessWidget {
               )
             else
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: AppColors.brandCyanDark.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(6),
@@ -1830,8 +2462,8 @@ class _PhotoUploadSlot extends StatelessWidget {
 // DATE PICKER FIELD
 // ═══════════════════════════════════════════════════════════
 class _DatePickerField extends StatelessWidget {
-  final String   label;
-  final String?  value;
+  final String label;
+  final String? value;
   final VoidCallback onTap;
 
   const _DatePickerField({
@@ -1850,8 +2482,7 @@ class _DatePickerField extends StatelessWidget {
         GestureDetector(
           onTap: onTap,
           child: Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 13),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             decoration: BoxDecoration(
               color: AppColors.white,
               borderRadius: BorderRadius.circular(10),
@@ -1891,17 +2522,23 @@ class _RequestHistoryTile extends StatelessWidget {
 
   Color get _statusColor {
     switch (request.status) {
-      case RequestStatus.approved: return AppColors.brandLimeDark;
-      case RequestStatus.rejected: return AppColors.danger;
-      case RequestStatus.pending:  return AppColors.brandOrange;
+      case RequestStatus.approved:
+        return AppColors.brandLimeDark;
+      case RequestStatus.rejected:
+        return AppColors.danger;
+      case RequestStatus.pending:
+        return AppColors.brandOrange;
     }
   }
 
   String get _statusLabel {
     switch (request.status) {
-      case RequestStatus.approved: return 'DISETUJUI';
-      case RequestStatus.rejected: return 'DITOLAK';
-      case RequestStatus.pending:  return 'MENUNGGU';
+      case RequestStatus.approved:
+        return 'DISETUJUI';
+      case RequestStatus.rejected:
+        return 'DITOLAK';
+      case RequestStatus.pending:
+        return 'MENUNGGU';
     }
   }
 
@@ -1935,9 +2572,7 @@ class _RequestHistoryTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    request.type == LeaveType.annual
-                        ? 'Cuti Tahunan'
-                        : 'Izin',
+                    request.type == LeaveType.annual ? 'Cuti Tahunan' : 'Izin',
                     style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -1996,8 +2631,7 @@ class _RequestHistoryTile extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text('Detail Pengajuan',
-                style:
-                    AppText.headline3.copyWith(color: AppColors.slate900)),
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
             const SizedBox(height: 16),
             _DetailRow('Jenis',
                 request.type == LeaveType.annual ? 'Cuti Tahunan' : 'Izin'),
@@ -2031,7 +2665,11 @@ class _DetailRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 110,
-            child: Text(label, style: AppText.body2, textAlign: TextAlign.start,),
+            child: Text(
+              label,
+              style: AppText.body2,
+              textAlign: TextAlign.start,
+            ),
           ),
           Expanded(
             child: Text(
@@ -2050,10 +2688,10 @@ class _DetailRow extends StatelessWidget {
 }
 
 class _ActionBtn extends StatelessWidget {
-  final String     label;
-  final Color      color;
+  final String label;
+  final Color color;
   final VoidCallback onTap;
-  final bool       filled;
+  final bool filled;
 
   const _ActionBtn({
     required this.label,
@@ -2090,10 +2728,10 @@ class _ActionBtn extends StatelessWidget {
 
 // ── Filter Chip ───────────────────────────────────────────────
 class _FilterChip extends StatelessWidget {
-  final String    label;
+  final String label;
   final IconData? icon;
-  final Color     color;
-  final bool      selected;
+  final Color color;
+  final bool selected;
   final VoidCallback onTap;
 
   const _FilterChip({
@@ -2124,8 +2762,7 @@ class _FilterChip extends StatelessWidget {
           children: [
             if (icon != null) ...[
               Icon(icon,
-                  size: 13,
-                  color: selected ? color : AppColors.slate600),
+                  size: 13, color: selected ? color : AppColors.slate600),
               const SizedBox(width: 5),
             ],
             Text(
@@ -2146,8 +2783,8 @@ class _FilterChip extends StatelessWidget {
 // ── Summary Chip ──────────────────────────────────────────────
 class _SummaryChip extends StatelessWidget {
   final String label;
-  final int    count;
-  final Color  color;
+  final int count;
+  final Color color;
   const _SummaryChip(
       {required this.label, required this.count, required this.color});
 
@@ -2167,10 +2804,183 @@ class _SummaryChip extends StatelessWidget {
               style: GoogleFonts.inter(
                   fontSize: 13, fontWeight: FontWeight.w800, color: color)),
           const SizedBox(width: 4),
-          Text(label,
-              style: GoogleFonts.inter(fontSize: 10, color: color)),
+          Text(label, style: GoogleFonts.inter(fontSize: 10, color: color)),
         ],
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// OVERTIME REQUEST DIALOG
+// ═══════════════════════════════════════════════════════════
+class _OvertimeRequestDialog extends StatefulWidget {
+  final double maxOvertimeHours;
+  final String dateStr;
+
+  const _OvertimeRequestDialog({
+    required this.maxOvertimeHours,
+    required this.dateStr,
+  });
+
+  @override
+  State<_OvertimeRequestDialog> createState() => _OvertimeRequestDialogState();
+}
+
+class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
+  final _hoursCtrl = TextEditingController();
+  final _reasonCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _hoursCtrl.dispose();
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+      actionsPadding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      title: Column(
+        children: [
+          const Icon(Icons.more_time_rounded,
+              color: AppColors.brandNavy, size: 36),
+          const SizedBox(height: 10),
+          Text(
+            'Ajukan Lembur',
+            style: AppText.headline3.copyWith(color: AppColors.slate900),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            widget.dateStr,
+            style: AppText.body2.copyWith(color: AppColors.slate700),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.brandOrange.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: AppColors.brandOrange.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        color: AppColors.brandOrange, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Batas lembur Anda: ${widget.maxOvertimeHours} jam',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.brandOrange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text('Durasi Lembur (Jam)', style: AppText.label),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _hoursCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  hintText: 'Contoh: 1.5 atau 2',
+                  suffixText: 'jam',
+                ),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Masukkan durasi lembur';
+                  }
+                  final hours = double.tryParse(val);
+                  if (hours == null) {
+                    return 'Masukkan angka desimal yang valid';
+                  }
+                  if (hours <= 0) {
+                    return 'Durasi harus lebih dari 0';
+                  }
+                  if (hours > widget.maxOvertimeHours) {
+                    return 'Tidak boleh melebihi ${widget.maxOvertimeHours} jam';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              Text('Alasan Lembur', style: AppText.label),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _reasonCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'Contoh: Menyelesaikan laporan bulanan IT...',
+                ),
+                validator: (val) {
+                  if (val == null || val.trim().isEmpty) {
+                    return 'Masukkan alasan lembur';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Batal',
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w600,
+              color: AppColors.slate700,
+            ),
+          ),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.brandNavy,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              Navigator.pop(context, {
+                'hours': double.parse(_hoursCtrl.text),
+                'reason': _reasonCtrl.text.trim(),
+              });
+            }
+          },
+          child: Text(
+            'Kirim',
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

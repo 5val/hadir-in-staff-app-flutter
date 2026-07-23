@@ -58,11 +58,8 @@ class _MainTabScaffoldState extends State<MainTabScaffold> {
               _buildTabItem(0, Icons.home, Icons.home_outlined, 'Home'),
               _buildTabItem(
                   1, Icons.camera_alt, Icons.camera_alt_outlined, 'Absen'),
-              _buildTabItem(
-                  2,
-                  Icons.account_circle,
-                  Icons.account_circle_outlined,
-                  'Profil'),
+              _buildTabItem(2, Icons.account_circle,
+                  Icons.account_circle_outlined, 'Profil'),
             ],
           ),
         ),
@@ -73,8 +70,7 @@ class _MainTabScaffoldState extends State<MainTabScaffold> {
   Widget _buildTabItem(
       int index, IconData activeIcon, IconData inactiveIcon, String label) {
     final isActive = _currentIndex == index;
-    final color =
-        isActive ? BrandColors.navy : NeutralColors.slate400;
+    final color = isActive ? BrandColors.navy : NeutralColors.slate400;
 
     return Expanded(
       child: GestureDetector(

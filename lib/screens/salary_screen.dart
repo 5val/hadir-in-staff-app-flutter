@@ -7,6 +7,8 @@ import 'package:printing/printing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/salary_service.dart';
+import '../services/api_client.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY SCREEN
@@ -21,12 +23,86 @@ class SalaryScreen extends StatefulWidget {
 
 class _SalaryScreenState extends State<SalaryScreen> {
   final user = SampleData.currentUser;
-  final slips = SampleData.salaryHistory;
+
+  // Slip gaji asli dari backend.
+  List<SalarySlip> _slips = [];
+  bool _loading = true;
+  String? _error;
 
   // Filter: 1 = 1 bulan terakhir, 2 = 2 bulan terakhir, 3 = 3 bulan terakhir
   int _filterMonths = 1;
 
-  List<SalarySlip> get _filteredSlips => slips.take(_filterMonths).toList();
+  List<SalarySlip> get _filteredSlips => _slips.take(_filterMonths).toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final list = await SalaryService.mySlips();
+      if (!mounted) return;
+      setState(() {
+        _slips = list;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.cloud_off_rounded,
+                size: 48, color: AppColors.slate400),
+            const SizedBox(height: 12),
+            Text(_error ?? 'Gagal memuat slip gaji',
+                textAlign: TextAlign.center, style: AppText.body2),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 60),
+      child: Center(
+        child: Column(
+          children: [
+            const Text('📄', style: TextStyle(fontSize: 44)),
+            const SizedBox(height: 12),
+            Text('Belum ada slip gaji',
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
+            const SizedBox(height: 4),
+            Text('Slip gaji akan muncul setelah diterbitkan HR.',
+                textAlign: TextAlign.center, style: AppText.body2),
+          ],
+        ),
+      ),
+    );
+  }
 
   String _fmtCurrency(int amount) =>
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0)
@@ -82,19 +158,26 @@ class _SalaryScreenState extends State<SalaryScreen> {
             ),
             Container(height: 1, color: AppColors.slate200),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-                children: [
-                  _buildFilterChips(),
-                  const SizedBox(height: 16),
-                  ..._filteredSlips.map((slip) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildSalaryCard(slip),
-                      )),
-                  // const SizedBox(height: 8),
-                  // _buildSalarySetting(),
-                ],
-              ),
+              child: _loading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(color: AppColors.brandNavy))
+                  : _error != null
+                      ? _buildErrorState()
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+                          children: [
+                            _buildFilterChips(),
+                            const SizedBox(height: 16),
+                            if (_slips.isEmpty)
+                              _buildEmptyState()
+                            else
+                              ..._filteredSlips.map((slip) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildSalaryCard(slip),
+                                  )),
+                          ],
+                        ),
             ),
           ],
         ),

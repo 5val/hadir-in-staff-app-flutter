@@ -12,6 +12,9 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = SampleData.currentUser;
+    final sisaCuti = AppSession.staff?.sisaCuti ?? 0;
+    final totalCuti = AppSession.staff?.totalCuti ?? 0;
+    final cutiRatio = totalCuti > 0 ? sisaCuti / totalCuti : 0.0;
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
@@ -67,7 +70,7 @@ class ProfileScreen extends StatelessWidget {
                 children: [
                   _InfoRow(icon: Icons.email_outlined, label: 'Email', value: user.email),
                   const AppDivider(),
-                  _InfoRow(icon: Icons.business_outlined, label: 'Divisi', value: 'Marketing'),
+                  _InfoRow(icon: Icons.business_outlined, label: 'Divisi', value: AppSession.staff?.divisiNama ?? '-'),
                   const AppDivider(),
                   _InfoRow(icon: Icons.schedule_outlined, label: 'Shift',
                       value: '${user.currentShift.name} (${user.currentShift.startTimeStr}–${user.currentShift.endTimeStr})'),
@@ -86,7 +89,7 @@ class ProfileScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Text('9',
+                      Text('$sisaCuti',
                           style: GoogleFonts.inter(
                             fontSize: 36, fontWeight: FontWeight.w800,
                             color: AppColors.brandNavy,
@@ -96,7 +99,7 @@ class ProfileScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('hari tersisa', style: AppText.body2),
-                          Text('dari 12 hari/tahun', style: AppText.caption),
+                          Text('dari $totalCuti hari/tahun', style: AppText.caption),
                         ],
                       ),
                     ],
@@ -105,7 +108,7 @@ class ProfileScreen extends StatelessWidget {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
                     child: LinearProgressIndicator(
-                      value: 9 / 12,
+                      value: cutiRatio,
                       backgroundColor: AppColors.slate100,
                       valueColor: const AlwaysStoppedAnimation(AppColors.brandNavy),
                       minHeight: 8,

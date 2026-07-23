@@ -37,7 +37,20 @@ class AppSession {
     } catch (_) {}
   }
 
-  static void clearUser() => _currentUser = null;
+  /// Profil staff asli dari backend (diisi setelah hidrasi di MainScreen).
+  static StaffProfile? staff;
+
+  /// Set profil staff dari backend & sinkronkan [currentUser] agar seluruh
+  /// layar yang membaca AppSession.currentUser menampilkan data asli.
+  static void setStaff(StaffProfile profile) {
+    staff = profile;
+    _currentUser = profile.toUserProfile();
+  }
+
+  static void clearUser() {
+    _currentUser = null;
+    staff = null;
+  }
 
   static void updateEmail(String newEmail) {
     final current = currentUser;
@@ -194,6 +207,7 @@ class UserProfile {
   final ShiftModel currentShift;
   final PositionModel position;
   final int points;
+  final double maxOvertimeHours;
 
   const UserProfile({
     required this.id,
@@ -210,6 +224,7 @@ class UserProfile {
     required this.currentShift,
     required this.position,
     this.points = 0,
+    this.maxOvertimeHours = 4.0,
   });
 
   UserProfile copyWith({int? points, String? email, String? phoneNumber}) =>
@@ -228,6 +243,7 @@ class UserProfile {
         currentShift: currentShift,
         position: position,
         points: points ?? this.points,
+        maxOvertimeHours: maxOvertimeHours,
       );
 }
 
@@ -247,6 +263,9 @@ class AttendanceRecord {
   final int? lateMinutes;
   final int? overtimeMinutes;
   final int pointsEarned;
+  final String? overtimeReason;
+  final bool overtimeApplied;
+  final RequestStatus overtimeStatus;
 
   const AttendanceRecord({
     required this.id,
@@ -261,7 +280,61 @@ class AttendanceRecord {
     this.lateMinutes,
     this.overtimeMinutes,
     this.pointsEarned = 0,
+    this.overtimeReason,
+    this.overtimeApplied = false,
+    this.overtimeStatus = RequestStatus.pending,
   });
+
+  /// Bangun dari JSON backend (/api/mobile/staff/:id/attendance).
+  /// Backend menyimpan `tanggal` (ISO date), `checkIn`/`checkOut` "HH:mm",
+  /// `status` (hadir|terlambat|izin|cuti|alpha|pulang_awal), `keterlambatan`,
+  /// `lembur`, `lokasi`.
+  factory AttendanceRecord.fromApi(Map<String, dynamic> j) {
+    final parsed = DateTime.tryParse((j['tanggal'] ?? '').toString());
+    final base = parsed != null
+        ? DateTime(parsed.year, parsed.month, parsed.day)
+        : DateTime.now();
+
+    DateTime? combine(dynamic hhmm) {
+      final s = hhmm?.toString() ?? '';
+      final parts = s.split(':');
+      if (parts.length < 2) return null;
+      final h = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      if (h == null || m == null) return null;
+      return DateTime(base.year, base.month, base.day, h, m);
+    }
+
+    AttendanceStatus mapStatus(String s) {
+      switch (s) {
+        case 'terlambat':
+          return AttendanceStatus.late;
+        case 'izin':
+        case 'cuti':
+          return AttendanceStatus.leave;
+        case 'alpha':
+          return AttendanceStatus.absent;
+        default:
+          return AttendanceStatus.present;
+      }
+    }
+
+    int? asIntN(dynamic v) =>
+        v == null ? null : (v is num ? v.toInt() : int.tryParse('$v'));
+    final lokasi = (j['lokasi'] ?? '').toString();
+
+    return AttendanceRecord(
+      id: (j['id'] ?? '').toString(),
+      date: base,
+      checkIn: combine(j['checkIn']),
+      checkOut: combine(j['checkOut']),
+      status: mapStatus((j['status'] ?? '').toString()),
+      locationLabel: lokasi.isEmpty ? null : lokasi,
+      useGps: true,
+      lateMinutes: asIntN(j['keterlambatan']),
+      overtimeMinutes: asIntN(j['lembur']),
+    );
+  }
 
   Duration? get workDuration {
     if (checkIn == null || checkOut == null) return null;
@@ -270,6 +343,42 @@ class AttendanceRecord {
         ? breakEnd!.difference(breakStart!)
         : Duration.zero;
     return raw - breakDur;
+  }
+
+  AttendanceRecord copyWith({
+    String? id,
+    DateTime? date,
+    DateTime? checkIn,
+    DateTime? checkOut,
+    DateTime? breakStart,
+    DateTime? breakEnd,
+    AttendanceStatus? status,
+    String? locationLabel,
+    bool? useGps,
+    int? lateMinutes,
+    int? overtimeMinutes,
+    int? pointsEarned,
+    String? overtimeReason,
+    bool? overtimeApplied,
+    RequestStatus? overtimeStatus,
+  }) {
+    return AttendanceRecord(
+      id: id ?? this.id,
+      date: date ?? this.date,
+      checkIn: checkIn ?? this.checkIn,
+      checkOut: checkOut ?? this.checkOut,
+      breakStart: breakStart ?? this.breakStart,
+      breakEnd: breakEnd ?? this.breakEnd,
+      status: status ?? this.status,
+      locationLabel: locationLabel ?? this.locationLabel,
+      useGps: useGps ?? this.useGps,
+      lateMinutes: lateMinutes ?? this.lateMinutes,
+      overtimeMinutes: overtimeMinutes ?? this.overtimeMinutes,
+      pointsEarned: pointsEarned ?? this.pointsEarned,
+      overtimeReason: overtimeReason ?? this.overtimeReason,
+      overtimeApplied: overtimeApplied ?? this.overtimeApplied,
+      overtimeStatus: overtimeStatus ?? this.overtimeStatus,
+    );
   }
 }
 
@@ -304,6 +413,61 @@ class LeaveRequest {
   });
 
   int get dayCount => endDate.difference(startDate).inDays + 1;
+
+  /// Bangun dari JSON backend (/api/mobile/staff/:id/leave).
+  /// Backend: `tipe` (Cuti|Izin|Sakit|Dinas), `subTipe`, `alasan`,
+  /// `tanggalMulai`/`tanggalSelesai` (ISO date), `status`, `alasanTolak`,
+  /// `diajukanPada`.
+  factory LeaveRequest.fromApi(Map<String, dynamic> j) {
+    LeaveType mapType(String tipe, String subTipe) {
+      switch (tipe) {
+        case 'Cuti':
+          return LeaveType.annual;
+        case 'Sakit':
+          return LeaveType.sick;
+        case 'Dinas':
+          return LeaveType.seminar;
+        case 'Izin':
+          return subTipe.toLowerCase().contains('seminar')
+              ? LeaveType.seminar
+              : LeaveType.school;
+        default:
+          return LeaveType.school;
+      }
+    }
+
+    RequestStatus mapStatus(String s) {
+      switch (s) {
+        case 'approved':
+          return RequestStatus.approved;
+        case 'rejected':
+          return RequestStatus.rejected;
+        default:
+          return RequestStatus.pending;
+      }
+    }
+
+    DateTime parseDate(dynamic v) {
+      final p = DateTime.tryParse(v?.toString() ?? '');
+      return p == null ? DateTime.now() : DateTime(p.year, p.month, p.day);
+    }
+
+    DateTime parseTs(dynamic v) =>
+        DateTime.tryParse(v?.toString() ?? '')?.toLocal() ?? DateTime.now();
+
+    final tolak = (j['alasanTolak'] ?? '').toString();
+
+    return LeaveRequest(
+      id: (j['id'] ?? '').toString(),
+      type: mapType((j['tipe'] ?? '').toString(), (j['subTipe'] ?? '').toString()),
+      startDate: parseDate(j['tanggalMulai']),
+      endDate: parseDate(j['tanggalSelesai']),
+      status: mapStatus((j['status'] ?? '').toString()),
+      reason: (j['alasan'] ?? '').toString(),
+      adminNote: tolak.isEmpty ? null : tolak,
+      submittedAt: parseTs(j['diajukanPada']),
+    );
+  }
 }
 
 enum LeaveType { annual, sick, seminar, school }
@@ -380,6 +544,72 @@ class SalarySlip {
   /// Jumlah hari tidak hadir (bukan cuti/sakit yang sudah dihitung)
   int get absentDays => workingDays - presentDays;
 
+  /// Bangun dari JSON backend (/api/mobile/staff/:id/gaji/slip).
+  /// Catatan: backend `SlipGaji` menyimpan komponen gaji tetapi TIDAK menyimpan
+  /// rincian hari kerja/hadir, sehingga statistik absensi di slip = 0.
+  factory SalarySlip.fromApi(Map<String, dynamic> j) {
+    int gi(String k) => (j[k] as num?)?.toInt() ?? 0;
+
+    final periodeRaw = (j['periode'] ?? '').toString(); // "2026-01"
+    final parts = periodeRaw.split('-');
+    final now = DateTime.now();
+    final year = parts.isNotEmpty ? int.tryParse(parts[0]) ?? now.year : now.year;
+    final month = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
+    final start = DateTime(year, month, 1);
+    final end = DateTime(year, month + 1, 0);
+    const monthNames = [
+      '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+    ];
+    final periodLabel =
+        (month >= 1 && month <= 12) ? '${monthNames[month]} $year' : periodeRaw;
+
+    final components = <SalaryComponent>[];
+    void income(String label, String note, int amount) {
+      if (amount != 0) {
+        components.add(SalaryComponent(label: label, note: note, amount: amount));
+      }
+    }
+
+    void deduction(String label, String note, int amount) {
+      if (amount != 0) {
+        components.add(SalaryComponent(
+            label: label, note: note, amount: amount, isDeduction: true));
+      }
+    }
+
+    income('Gaji Pokok', '', gi('gajiPokok'));
+    income('Bonus Tepat Waktu', '', gi('bonusTepat'));
+    income('Bonus Kehadiran', '', gi('bonusKehadiran'));
+    income('Tunjangan Transport', 'Dibayarkan per bulan', gi('tunjanganTransport'));
+    income('Tunjangan Makan', '', gi('tunjanganMakan'));
+    income('Tunjangan Kesehatan', 'Dibayarkan per bulan', gi('tunjanganKesehatan'));
+    income('Tunjangan Tambahan', '', gi('tunjanganTambahan'));
+    income('Lembur', '${gi('lemburJam')} jam', gi('lemburTotal'));
+    deduction('Denda Keterlambatan', '', gi('dendaTerlambat'));
+    deduction('Potongan Alpha', '', gi('potonganAlpha'));
+    deduction('BPJS', '', gi('potonganBPJS'));
+    deduction('PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
+
+    final bank = AppSession.staff?.namaBank ?? '';
+
+    return SalarySlip(
+      period: periodLabel,
+      periodStart: start,
+      periodEnd: end,
+      transferBy: bank.isNotEmpty ? '$bank Transfer' : 'Bank Transfer',
+      components: components,
+      workingDays: 0,
+      presentDays: 0,
+      lateDays: 0,
+      overtimeHours: gi('lemburJam'),
+      leaveDays: 0,
+      permissionDays: 0,
+      leaveHistory: const [],
+      permissionHistory: const [],
+    );
+  }
+
   int get totalIncome => components
       .where((c) => !c.isDeduction)
       .fold(0, (sum, c) => sum + c.amount);
@@ -410,6 +640,30 @@ class AppNotification {
     this.isRead = false,
     this.isTeam = false,
   });
+
+  /// Bangun dari JSON backend (/api/mobile/staff/:id/notifications).
+  /// Backend: `type` (leave_approved|leave_rejected|...), `title`, `body`,
+  /// `readAt`, `createdAt`.
+  factory AppNotification.fromApi(Map<String, dynamic> j) {
+    final type = (j['type'] ?? '').toString();
+    NotificationType mapType(String t) {
+      if (t.contains('approved')) return NotificationType.approval;
+      if (t.contains('rejected')) return NotificationType.rejection;
+      if (t.contains('reminder')) return NotificationType.reminder;
+      return NotificationType.info;
+    }
+
+    return AppNotification(
+      id: (j['id'] ?? '').toString(),
+      title: (j['title'] ?? '').toString(),
+      message: (j['body'] ?? '').toString(),
+      type: mapType(type),
+      createdAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal() ??
+          DateTime.now(),
+      isRead: j['readAt'] != null,
+      isTeam: false,
+    );
+  }
 }
 
 enum NotificationType { approval, rejection, reminder, info }
@@ -541,6 +795,7 @@ class SampleData {
       currentShift: morningShift,
       position: posITSupervisor,
       points: 420,
+      maxOvertimeHours: 4.0,
     ),
     const UserProfile(
       id: 'U002',
@@ -557,6 +812,7 @@ class SampleData {
       currentShift: morningShift,
       position: posSalesExecutive,
       points: 420,
+      maxOvertimeHours: 3.5,
     ),
     const UserProfile(
       id: 'U003',
@@ -573,6 +829,7 @@ class SampleData {
       currentShift: morningShift,
       position: posHR,
       points: 1000,
+      maxOvertimeHours: 6.0,
     ),
     const UserProfile(
       id: 'U004',
@@ -589,6 +846,7 @@ class SampleData {
       currentShift: morningShift,
       position: posSalesExecutive,
       points: 280,
+      maxOvertimeHours: 2.0,
     ),
     const UserProfile(
       id: 'U005',
@@ -605,6 +863,7 @@ class SampleData {
       currentShift: morningShift,
       position: posSalesExecutive,
       points: 350,
+      maxOvertimeHours: 4.5,
     ),
     const UserProfile(
       id: 'U006',
@@ -621,6 +880,7 @@ class SampleData {
       currentShift: morningShift,
       position: posITSupervisor,
       points: 410,
+      maxOvertimeHours: 5.0,
     ),
   ];
 
@@ -633,9 +893,8 @@ class SampleData {
     AttendanceRecord(
       id: 'A001',
       date: DateTime.now().subtract(const Duration(days: 1)),
-      checkIn: DateTime.now().subtract(const Duration(days: 1, hours: 9)),
-      checkOut: DateTime.now()
-          .subtract(const Duration(days: 1, hours: 0, minutes: 30)),
+      checkIn: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 1, 8, 0),
+      checkOut: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 1, 19, 30),
       status: AttendanceStatus.present,
       locationLabel:
           'Jl. Sudirman No. 12, Kel. Karet Tengsin, Kec. Tanah Abang',
@@ -645,9 +904,8 @@ class SampleData {
     AttendanceRecord(
       id: 'A002',
       date: DateTime.now().subtract(const Duration(days: 2)),
-      checkIn: DateTime.now()
-          .subtract(const Duration(days: 2, hours: 8, minutes: 15)),
-      checkOut: DateTime.now().subtract(const Duration(days: 2, hours: 0)),
+      checkIn: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 2, 8, 15),
+      checkOut: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 2, 18, 15),
       status: AttendanceStatus.late,
       locationLabel: 'Jl. Gatot Subroto, Kel. Menteng Atas, Kec. Setiabudi',
       useGps: true,
@@ -657,12 +915,11 @@ class SampleData {
     AttendanceRecord(
       id: 'A003',
       date: DateTime.now().subtract(const Duration(days: 3)),
-      checkIn: DateTime.now().subtract(const Duration(days: 3, hours: 9)),
-      checkOut: DateTime.now().subtract(const Duration(days: 3, hours: 1)),
+      checkIn: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 3, 8, 0),
+      checkOut: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 3, 17, 0),
       status: AttendanceStatus.present,
       locationLabel: 'Jl. HR Rasuna Said, Kel. Kuningan Timur, Kec. Setiabudi',
       useGps: false,
-      overtimeMinutes: 60,
       pointsEarned: 15,
     ),
     AttendanceRecord(
@@ -674,8 +931,8 @@ class SampleData {
     AttendanceRecord(
       id: 'A005',
       date: DateTime.now().subtract(const Duration(days: 5)),
-      checkIn: DateTime.now().subtract(const Duration(days: 5, hours: 9)),
-      checkOut: DateTime.now().subtract(const Duration(days: 5, hours: 0)),
+      checkIn: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 5, 8, 0),
+      checkOut: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day - 5, 20, 0),
       status: AttendanceStatus.present,
       locationLabel: 'Jl. Kuningan, Kel. Guntur, Kec. Setiabudi',
       useGps: true,
@@ -1218,4 +1475,155 @@ class SampleData {
     "Kerja keras hari ini sudah tercatat. Sampai besok! 🌙",
     "Great job! Istirahat yang baik ya malam ini. ⭐",
   ];
+}
+
+// ============================================================
+// STAFF PROFILE (data asli dari backend /api/mobile/staff/:id/profile)
+// ============================================================
+/// Representasi profil staff dari backend. Menyimpan field mentah + relasi
+/// (divisi, jabatan, shift, lokasi) dan dapat dipetakan ke [UserProfile]
+/// lewat [toUserProfile] agar kompatibel dengan layar yang sudah ada.
+class StaffProfile {
+  final String id;
+  final String nama;
+  final String email;
+  final String phone;
+  final String level;
+  final String statusKepegawaian;
+  final String status;
+  final int sisaCuti;
+  final int totalCuti;
+  final String photo;
+  final String namaBank;
+  final String nomorRekening;
+  final String namaPemilikRekening;
+
+  // Relasi (nama-nama siap tampil)
+  final String divisiNama;
+  final String divisiColor;
+  final String jabatanNama;
+  final bool jabatanIsSupervisor;
+  final int gajiPokok;
+  final int maxExtraHour;
+  final String shiftNama;
+  final String jamMasuk; // "08:00"
+  final String jamPulang; // "17:00"
+  final String lokasiNama;
+  final String lokasiAlamat;
+
+  const StaffProfile({
+    required this.id,
+    required this.nama,
+    required this.email,
+    required this.phone,
+    required this.level,
+    required this.statusKepegawaian,
+    required this.status,
+    required this.sisaCuti,
+    required this.totalCuti,
+    required this.photo,
+    required this.namaBank,
+    required this.nomorRekening,
+    required this.namaPemilikRekening,
+    required this.divisiNama,
+    required this.divisiColor,
+    required this.jabatanNama,
+    required this.jabatanIsSupervisor,
+    required this.gajiPokok,
+    required this.maxExtraHour,
+    required this.shiftNama,
+    required this.jamMasuk,
+    required this.jamPulang,
+    required this.lokasiNama,
+    required this.lokasiAlamat,
+  });
+
+  factory StaffProfile.fromJson(Map<String, dynamic> j) {
+    Map<String, dynamic> rel(String key) =>
+        j[key] is Map ? Map<String, dynamic>.from(j[key] as Map) : const {};
+    final divisi = rel('divisi');
+    final jabatan = rel('jabatan');
+    final shift = rel('shift');
+    final lokasi = rel('lokasi');
+    int asInt(dynamic v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+
+    return StaffProfile(
+      id: (j['id'] ?? '').toString(),
+      nama: (j['nama'] ?? '').toString(),
+      email: (j['email'] ?? '').toString(),
+      phone: (j['phone'] ?? '').toString(),
+      level: (j['level'] ?? '').toString(),
+      statusKepegawaian: (j['statusKepegawaian'] ?? '').toString(),
+      status: (j['status'] ?? '').toString(),
+      sisaCuti: asInt(j['sisaCuti']),
+      totalCuti: asInt(j['totalCuti']),
+      photo: (j['photo'] ?? '').toString(),
+      namaBank: (j['namaBank'] ?? '').toString(),
+      nomorRekening: (j['nomorRekening'] ?? '').toString(),
+      namaPemilikRekening: (j['namaPemilikRekening'] ?? '').toString(),
+      divisiNama: (divisi['nama'] ?? '-').toString(),
+      divisiColor: (divisi['color'] ?? '#3b82f6').toString(),
+      jabatanNama: (jabatan['nama'] ?? '-').toString(),
+      jabatanIsSupervisor: jabatan['isSupervisor'] == true,
+      gajiPokok: asInt(jabatan['gajiPokok']),
+      maxExtraHour: asInt(jabatan['maxExtraHour']),
+      shiftNama: (shift['nama'] ?? '-').toString(),
+      jamMasuk: (shift['jamMasuk'] ?? '08:00').toString(),
+      jamPulang: (shift['jamPulang'] ?? '17:00').toString(),
+      lokasiNama: (lokasi['nama'] ?? '-').toString(),
+      lokasiAlamat: (lokasi['alamat'] ?? '-').toString(),
+    );
+  }
+
+  static TimeOfDay _parseTime(String hhmm) {
+    final parts = hhmm.split(':');
+    final h = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 8 : 8;
+    final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  /// Petakan ke [UserProfile] lama agar layar existing tetap berfungsi.
+  UserProfile toUserProfile() {
+    final pos = PositionModel(
+      id: '',
+      name: jabatanNama,
+      divisionId: divisiNama,
+      annualLeaveQuota: totalCuti,
+      earlyCheckoutToleranceMinutes: 30,
+      minLeaveAdvanceDays: 3,
+      payrollPeriodDays: 30,
+      operationalHours: 8,
+      extraHourAllowance: maxExtraHour,
+      payrollType: PayrollType.monthly,
+      payrollEndMonth: true,
+      baseSalary: gajiPokok,
+      dailyBonus: 0,
+      healthAllowance: 0,
+      transportAllowance: 0,
+      salaryDisbursementDay: 25,
+    );
+    final shift = ShiftModel(
+      id: '',
+      name: shiftNama,
+      startTime: _parseTime(jamMasuk),
+      endTime: _parseTime(jamPulang),
+    );
+    return UserProfile(
+      id: id,
+      name: nama,
+      username: email,
+      password: '',
+      employeeId: id,
+      nik: '-',
+      positionId: '',
+      divisionId: divisiNama,
+      email: email,
+      phoneNumber: phone,
+      role: jabatanIsSupervisor ? UserRole.supervisor : UserRole.staff,
+      currentShift: shift,
+      position: pos,
+      points: 0,
+      maxOvertimeHours: maxExtraHour.toDouble(),
+    );
+  }
 }

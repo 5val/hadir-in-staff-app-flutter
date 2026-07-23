@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/attendance_provider.dart'; // ← shared state
+import '../services/attendance_service.dart';
+import '../services/profile_service.dart';
+import '../services/api_client.dart';
+import '../services/session_service.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
+import 'login_screen.dart';
 import 'home_tab.dart';
 import 'leave_tab.dart';
 import 'salary_screen.dart';
@@ -35,6 +40,10 @@ class _MainScreenState extends State<MainScreen> {
   /// seluruh widget tree melalui [InheritedAttendance].
   final AttendanceProvider _attendance = AttendanceProvider();
 
+  // Status hidrasi profil staff dari backend.
+  bool _loadingProfile = true;
+  String? _profileError;
+
   bool get _isAdmin => AppSession.isAdmin;
 
   @override
@@ -43,6 +52,44 @@ class _MainScreenState extends State<MainScreen> {
     _tab = widget.initialTab;
     // Rebuild FAB ketika status berubah
     _attendance.addListener(() => setState(() {}));
+    _hydrateProfile();
+  }
+
+  /// Ambil profil staff asli dari backend & sinkronkan ke AppSession sebelum
+  /// menampilkan konten, agar seluruh tab menampilkan data nyata.
+  Future<void> _hydrateProfile() async {
+    setState(() {
+      _loadingProfile = true;
+      _profileError = null;
+    });
+    try {
+      await ProfileService.loadAndCache();
+      // Sinkronkan status absensi hari ini (best-effort, tidak memblokir).
+      try {
+        final today = await AttendanceService.today();
+        _attendance.hydrateFromToday(today);
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() => _loadingProfile = false);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingProfile = false;
+        _profileError = e.message;
+      });
+    }
+  }
+
+  Future<void> _logout() async {
+    await SessionService.clearSession();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+          builder: (_) =>
+              const LoginScreen(destination: LoginDestination.landing)),
+      (r) => false,
+    );
   }
 
   @override
@@ -85,13 +132,21 @@ class _MainScreenState extends State<MainScreen> {
 
     if (!mounted || result == null || !result.confirmed) return;
 
-    // Update state sesuai aksi
-    if (result.actionType == CameraActionType.checkIn) {
-      _attendance.doCheckIn();
-      _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
-    } else {
-      _attendance.doCheckOut();
-      _showSuccessSnackbar('Check-out berhasil! Istirahat yang baik 🌙');
+    // Simpan ke backend sesuai aksi.
+    try {
+      if (result.actionType == CameraActionType.checkIn) {
+        await _attendance.checkInRemote(
+            lokasi: result.address, fotoPath: result.imagePath);
+        if (!mounted) return;
+        _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
+      } else {
+        await _attendance.checkOutRemote(fotoPath: result.imagePath);
+        if (!mounted) return;
+        _showSuccessSnackbar('Check-out berhasil! Istirahat yang baik 🌙');
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showInfoSnackbar(e.message);
     }
   }
 
@@ -170,6 +225,25 @@ class _MainScreenState extends State<MainScreen> {
   // ── Build ─────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Memuat profil staff dari backend.
+    if (_loadingProfile) {
+      return const Scaffold(
+        backgroundColor: AppColors.slate50,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.brandNavy),
+        ),
+      );
+    }
+
+    // Gagal memuat profil (mis. jaringan / sesi habis).
+    if (_profileError != null) {
+      return _ProfileErrorView(
+        message: _profileError!,
+        onRetry: _hydrateProfile,
+        onLogout: _logout,
+      );
+    }
+
     // Admin: tampilan khusus (hanya dashboard, tidak ada FAB)
     if (_isAdmin) {
       return _buildAdminLayout();
@@ -305,6 +379,69 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
         child: Icon(fabIcon, color: Colors.white, size: 28),
+      ),
+    );
+  }
+}
+
+// ── Tampilan error saat gagal memuat profil ──────────────────────
+class _ProfileErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback onLogout;
+
+  const _ProfileErrorView({
+    required this.message,
+    required this.onRetry,
+    required this.onLogout,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.slate50,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.cloud_off_rounded,
+                    size: 56, color: AppColors.slate400),
+                const SizedBox(height: 16),
+                Text('Gagal memuat data',
+                    style: AppText.headline3
+                        .copyWith(color: AppColors.slate900)),
+                const SizedBox(height: 8),
+                Text(message,
+                    textAlign: TextAlign.center, style: AppText.body2),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.brandNavy,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Coba Lagi'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: onLogout,
+                  child: Text('Keluar',
+                      style: GoogleFonts.inter(color: AppColors.slate600)),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
