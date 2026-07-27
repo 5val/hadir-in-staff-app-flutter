@@ -55,8 +55,8 @@ class ProfileScreen extends StatelessWidget {
             Text(user.name,
                 style: AppText.headline2.copyWith(color: AppColors.slate900)),
             const SizedBox(height: 2),
-            Text(user.position.name, style: AppText.body2),
-            const SizedBox(height: 4),
+            // Text(user.position.name, style: AppText.body2),
+            // const SizedBox(height: 4),
             StatusBadge(label: user.role.name.toUpperCase(), color: AppColors.brandNavy),
             const SizedBox(height: 28),
 

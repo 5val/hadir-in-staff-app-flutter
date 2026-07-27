@@ -82,8 +82,8 @@ class _LeaveTabState extends State<LeaveTab> {
   List<_TabDef> get _tabs => const [
         _TabDef(Icons.beach_access_rounded, 'Cuti'),
         _TabDef(Icons.medical_services_rounded, 'Izin'),
-        _TabDef(Icons.history_rounded, 'Riwayat'),
         _TabDef(Icons.more_time_rounded, 'Lembur'),
+        _TabDef(Icons.history_rounded, 'Riwayat'),
       ];
 
   void _showActionDialog(bool approve, String name) {
@@ -336,9 +336,9 @@ class _LeaveTabState extends State<LeaveTab> {
       case 1:
         return _buildIzinTab();
       case 2:
-        return _buildRiwayatTab();
-      case 3:
         return _buildLemburTab();
+      case 3:
+        return _buildRiwayatTab();
     }
     return const SizedBox();
   }

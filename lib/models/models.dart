@@ -290,7 +290,10 @@ class AttendanceRecord {
   /// `status` (hadir|terlambat|izin|cuti|alpha|pulang_awal), `keterlambatan`,
   /// `lembur`, `lokasi`.
   factory AttendanceRecord.fromApi(Map<String, dynamic> j) {
-    final parsed = DateTime.tryParse((j['tanggal'] ?? '').toString());
+    // Backend mengirim `tanggal` sebagai local-midnight yang diserialisasi ke
+    // UTC (mis. "…T17:00:00.000Z" untuk WIB). Konversi ke lokal dulu agar
+    // komponen tanggalnya tidak mundur satu hari.
+    final parsed = DateTime.tryParse((j['tanggal'] ?? '').toString())?.toLocal();
     final base = parsed != null
         ? DateTime(parsed.year, parsed.month, parsed.day)
         : DateTime.now();
@@ -428,6 +431,7 @@ class LeaveRequest {
         case 'Dinas':
           return LeaveType.seminar;
         case 'Izin':
+        case 'Ijin': // enum DB memakai ejaan "Ijin"
           return subTipe.toLowerCase().contains('seminar')
               ? LeaveType.seminar
               : LeaveType.school;
@@ -541,14 +545,37 @@ class SalarySlip {
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
   int get workDays => workingDays;
 
-  /// Jumlah hari tidak hadir (bukan cuti/sakit yang sudah dihitung)
-  int get absentDays => workingDays - presentDays;
+  /// Jumlah hari alpha (tidak hadir tanpa cuti/izin). Cuti & izin dikeluarkan
+  /// agar tidak dihitung sebagai ketidakhadiran.
+  int get absentDays {
+    final absent =
+        workingDays - presentDays - (leaveDays ?? 0) - (permissionDays ?? 0);
+    return absent < 0 ? 0 : absent;
+  }
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/gaji/slip).
-  /// Catatan: backend `SlipGaji` menyimpan komponen gaji tetapi TIDAK menyimpan
-  /// rincian hari kerja/hadir, sehingga statistik absensi di slip = 0.
+  /// Backend `SlipGaji` tidak menyimpan rincian kehadiran, jadi statistik
+  /// (hari kerja/hadir/cuti/izin + riwayat) dihitung server dari tabel
+  /// Attendance & LeaveRequest lalu disertakan di respons.
   factory SalarySlip.fromApi(Map<String, dynamic> j) {
     int gi(String k) => (j[k] as num?)?.toInt() ?? 0;
+
+    List<LeaveRecord> parseHistory(String key) {
+      final raw = j[key];
+      if (raw is! List) return const [];
+      return raw.whereType<Map>().map((m) {
+        final map = m.map((k, v) => MapEntry(k.toString(), v));
+        DateTime parseDate(String k) =>
+            DateTime.tryParse((map[k] ?? '').toString()) ?? DateTime.now();
+        return LeaveRecord(
+          reason: (map['reason'] ?? '').toString(),
+          startDate: parseDate('startDate'),
+          endDate: parseDate('endDate'),
+          totalDays: (map['totalDays'] as num?)?.toInt() ?? 1,
+          status: (map['status'] ?? 'Disetujui').toString(),
+        );
+      }).toList();
+    }
 
     final periodeRaw = (j['periode'] ?? '').toString(); // "2026-01"
     final parts = periodeRaw.split('-');
@@ -599,14 +626,14 @@ class SalarySlip {
       periodEnd: end,
       transferBy: bank.isNotEmpty ? '$bank Transfer' : 'Bank Transfer',
       components: components,
-      workingDays: 0,
-      presentDays: 0,
-      lateDays: 0,
-      overtimeHours: gi('lemburJam'),
-      leaveDays: 0,
-      permissionDays: 0,
-      leaveHistory: const [],
-      permissionHistory: const [],
+      workingDays: gi('workingDays'),
+      presentDays: gi('presentDays'),
+      lateDays: gi('lateDays'),
+      overtimeHours: gi('overtimeHours') != 0 ? gi('overtimeHours') : gi('lemburJam'),
+      leaveDays: gi('leaveDays'),
+      permissionDays: gi('permissionDays'),
+      leaveHistory: parseHistory('leaveHistory'),
+      permissionHistory: parseHistory('permissionHistory'),
     );
   }
 

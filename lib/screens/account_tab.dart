@@ -366,11 +366,11 @@ class _AccountTabState extends State<AccountTab> {
                             .copyWith(color: AppColors.slate900)),
                     const SizedBox(height: 2),
                     Text(user.position.name, style: AppText.body2),
-                    const SizedBox(height: 4),
-                    StatusBadge(
-                      label: user.role.name.toUpperCase(),
-                      color: AppColors.brandNavy,
-                    ),
+                    // const SizedBox(height: 4),
+                    // StatusBadge(
+                    //   label: user.role.name.toUpperCase(),
+                    //   color: AppColors.brandNavy,
+                    // ),
                   ],
                 ),
               ),
@@ -450,7 +450,7 @@ class _AccountTabState extends State<AccountTab> {
                 onTap: () => _showQrCodeDialog(context, user.employeeId),
                 child: const _StatChip(
                   label: 'Scan ID',
-                  value: 'QR Code',
+                  value: 'ID Staff',
                   icon: Icons.qr_code_2_rounded,
                 ),
               ),
