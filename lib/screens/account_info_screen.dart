@@ -282,13 +282,7 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                         child: InfoTile(
                           icon: Icons.business_outlined,
                           label: 'Divisi',
-                          value: user.divisionId == 'D002'
-                              ? 'IT'
-                              : user.divisionId == 'D001'
-                                  ? 'Marketing'
-                                  : user.divisionId == 'D003'
-                                      ? 'HR'
-                                      : 'Lainnya',
+                          value: AppSession.staff?.divisiNama ?? user.divisionId,
                         ),
                       ),
                       if (user.role != UserRole.admin) ...[

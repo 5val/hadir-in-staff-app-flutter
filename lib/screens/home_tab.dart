@@ -10,6 +10,7 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/attendance_provider.dart';
+import '../services/api_client.dart';
 import '../screens/camera_checkin_screen.dart';
 import 'break_screen.dart';
 import 'notification_screen.dart';
@@ -158,7 +159,15 @@ class _HomeTabState extends State<HomeTab> {
       ),
     );
     if (!mounted || result == null || !result.confirmed) return;
-    _att.doCheckIn();
+    try {
+      await _att.checkInRemote(
+          lokasi: result.address, fotoPath: result.imagePath);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showSnackbar(e.message, color: AppColors.danger);
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _checkInPhotoPath = result.imagePath;
       _checkInLocation = result.address ?? _officeAddress;
@@ -177,7 +186,14 @@ class _HomeTabState extends State<HomeTab> {
       ),
     );
     if (!mounted || result == null || !result.confirmed) return;
-    _att.doCheckOut();
+    try {
+      await _att.checkOutRemote(fotoPath: result.imagePath);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showSnackbar(e.message, color: AppColors.danger);
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       _showMascot = true;
       _mascotMsg = 'Kerja hari ini selesai!\nGood job! 🎉';

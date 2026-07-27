@@ -366,11 +366,11 @@ class _AccountTabState extends State<AccountTab> {
                             .copyWith(color: AppColors.slate900)),
                     const SizedBox(height: 2),
                     Text(user.position.name, style: AppText.body2),
-                    const SizedBox(height: 4),
-                    StatusBadge(
-                      label: user.role.name.toUpperCase(),
-                      color: AppColors.brandNavy,
-                    ),
+                    // const SizedBox(height: 4),
+                    // StatusBadge(
+                    //   label: user.role.name.toUpperCase(),
+                    //   color: AppColors.brandNavy,
+                    // ),
                   ],
                 ),
               ),
@@ -450,7 +450,7 @@ class _AccountTabState extends State<AccountTab> {
                 onTap: () => _showQrCodeDialog(context, user.employeeId),
                 child: const _StatChip(
                   label: 'Scan ID',
-                  value: 'QR Code',
+                  value: 'ID Staff',
                   icon: Icons.qr_code_2_rounded,
                 ),
               ),
@@ -458,7 +458,7 @@ class _AccountTabState extends State<AccountTab> {
                 Container(width: 1, height: 36, color: AppColors.slate200),
                 _StatChip(
                   label: 'Sisa Cuti',
-                  value: '9 hari',
+                  value: '${AppSession.staff?.sisaCuti ?? 0} hari',
                   icon: Icons.beach_access_rounded,
                 ),
                 Container(width: 1, height: 36, color: AppColors.slate200),
@@ -677,7 +677,7 @@ class _AccountTabState extends State<AccountTab> {
             const AppDivider(),
             _InfoRow(Icons.email_outlined, 'Email', user.email),
             const AppDivider(),
-            _InfoRow(Icons.business_outlined, 'Divisi', 'Marketing'),
+            _InfoRow(Icons.business_outlined, 'Divisi', AppSession.staff?.divisiNama ?? '-'),
             if (user.role != UserRole.admin) ...[
               const AppDivider(),
               _InfoRow(Icons.schedule_outlined, 'Shift',

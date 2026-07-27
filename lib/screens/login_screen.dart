@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import '../models/models.dart';
 import '../services/session_service.dart';
+import '../services/auth_service.dart';
+import '../services/api_client.dart';
 import 'main_screen.dart';
 
 enum LoginDestination { landing, leaveRequest }
@@ -36,8 +37,9 @@ class _LoginScreenState extends State<LoginScreen>
 
   LoginStep _currentStep = LoginStep.phone;
   bool _isLoading = false;
-  UserProfile? _matchedUser;
-  String _sentOtp = "123456";
+  // Data staff dari hasil verifikasi OTP (login pertama di device ini).
+  String? _authStaffId;
+  String _authStaffName = "";
   int _timerSeconds = 60;
   Timer? _resendTimer;
   String _savedPasscode = "";
@@ -131,85 +133,90 @@ class _LoginScreenState extends State<LoginScreen>
     if (!_phoneFormKey.currentState!.validate()) return;
 
     final phone = _phoneCtrl.text.trim();
-    final user = AppSession.findUserByPhone(phone);
+    setState(() => _isLoading = true);
 
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Nomor HP tidak terdaftar sebagai karyawan!"),
-          backgroundColor: AppColors.danger,
-        ),
-      );
+    // Cek apakah sudah ada passcode tersimpan di device ini.
+    final prefsState = await SessionService.getAuthState();
+    final savedCode = await SessionService.getPasscode();
+    if (!mounted) return;
+
+    if (prefsState['hasPasscode'] == true && (savedCode ?? "").isNotEmpty) {
+      // Sudah pernah login di device ini → cukup passcode lokal.
+      // Token backend sudah tersimpan sejak login pertama.
+      setState(() {
+        _isLoading = false;
+        _savedPasscode = savedCode!;
+        _currentStep = LoginStep.enterPasscode;
+      });
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _matchedUser = user;
-    });
-
-    // Simulasi network delay
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-
-    // Cek apakah sudah ada passcode tersimpan di device ini
-    final prefsState = await SessionService.getAuthState();
-    final savedCode = await SessionService.getPasscode();
-
-    setState(() {
-      _isLoading = false;
-      _savedPasscode = savedCode ?? "";
-    });
-
-    if (prefsState['hasPasscode'] == true && _savedPasscode.isNotEmpty) {
-      // Sudah pernah login → langsung minta passcode
+    // Login pertama di device ini → minta OTP ke backend.
+    try {
+      final result = await AuthService.requestOtp(phone);
+      if (!mounted) return;
       setState(() {
-        _currentStep = LoginStep.enterPasscode;
-      });
-    } else {
-      // Pertama kali → kirim OTP
-      _sentOtp = "123456";
-      setState(() {
+        _isLoading = false;
         _currentStep = LoginStep.otp;
       });
       _startTimer();
-      _showMockWaNotification(_sentOtp);
+      if (result.devCode != null && result.devCode!.isNotEmpty) {
+        _showMockWaNotification(result.devCode!);
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError(e.message);
     }
   }
 
-  void _verifyOtp() {
-    if (_otpCtrl.text.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Masukkan 6 digit OTP lengkap"),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      return;
-    }
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.danger),
+    );
+  }
 
-    if (_otpCtrl.text != _sentOtp) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Kode OTP salah! Silakan coba lagi."),
-          backgroundColor: AppColors.danger,
-        ),
-      );
+  Future<void> _verifyOtp() async {
+    if (_otpCtrl.text.length < 6) {
+      _showError("Masukkan 6 digit OTP lengkap");
       return;
     }
 
     FocusScope.of(context).unfocus();
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
-    Future.delayed(const Duration(milliseconds: 600), () async {
+    try {
+      final staff = await AuthService.verifyOtp(
+        phone: _phoneCtrl.text.trim(),
+        code: _otpCtrl.text.trim(),
+      );
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _authStaffId = staff.id;
+        _authStaffName = staff.nama;
         _currentStep = LoginStep.createPasscode;
       });
-    });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _otpCtrl.clear();
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _resendOtp() async {
+    try {
+      final result = await AuthService.requestOtp(_phoneCtrl.text.trim());
+      if (!mounted) return;
+      _startTimer();
+      if (result.devCode != null && result.devCode!.isNotEmpty) {
+        _showMockWaNotification(result.devCode!);
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showError(e.message);
+    }
   }
 
   /// Login kembali — verifikasi passcode yang sudah ada
@@ -240,10 +247,11 @@ class _LoginScreenState extends State<LoginScreen>
     await Future.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
 
-    // Simpan session untuk user yang baru dipilih
+    // Simpan session — pakai staffId asli yang tersimpan sejak login pertama.
+    final staffId = _authStaffId ?? await SessionService.getStaffId() ?? "";
     await SessionService.saveSessionWithPhone(
       phone: _phoneCtrl.text.trim(),
-      employeeId: _matchedUser!.id,
+      employeeId: staffId,
     );
 
     setState(() => _isLoading = false);
@@ -332,13 +340,12 @@ class _LoginScreenState extends State<LoginScreen>
       _isLoading = false;
     });
 
-    // Simpan passcode & session
+    // Simpan passcode & session — staffId asli dari verifikasi OTP.
     await SessionService.savePasscode(_confirmPasscodeCtrl.text);
+    final staffId = _authStaffId ?? await SessionService.getStaffId() ?? "";
     await SessionService.saveSessionWithPhone(
-      phone: _phoneCtrl.text.trim().isNotEmpty
-          ? _phoneCtrl.text.trim()
-          : _matchedUser!.phoneNumber,
-      employeeId: _matchedUser!.id,
+      phone: _phoneCtrl.text.trim(),
+      employeeId: staffId,
     );
 
     if (_isInitialLogin) {
@@ -737,10 +744,7 @@ class _LoginScreenState extends State<LoginScreen>
               )
             else
               TextButton(
-                onPressed: () {
-                  _startTimer();
-                  _showMockWaNotification("123456");
-                },
+                onPressed: _resendOtp,
                 child: Text(
                   "Kirim Ulang",
                   style: GoogleFonts.inter(
@@ -780,8 +784,8 @@ class _LoginScreenState extends State<LoginScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Nama user yang ditemukan
-        if (_matchedUser != null)
+        // Nama staff (bila tersedia dari login pertama)
+        if (_authStaffName.isNotEmpty)
           Container(
             margin: const EdgeInsets.only(bottom: 20),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -796,7 +800,7 @@ class _LoginScreenState extends State<LoginScreen>
                     size: 16, color: AppColors.brandNavy),
                 const SizedBox(width: 8),
                 Text(
-                  _matchedUser!.name,
+                  _authStaffName,
                   style: GoogleFonts.inter(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,

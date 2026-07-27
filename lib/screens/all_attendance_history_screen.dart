@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/attendance_service.dart';
+import '../services/api_client.dart';
 
 class AllAttendanceHistoryScreen extends StatefulWidget {
   const AllAttendanceHistoryScreen({super.key});
@@ -16,13 +18,42 @@ class AllAttendanceHistoryScreen extends StatefulWidget {
 class _AllAttendanceHistoryScreenState
     extends State<AllAttendanceHistoryScreen> {
   final user = SampleData.currentUser;
-  late List<AttendanceRecord> _allAttendanceRecords;
+  List<AttendanceRecord> _allAttendanceRecords = [];
+  // Data absensi asli dari backend untuk bulan terpilih.
+  List<AttendanceRecord> _monthRecords = [];
+  bool _loading = true;
+  String? _error;
   DateTime _selectedDate = DateTime.now();
 
   @override
   void initState() {
     super.initState();
-    _generateFullAttendanceHistory();
+    _load();
+  }
+
+  /// Ambil riwayat absensi bulan terpilih dari backend, lalu susun grid harian.
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final month =
+        '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}';
+    try {
+      final records = await AttendanceService.history(month: month, limit: 100);
+      if (!mounted) return;
+      setState(() {
+        _monthRecords = records;
+        _generateFullAttendanceHistory();
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
   }
 
   void _generateFullAttendanceHistory() {
@@ -37,7 +68,21 @@ class _AllAttendanceHistoryScreenState
 
       final dayOfWeek = date.weekday;
 
-      if (dayOfWeek == DateTime.saturday || dayOfWeek == DateTime.sunday) {
+      // Cari record asli untuk tanggal ini.
+      AttendanceRecord? existing;
+      for (final record in _monthRecords) {
+        if (record.date.year == date.year &&
+            record.date.month == date.month &&
+            record.date.day == date.day) {
+          existing = record;
+          break;
+        }
+      }
+
+      if (existing != null) {
+        generatedRecords.add(existing);
+      } else if (dayOfWeek == DateTime.saturday ||
+          dayOfWeek == DateTime.sunday) {
         generatedRecords.add(
           AttendanceRecord(
             id: 'HOLIDAY-${date.toIso8601String()}',
@@ -47,30 +92,23 @@ class _AllAttendanceHistoryScreenState
           ),
         );
       } else {
-        final existingRecord = SampleData.recentAttendance.firstWhere(
-          (record) =>
-              record.date.year == date.year &&
-              record.date.month == date.month &&
-              record.date.day == date.day,
-          orElse: () => AttendanceRecord(
+        generatedRecords.add(
+          AttendanceRecord(
             id: 'ABSENT-${date.toIso8601String()}',
             date: date,
             status: AttendanceStatus.absent,
             pointsEarned: 0,
           ),
         );
-        generatedRecords.add(existingRecord);
       }
     }
     _allAttendanceRecords = generatedRecords.reversed.toList();
   }
 
   void _changeMonth(int offset) {
-    setState(() {
-      _selectedDate =
-          DateTime(_selectedDate.year, _selectedDate.month + offset, 1);
-      _generateFullAttendanceHistory();
-    });
+    setState(() => _selectedDate =
+        DateTime(_selectedDate.year, _selectedDate.month + offset, 1));
+    _load();
   }
 
   // ── Fungsi Popup Pemilih Bulan & Tahun ────────────────────────────────
@@ -206,12 +244,10 @@ class _AllAttendanceHistoryScreenState
                   ),
                   onPressed: () {
                     Navigator.pop(context); // Tutup popup
-
-                    // Update state utama dan generate ulang data absensi
-                    setState(() {
-                      _selectedDate = DateTime(tempYear, tempMonth, 1);
-                      _generateFullAttendanceHistory();
-                    });
+                    // Update periode & muat ulang data dari backend.
+                    setState(() => _selectedDate =
+                        DateTime(tempYear, tempMonth, 1));
+                    _load();
                   },
                   child: Text(
                     'Terapkan',
@@ -279,8 +315,39 @@ class _AllAttendanceHistoryScreenState
           //   ),
           // ),
           _buildHeaderFilter(),
-          Expanded(
-            child: ListView.builder(
+          if (_loading)
+            const Expanded(
+              child: Center(
+                child: CircularProgressIndicator(color: AppColors.brandNavy),
+              ),
+            )
+          else if (_error != null)
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.cloud_off_rounded,
+                          size: 48, color: AppColors.slate400),
+                      const SizedBox(height: 12),
+                      Text(_error!,
+                          textAlign: TextAlign.center, style: AppText.body2),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: _load,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Coba Lagi'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _allAttendanceRecords.length,
               itemBuilder: (context, index) {
