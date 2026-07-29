@@ -22,6 +22,12 @@ dependencies:
   google_mlkit_face_detection: ^0.11.0
   pdf: ^3.10.8
   printing: ^5.12.0
+  # Fase 8: pengecekan lokasi GPS nyata untuk check-in/check-out
+  # (menggantikan Random().nextBool() di home_tab.dart).
+  geolocator: ^13.0.2
+  # Fase 8: pilih file/foto untuk upload dokumen onboarding
+  # (pas foto / KTP / BPJS / NPWP).
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:

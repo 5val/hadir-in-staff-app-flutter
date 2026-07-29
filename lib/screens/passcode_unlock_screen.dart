@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import '../models/models.dart';
 import '../services/session_service.dart';
+import '../services/auth_service.dart';
+import '../services/api_client.dart';
 import 'main_screen.dart';
-import 'login_screen.dart';
 
 enum UnlockStep {
   enterPasscode,
@@ -27,9 +27,10 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     with TickerProviderStateMixin {
   UnlockStep _currentStep = UnlockStep.enterPasscode;
   String _enteredCode = "";
-  String _savedPasscode = "";
+  /// Nomor HP staff — dikirim bersama passcode ke server saat verifikasi.
+  /// Fase 8: passcode itu sendiri TIDAK pernah lagi disimpan/dibaca di HP.
+  String _phone = "";
   String _recoveryMethod = ""; // "WA" or "Gmail"
-  String _recoveryOtp = "";
   String _enteredOtp = "";
   String _newPasscode = "";
   String _confirmNewPasscode = "";
@@ -81,14 +82,16 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _bannerCtrl, curve: Curves.easeOutBack));
 
-    _loadPasscode();
+    _loadPhone();
   }
 
-  Future<void> _loadPasscode() async {
-    final code = await SessionService.getPasscode();
-    setState(() {
-      _savedPasscode = code ?? "";
-    });
+  /// Fase 8: layar ini tidak lagi memuat passcode ke memori app. Passcode
+  /// tinggal terhash di server; yang dibutuhkan di sini hanya nomor HP staff
+  /// untuk dikirim bersama passcode saat verifikasi.
+  Future<void> _loadPhone() async {
+    final phone = await SessionService.getSavedPhone();
+    if (!mounted) return;
+    setState(() => _phone = phone);
   }
 
   @override
@@ -200,89 +203,101 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     }
   }
 
-  void _verifyUnlockCode() {
+  /// Fase 8: verifikasi ke SERVER.
+  ///
+  /// Dua hal dihapus di sini:
+  ///  - perbandingan lokal `_enteredCode == _savedPasscode` (yang berarti
+  ///    passcode tersimpan apa adanya di HP), dan
+  ///  - master backdoor `"123456"`, yang menerima siapa pun yang memegang
+  ///    HP staff tanpa tahu passcode-nya sama sekali.
+  ///
+  /// Login ulang lewat passcode juga menyegarkan token staff, jadi sesi yang
+  /// tokennya sudah kedaluwarsa ikut pulih saat membuka kunci.
+  void _verifyUnlockCode() async {
     setState(() => _isLoading = true);
 
-    Future.delayed(const Duration(milliseconds: 400), () async {
+    try {
+      await AuthService.loginWithPasscode(phone: _phone, passcode: _enteredCode);
+      await SessionService.setSessionActive(true);
       if (!mounted) return;
       setState(() => _isLoading = false);
-
-      if (_enteredCode == _savedPasscode ||
-          _enteredCode == "123456" /* master backup */) {
-        // Unlock session
-        await SessionService.setSessionActive(true);
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (_) => const MainScreen()),
-            (r) => false,
-          );
-        }
-      } else {
-        // Shake animation and error
-        _shakeCtrl.forward(from: 0.0);
-        setState(() {
-          _enteredCode = "";
-          _errorMessage = "Passcode salah! Silakan coba lagi.";
-        });
-      }
-    });
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (r) => false,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _shakeCtrl.forward(from: 0.0);
+      setState(() {
+        _isLoading = false;
+        _enteredCode = "";
+        _errorMessage = e.message;
+      });
+    }
   }
 
-  void _sendRecoveryOtp(String method) {
+  /// Kirim OTP pemulihan ke WhatsApp staff (endpoint OTP login yang sama).
+  ///
+  /// Fase 8: kode `654321` yang dulu di-hardcode di app — dan ditampilkan
+  /// sendiri lewat notifikasi palsu — dihapus. Kodenya sekarang dibuat
+  /// server dan dikirim ke WhatsApp asli; app tidak pernah mengetahuinya.
+  void _sendRecoveryOtp(String method) async {
     setState(() {
       _isLoading = true;
       _recoveryMethod = method;
       _enteredOtp = "";
-      _recoveryOtp = "654321"; // Simulated Recovery OTP
     });
 
-    Future.delayed(const Duration(milliseconds: 600), () {
+    try {
+      final result = await AuthService.requestOtp(_phone);
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _currentStep = UnlockStep.verifyOtp;
       });
 
-      if (method == "WA") {
-        _showNotification(
-          "WhatsApp • Hadir-In Recovery",
-          "[Hadir-In] OTP Pemulihan Passcode Anda: 654321. Jangan berikan kode ini kepada siapapun.",
-          const Color(0xFF25D366),
-          Icons.phone_enabled_rounded,
-        );
-      } else {
-        _showNotification(
-          "Gmail • Hadir-In Security",
-          "Kode verifikasi pemulihan passcode Hadir-In Anda adalah: 654321.",
-          const Color(0xFFD44638),
-          Icons.mail_outline_rounded,
-        );
-      }
-    });
+      _showNotification(
+        "WhatsApp • Hadir-In Recovery",
+        result.devCode != null && result.devCode!.isNotEmpty
+            ? "[Hadir-In] Kode pemulihan Anda: ${result.devCode}. Jangan berikan kepada siapa pun."
+            : "Kode pemulihan telah dikirim ke WhatsApp Anda.",
+        const Color(0xFF25D366),
+        Icons.phone_enabled_rounded,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+    }
   }
 
-  void _verifyRecoveryOtp() {
+  /// Verifikasi OTP pemulihan ke server. Bila benar, token staff baru
+  /// tersimpan — itulah yang membuat penyimpanan passcode baru di langkah
+  /// berikutnya bisa diotorisasi.
+  void _verifyRecoveryOtp() async {
     setState(() => _isLoading = true);
 
-    Future.delayed(const Duration(milliseconds: 500), () {
+    try {
+      await AuthService.verifyOtp(phone: _phone, code: _enteredOtp);
       if (!mounted) return;
-      setState(() => _isLoading = false);
-
-      if (_enteredOtp == _recoveryOtp) {
-        setState(() {
-          _newPasscode = "";
-          _confirmNewPasscode = "";
-          _currentStep = UnlockStep.resetPasscode;
-        });
-      } else {
-        _shakeCtrl.forward(from: 0.0);
-        setState(() {
-          _enteredOtp = "";
-          _errorMessage = "Kode OTP salah! Coba lagi.";
-        });
-      }
-    });
+      setState(() {
+        _isLoading = false;
+        _newPasscode = "";
+        _confirmNewPasscode = "";
+        _currentStep = UnlockStep.resetPasscode;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _shakeCtrl.forward(from: 0.0);
+      setState(() {
+        _isLoading = false;
+        _enteredOtp = "";
+        _errorMessage = e.message;
+      });
+    }
   }
 
   void _saveNewPasscode() async {
@@ -296,16 +311,23 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     }
 
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 600));
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
+    try {
+      // Passcode baru disimpan terhash di server (Staff.passcodeHash).
+      // Token dari verifikasi OTP barusan yang mengotorisasi panggilan ini.
+      await AuthService.setPasscode(passcode: _confirmNewPasscode);
+      await SessionService.setSessionActive(true);
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+      });
+      return;
+    }
 
-    // Save
-    await SessionService.savePasscode(_confirmNewPasscode);
-    await SessionService.setSessionActive(true);
-
-    // Show success dialog or notification
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Passcode baru berhasil dibuat!"),

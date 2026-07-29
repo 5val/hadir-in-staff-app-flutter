@@ -4,14 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
+import '../widgets/work_date_picker.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/leave_service.dart';
 import '../services/api_client.dart';
+import '../services/overtime_service.dart';
+import '../services/subordinate_service.dart';
+import '../services/calendar_service.dart';
 import 'all_leave_history_screen.dart';
 import 'all_subordinate_leave_history_screen.dart';
 import 'subordinate_requests_screen.dart';
-import 'overtime_history_screen.dart';
 
 /// Leave & Time Off tab — tampil langsung di MainScreen.
 /// Tanpa re-verifikasi. Tab selector untuk: Pengajuan Karyawan (supervisor),
@@ -29,7 +32,9 @@ class _LeaveTabState extends State<LeaveTab> {
   //   non-supervisor: 0=Ajukan Cuti, 1=Ajukan Izin, 2=Riwayat
   int _selectedTab = 0;
 
-  final bool _isSupervisor = SampleData.currentUser.role == UserRole.supervisor;
+  /// Fase 8: status "atasan" ditentukan SERVER lewat AuthorityGrant
+  /// (`isApprover` pada respons subordinates), bukan lagi role dummy di app.
+  bool get _isSupervisor => _subordinates.isApprover;
 
   bool _showAllHistory = false;
   LeaveType? _filterType;
@@ -42,10 +47,72 @@ class _LeaveTabState extends State<LeaveTab> {
   bool _loadingLeaves = true;
   String? _leaveError;
 
+  // ── Lembur (Fase 8) ─────────────────────────────────────────
+  /// Hari kerja yang memenuhi syarat lembur (H-3, checkout lewat jam pulang,
+  /// hari libur dilewati) — SELURUHNYA dihitung backend.
+  List<OvertimeEligibleDay> _overtimeDays = [];
+  bool _loadingOvertime = true;
+  String? _overtimeError;
+
+  /// Riwayat pengajuan lembur — ditampilkan di tab "Riwayat" gabungan,
+  /// menggantikan layar riwayat lembur terpisah yang dihapus.
+  List<OvertimeRequestRecord> _myOvertime = [];
+
+  // ── Pengajuan bawahan (Manager/SPV) — Fase 8 ────────────────
+  /// Data asli dari `GET .../subordinates/requests`. Menggantikan
+  /// `SampleData.subordinateLeaveRequests` yang tombol Setujui/Tolak-nya
+  /// dulu hanya menutup dialog tanpa mengubah apa pun di database.
+  SubordinateRequests _subordinates = SubordinateRequests.empty;
+  bool _loadingSubordinates = true;
+
   @override
   void initState() {
     super.initState();
     _loadLeaves();
+    _loadOvertimeDays();
+    _loadSubordinates();
+  }
+
+  Future<void> _loadSubordinates() async {
+    setState(() => _loadingSubordinates = true);
+    try {
+      final data = await SubordinateService.load();
+      if (!mounted) return;
+      setState(() {
+        _subordinates = data;
+        _loadingSubordinates = false;
+      });
+    } on ApiException {
+      if (!mounted) return;
+      // Gagal memuat pengajuan bawahan tidak boleh mengunci tab lain.
+      setState(() {
+        _subordinates = SubordinateRequests.empty;
+        _loadingSubordinates = false;
+      });
+    }
+  }
+
+  Future<void> _loadOvertimeDays() async {
+    setState(() {
+      _loadingOvertime = true;
+      _overtimeError = null;
+    });
+    try {
+      final days = await OvertimeService.eligibleDays();
+      final history = await OvertimeService.history();
+      if (!mounted) return;
+      setState(() {
+        _overtimeDays = days;
+        _myOvertime = history;
+        _loadingOvertime = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _overtimeError = e.message;
+        _loadingOvertime = false;
+      });
+    }
   }
 
   Future<void> _loadLeaves() async {
@@ -86,8 +153,41 @@ class _LeaveTabState extends State<LeaveTab> {
         _TabDef(Icons.history_rounded, 'Riwayat'),
       ];
 
-  void _showActionDialog(bool approve, String name) {
-    showDialog(
+  /// Setujui/tolak pengajuan bawahan — Fase 8: benar-benar mengubah status
+  /// di database (dan memicu potong sisa cuti + notifikasi ke staff, lewat
+  /// fungsi approval yang sama dengan portal web).
+  Future<void> _respondToLeave(LeaveRequest app, bool approve) async {
+    final name = app.employeeName ?? 'karyawan ini';
+    final ok = await _confirmAction(approve, name);
+    if (ok != true) return;
+
+    try {
+      await SubordinateService.respondLeave(
+        leaveId: app.id,
+        approve: approve,
+      );
+      if (!mounted) return;
+      await _loadSubordinates();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(approve
+              ? 'Pengajuan $name disetujui.'
+              : 'Pengajuan $name ditolak.'),
+          backgroundColor:
+              approve ? AppColors.brandLimeDark : AppColors.slate700,
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    }
+  }
+
+  Future<bool?> _confirmAction(bool approve, String name) {
+    return showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         icon: Icon(
@@ -104,7 +204,7 @@ class _LeaveTabState extends State<LeaveTab> {
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Batal'),
           ),
           ElevatedButton(
@@ -112,7 +212,7 @@ class _LeaveTabState extends State<LeaveTab> {
               backgroundColor:
                   approve ? AppColors.brandLimeDark : AppColors.danger,
             ),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, true),
             child: Text(approve ? 'Setujui' : 'Tolak'),
           ),
         ],
@@ -165,7 +265,7 @@ class _LeaveTabState extends State<LeaveTab> {
   }
 
   Widget _buildSeeMyTeamButton() {
-    final pendingCount = SampleData.subordinateLeaveRequests
+    final pendingCount = _subordinates.leave
         .where((r) => r.status == RequestStatus.pending)
         .length;
 
@@ -245,7 +345,7 @@ class _LeaveTabState extends State<LeaveTab> {
 
           // Show pending badge on "Cuti" tab for supervisor (since Cuti is now idx == 0)
           final pendingCount = (_isSupervisor && idx == 0)
-              ? SampleData.subordinateLeaveRequests
+              ? _subordinates.leave
                   .where((r) => r.status == RequestStatus.pending)
                   .length
               : 0;
@@ -345,7 +445,15 @@ class _LeaveTabState extends State<LeaveTab> {
 
   // ── Employee Tab (supervisor) ────────────────────────────
   Widget _buildEmployeeTab() {
-    final apps = SampleData.subordinateLeaveRequests;
+    if (_loadingSubordinates) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(40),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    final apps = _subordinates.leave;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
@@ -396,70 +504,14 @@ class _LeaveTabState extends State<LeaveTab> {
                 padding: EdgeInsets.zero,
                 child: _EmployeeAppTile(
                   app: app,
-                  onApprove: () => _showActionDialog(true, app.employeeName!),
-                  onReject: () => _showActionDialog(false, app.employeeName!),
+                  onApprove: () => _respondToLeave(app, true),
+                  onReject: () => _respondToLeave(app, false),
                 ),
               ),
             );
           }),
       ],
     );
-  }
-
-  // ── Lembur Tab ───────────────────────────────────────────
-  Future<void> _pickOvertimeStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _overtimeStartDate ?? DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.brandNavy,
-              onPrimary: Colors.white,
-              onSurface: AppColors.slate900,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null) {
-      setState(() {
-        _overtimeStartDate = picked;
-        if (_overtimeEndDate != null &&
-            _overtimeEndDate!.isBefore(_overtimeStartDate!)) {
-          _overtimeEndDate = null;
-        }
-      });
-    }
-  }
-
-  Future<void> _pickOvertimeEndDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _overtimeEndDate ?? _overtimeStartDate ?? DateTime.now(),
-      firstDate: _overtimeStartDate ??
-          DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.brandNavy,
-              onPrimary: Colors.white,
-              onSurface: AppColors.slate900,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null) {
-      setState(() => _overtimeEndDate = picked);
-    }
   }
 
   Widget _buildDateInput({
@@ -519,366 +571,321 @@ class _LeaveTabState extends State<LeaveTab> {
   }
 
   // ── Lembur Tab ───────────────────────────────────────────
+  // ── Lembur Tab ───────────────────────────────────────────
+  //
+  // Fase 8 — ditulis ulang total. Sebelumnya tab ini memfilter
+  // `SampleData.recentAttendance` (data dummy di memori) dan "mengajukan"
+  // lembur hanya dengan menandai objek dummy itu `overtimeApplied = true`,
+  // yang hilang begitu app ditutup. Tidak ada satu pun panggilan API.
+  //
+  // Sekarang seluruh isinya datang dari backend
+  // (`GET .../lembur/eligible-days`), yang menerapkan tiga aturan produk:
+  //   1. hanya 3 HARI KERJA terakhir (H-3) — akhir pekan & hari libur
+  //      dilewati, jadi kalau hari ini Senin yang muncul Jumat/Kamis/Rabu;
+  //   2. hanya hari yang checkout-nya memang melewati jam pulang shift —
+  //      kalau tidak ada, daftarnya kosong (bukan "3 lembur terakhir");
+  //   3. tidak bisa diajukan bila gaji periode tersebut sudah ditutup.
+  //
+  // Sub-tab "Riwayat Pengajuan Lembur" juga dihapus dari sini — riwayatnya
+  // digabung ke tab "Riwayat" bersama cuti & izin.
   Widget _buildLemburTab() {
-    final user = SampleData.currentUser;
-    final userShift = user.currentShift;
-    final shiftEndTime = userShift.endTime;
-    final shiftEndMinutes = shiftEndTime.hour * 60 + shiftEndTime.minute;
-
-    // Filter absensi yang check out-nya melebihi jam pulang normal dan belum diajukan lembur
-    var readyToApply = SampleData.recentAttendance.where((r) {
-      if (r.checkOut == null) return false;
-      if (r.overtimeApplied) return false;
-      final checkoutMinutes = r.checkOut!.hour * 60 + r.checkOut!.minute;
-      return checkoutMinutes > shiftEndMinutes;
-    }).toList();
-
-    // Filter range tanggal
-    if (_overtimeStartDate != null) {
-      readyToApply = readyToApply.where((r) {
-        final recordDateOnly = DateTime(r.date.year, r.date.month, r.date.day);
-        final startDateOnly = DateTime(_overtimeStartDate!.year,
-            _overtimeStartDate!.month, _overtimeStartDate!.day);
-        return recordDateOnly.isAfter(startDateOnly) ||
-            recordDateOnly.isAtSameMomentAs(startDateOnly);
-      }).toList();
-    }
-
-    if (_overtimeEndDate != null) {
-      readyToApply = readyToApply.where((r) {
-        final recordDateOnly = DateTime(r.date.year, r.date.month, r.date.day);
-        final endDateOnly = DateTime(_overtimeEndDate!.year,
-            _overtimeEndDate!.month, _overtimeEndDate!.day);
-        return recordDateOnly.isBefore(endDateOnly) ||
-            recordDateOnly.isAtSameMomentAs(endDateOnly);
-      }).toList();
-    }
-
-    // Sort by date descending
-    readyToApply.sort((a, b) => b.date.compareTo(a.date));
-
     final df = DateFormat('EEEE, dd MMMM yyyy', 'id_ID');
-    final tf = DateFormat('HH:mm');
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-      children: [
-        // Info card at the top displaying maximum overtime limit
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppColors.brandNavy,
-                AppColors.brandNavy.withOpacity(0.85),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.brandNavy.withOpacity(0.2),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.more_time_rounded,
-                  color: Colors.white,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Batas Maksimal Lembur Anda',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white.withOpacity(0.8),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${user.maxOvertimeHours} Jam / Pengajuan',
-                      style: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+    if (_loadingOvertime) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(40),
+          child: CircularProgressIndicator(),
         ),
-        const SizedBox(height: 24),
+      );
+    }
 
-        // --- FILTER & HISTORY NAVIGATION ROW ---
-        Row(
-          children: [
-            _buildDateInput(
-              label: 'Mulai',
-              value: _overtimeStartDate,
-              onTap: _pickOvertimeStartDate,
-            ),
-            const SizedBox(width: 8),
-            Text('-',
-                style:
-                    GoogleFonts.inter(fontSize: 12, color: AppColors.slate700)),
-            const SizedBox(width: 8),
-            _buildDateInput(
-              label: 'Selesai',
-              value: _overtimeEndDate,
-              onTap: _pickOvertimeEndDate,
-            ),
-            if (_overtimeStartDate != null || _overtimeEndDate != null) ...[
-              const SizedBox(width: 6),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded,
-                    color: AppColors.slate700, size: 20),
-                onPressed: () => setState(() {
-                  _overtimeStartDate = null;
-                  _overtimeEndDate = null;
-                }),
-                tooltip: 'Reset Filter',
-              ),
-            ],
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.history_rounded, size: 16),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.brandNavy,
-                side: const BorderSide(color: AppColors.brandNavy),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              label: Text(
-                'Riwayat',
-                style: GoogleFonts.inter(
-                    fontSize: 11, fontWeight: FontWeight.w700),
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const OvertimeHistoryScreen()),
-                ).then((_) {
-                  if (mounted) setState(() {});
-                });
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-
-        // --- SECTION Header ---
-        Row(
-          children: [
-            Text(
-              'Absensi Siap Lembur',
-              style: AppText.headline3.copyWith(color: AppColors.slate900),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: AppColors.brandOrange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '${readyToApply.length}',
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.brandOrange,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-
-        if (readyToApply.isEmpty)
+    if (_overtimeError != null) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        children: [
           SectionCard(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  const Text('✅', style: TextStyle(fontSize: 32)),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Tidak ada absensi baru yang memenuhi kriteria filter.',
-                    textAlign: TextAlign.center,
-                    style: AppText.body2.copyWith(color: AppColors.slate600),
-                  ),
+                  const Icon(Icons.cloud_off_rounded,
+                      size: 40, color: AppColors.slate400),
+                  const SizedBox(height: 10),
+                  Text(_overtimeError!,
+                      textAlign: TextAlign.center, style: AppText.body2),
+                  const SizedBox(height: 14),
+                  ElevatedButton(
+                      onPressed: _loadOvertimeDays,
+                      child: const Text('Coba Lagi')),
                 ],
               ),
             ),
-          )
-        else
-          ...readyToApply.map((record) {
-            // Hitung kelebihan waktu
-            final diff = record.checkOut!.difference(
-              DateTime(
-                record.checkOut!.year,
-                record.checkOut!.month,
-                record.checkOut!.day,
-                shiftEndTime.hour,
-                shiftEndTime.minute,
+          ),
+        ],
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadOvertimeDays,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+        children: [
+          // Info batas lembur — angkanya dari Jabatan.maxExtraHour di DB.
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.brandNavy,
+                  AppColors.brandNavy.withOpacity(0.85),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
-            );
-            final hours = diff.inHours;
-            final minutes = diff.inMinutes % 60;
-            final diffStr =
-                hours > 0 ? '$hours jam $minutes menit' : '$minutes menit';
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: SectionCard(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Date
-                    Text(
-                      df.format(record.date),
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.slate800,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const AppDivider(),
-                    const SizedBox(height: 10),
-
-                    // Info Row
-                    Row(
-                      children: [
-                        const Icon(Icons.login_rounded,
-                            size: 16, color: AppColors.slate700),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Check-in: ${record.checkIn != null ? tf.format(record.checkIn!) : '-'}',
-                          style: AppText.body2,
-                        ),
-                        const SizedBox(width: 16),
-                        const Icon(Icons.logout_rounded,
-                            size: 16, color: AppColors.slate700),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Check-out: ${tf.format(record.checkOut!)}',
-                          style: AppText.body2,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    Row(
-                      children: [
-                        const Icon(Icons.schedule_rounded,
-                            size: 16, color: AppColors.slate700),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Pulang Normal: ${userShift.endTimeStr}',
-                          style: AppText.body2,
-                        ),
-                        const Spacer(),
-                        Text(
-                          'Kelebihan: $diffStr',
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.more_time_rounded,
+                      color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Batas Maksimal Lembur Anda',
                           style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.brandOrange,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    GradientButton(
-                      label: 'Ajukan Lembur',
-                      height: 40,
-                      color: AppColors.brandNavy,
-                      onTap: () => _showOvertimeDialog(record,
-                          user.maxOvertimeHours, df.format(record.date)),
+                              fontSize: 11,
+                              color: Colors.white.withOpacity(0.8))),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${AppSession.staff?.maxExtraHour ?? 4} Jam / Pengajuan',
+                        style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Row(
+            children: [
+              Text('Hari yang Bisa Diajukan',
+                  style:
+                      AppText.headline3.copyWith(color: AppColors.slate900)),
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.brandOrange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('${_overtimeDays.length}',
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.brandOrange)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Menampilkan maksimal 3 hari kerja terakhir yang jam pulangnya '
+            'melebihi jam pulang shift. Hari libur tidak dihitung.',
+            style: AppText.caption,
+          ),
+          const SizedBox(height: 12),
+
+          if (_overtimeDays.isEmpty)
+            SectionCard(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    const Text('OK', style: TextStyle(fontSize: 26)),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tidak ada hari yang bisa diajukan lembur.\n'
+                      'Lembur baru muncul di sini bila check-out Anda '
+                      'melewati jam pulang shift.',
+                      textAlign: TextAlign.center,
+                      style: AppText.body2.copyWith(color: AppColors.slate600),
                     ),
                   ],
                 ),
               ),
-            );
-          }),
-      ],
+            )
+          else
+            ..._overtimeDays.map((day) => _buildOvertimeDayCard(day, df)),
+        ],
+      ),
     );
   }
 
-  void _showOvertimeDialog(
-      AttendanceRecord record, double maxHours, String dateStr) async {
+  Widget _buildOvertimeDayCard(OvertimeEligibleDay day, DateFormat df) {
+    final jam = day.menitLewatJamPulang ~/ 60;
+    final menit = day.menitLewatJamPulang % 60;
+    final lebihStr = jam > 0 ? '$jam jam $menit menit' : '$menit menit';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SectionCard(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(df.format(day.tanggal),
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.slate800)),
+            const SizedBox(height: 10),
+            const AppDivider(),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.login_rounded,
+                    size: 16, color: AppColors.slate700),
+                const SizedBox(width: 6),
+                Text('Check-in: ${day.checkIn ?? '-'}', style: AppText.body2),
+                const SizedBox(width: 16),
+                const Icon(Icons.logout_rounded,
+                    size: 16, color: AppColors.slate700),
+                const SizedBox(width: 6),
+                Text('Check-out: ${day.checkOut ?? '-'}',
+                    style: AppText.body2),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 16, color: AppColors.slate700),
+                const SizedBox(width: 6),
+                Text('Pulang shift: ${day.jamPulangShift}',
+                    style: AppText.body2),
+                const Spacer(),
+                Text('Kelebihan: $lebihStr',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.brandOrange)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (day.bisaDiajukan)
+              GradientButton(
+                label: 'Ajukan Lembur',
+                height: 40,
+                color: AppColors.brandNavy,
+                onTap: () => _showOvertimeDialog(day, df.format(day.tanggal)),
+              )
+            else
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.slate100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                        day.sudahDiajukan
+                            ? Icons.hourglass_top_rounded
+                            : Icons.lock_rounded,
+                        size: 16,
+                        color: AppColors.slate600),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        day.alasanTidakBisa ?? 'Tidak bisa diajukan.',
+                        style: AppText.caption,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Dialog pengajuan lembur -> kirim ke backend (bukan lagi menandai objek
+  /// dummy di memori). Jam mulai default = jam pulang shift.
+  void _showOvertimeDialog(OvertimeEligibleDay day, String dateStr) async {
+    final maxHours = (AppSession.staff?.maxExtraHour ?? 4).toDouble();
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) =>
           _OvertimeRequestDialog(maxOvertimeHours: maxHours, dateStr: dateStr),
     );
-
     if (result == null) return;
 
     final hours = result['hours'] as double;
     final reason = result['reason'] as String;
 
-    final idx =
-        SampleData.recentAttendance.indexWhere((r) => r.id == record.id);
-    if (idx != -1) {
-      setState(() {
-        SampleData.recentAttendance[idx] =
-            SampleData.recentAttendance[idx].copyWith(
-          overtimeMinutes: (hours * 60).round(),
-          overtimeReason: reason,
-          overtimeApplied: true,
-          overtimeStatus: RequestStatus.pending,
-        );
-      });
+    // jamMulai = jam pulang shift; jamSelesai = jamMulai + durasi diajukan.
+    final parts = day.jamPulangShift.split(':');
+    final startMin = (int.tryParse(parts.first) ?? 17) * 60 +
+        (int.tryParse(parts.last) ?? 0);
+    final endMin = startMin + (hours * 60).round();
+    String fmt(int m) =>
+        '${((m ~/ 60) % 24).toString().padLeft(2, '0')}:${(m % 60).toString().padLeft(2, '0')}';
 
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (_) => AlertDialog(
-            icon: Container(
-              width: 48,
-              height: 48,
-              decoration: const BoxDecoration(
-                  color: AppColors.brandLimeDark, shape: BoxShape.circle),
-              child: const Icon(Icons.check_rounded,
-                  color: Colors.white, size: 24),
-            ),
-            title:
-                const Text('Pengajuan Berhasil!', textAlign: TextAlign.center),
-            content: Text('Pengajuan lembur telah dikirim.',
-                style: AppText.body2, textAlign: TextAlign.center),
-            actionsAlignment: MainAxisAlignment.center,
-            actions: [
-              ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'))
-            ],
+    try {
+      await OvertimeService.submit(
+        tanggal: day.tanggal,
+        jamMulai: fmt(startMin),
+        jamSelesai: fmt(endMin),
+        alasan: reason,
+      );
+      if (!mounted) return;
+      await _loadOvertimeDays();
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          icon: Container(
+            width: 48,
+            height: 48,
+            decoration: const BoxDecoration(
+                color: AppColors.brandLimeDark, shape: BoxShape.circle),
+            child:
+                const Icon(Icons.check_rounded, color: Colors.white, size: 24),
           ),
-        );
-      }
+          title:
+              const Text('Pengajuan Berhasil!', textAlign: TextAlign.center),
+          content: Text('Pengajuan lembur telah dikirim ke atasan Anda.',
+              style: AppText.body2, textAlign: TextAlign.center),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'))
+          ],
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
     }
   }
 
@@ -1281,7 +1288,122 @@ class _LeaveTabState extends State<LeaveTab> {
               }).toList(),
             ),
           ),
+
+        // ── Riwayat Lembur ──────────────────────────────────
+        //
+        // Fase 8: digabung ke sini sesuai permintaan ("riwayat pengajuan
+        // lembur dijadikan satu di tab Riwayat"). Tab Lembur kini murni
+        // berisi daftar hari yang bisa diajukan, dan layar
+        // `overtime_history_screen.dart` yang berbasis data dummy dihapus.
+        const SizedBox(height: 20),
+        Text('Riwayat Pengajuan Lembur',
+            style: AppText.headline3.copyWith(color: AppColors.slate900)),
+        const SizedBox(height: 8),
+        if (_myOvertime.isEmpty)
+          SectionCard(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child:
+                    Text('Belum ada pengajuan lembur', style: AppText.body2),
+              ),
+            ),
+          )
+        else
+          SectionCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: _myOvertime.asMap().entries.map((e) {
+                final isLast = e.key == _myOvertime.length - 1;
+                return Column(
+                  children: [
+                    _OvertimeHistoryTile(record: e.value),
+                    if (!isLast) const AppDivider(),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+/// Satu baris riwayat lembur — data asli dari tabel `overtime_request`.
+class _OvertimeHistoryTile extends StatelessWidget {
+  final OvertimeRequestRecord record;
+
+  const _OvertimeHistoryTile({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final df = DateFormat('EEE, d MMM yyyy', 'id_ID');
+
+    late final Color color;
+    late final String label;
+    switch (record.status) {
+      case 'approved':
+        color = AppColors.brandLimeDark;
+        label = 'Disetujui';
+        break;
+      case 'rejected':
+        color = AppColors.danger;
+        label = 'Ditolak';
+        break;
+      default:
+        color = AppColors.brandOrange;
+        label = 'Menunggu';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.more_time_rounded, size: 18, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(df.format(record.tanggal),
+                    style: AppText.body1
+                        .copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text(
+                  '${record.jamMulai} – ${record.jamSelesai} '
+                  '(${record.durasiJam.toStringAsFixed(record.durasiJam % 1 == 0 ? 0 : 1)} jam)',
+                  style: AppText.caption,
+                ),
+                if (record.alasan.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(record.alasan, style: AppText.caption),
+                ],
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(label,
+                style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1772,7 +1894,8 @@ class _CutiFormState extends State<_CutiForm> {
   Future<void> _pickDate(bool isStart) async {
     final minDate =
         DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
-    final picked = await showDatePicker(
+    // Fase 8: hari libur & hari non-kerja shift di-disable di picker.
+    final picked = await showWorkDatePicker(
       context: context,
       initialDate: isStart ? (_start ?? minDate) : (_end ?? _start ?? minDate),
       firstDate: minDate,
@@ -2129,7 +2252,7 @@ class _IzinFormState extends State<_IzinForm> {
                   label: 'Tanggal Mulai',
                   value: _startDate != null ? f.format(_startDate!) : null,
                   onTap: () async {
-                    final picked = await showDatePicker(
+                    final picked = await showWorkDatePicker(
                       context: context,
                       initialDate: _startDate ?? DateTime.now(),
                       firstDate:
@@ -2153,7 +2276,7 @@ class _IzinFormState extends State<_IzinForm> {
                   label: 'Tanggal Selesai',
                   value: _endDate != null ? f.format(_endDate!) : null,
                   onTap: () async {
-                    final picked = await showDatePicker(
+                    final picked = await showWorkDatePicker(
                       context: context,
                       initialDate: _endDate ?? _startDate ?? DateTime.now(),
                       firstDate: _startDate ??

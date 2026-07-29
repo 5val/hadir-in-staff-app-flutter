@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/work_date_picker.dart';
 import '../models/models.dart';
 
 class LeaveRequestScreen extends StatefulWidget {
@@ -224,25 +225,18 @@ class _LeaveRequestScreenState extends State<LeaveRequestScreen>
     if (picked != null) setState(() => _permEnd = picked);
   }
 
+  /// Fase 8: hari libur (master `hari_libur`) & hari non-kerja shift
+  /// di-disable — lihat widgets/work_date_picker.dart.
   Future<DateTime?> _datePicker({
     required DateTime initial,
     required DateTime first,
     required DateTime last,
   }) {
-    return showDatePicker(
+    return showWorkDatePicker(
       context: context,
       initialDate: initial,
       firstDate: first,
       lastDate: last,
-      builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
-            primary: AppColors.brandNavy,
-            surface: AppColors.white,
-          ),
-        ),
-        child: child!,
-      ),
     );
   }
 

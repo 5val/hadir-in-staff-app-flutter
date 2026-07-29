@@ -334,7 +334,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   color: Colors.white, size: 26),
             ),
             const SizedBox(height: 14),
-            Text('Total Gaji Bersih (Take Home Pay)',
+            Text('Total Take Home Pay',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   color: Colors.white.withOpacity(0.75),
@@ -599,7 +599,13 @@ class SalaryDetailScreen extends StatelessWidget {
 
   // ── Generate & share PDF ──────────────────────────────────
   Future<void> _downloadPdf(BuildContext context) async {
-    final income = slip.components.where((c) => !c.isDeduction).toList();
+    // Sama seperti tampilan layar: tunjangan berdiri sendiri di bawah gaji
+    // bersih, jadi "pendapatan" di PDF = pendapatan pokok + tunjangan.
+    final income = slip.components
+        .where((c) =>
+            c.group == SalaryGroup.pendapatanPokok ||
+            c.group == SalaryGroup.tunjangan)
+        .toList();
     final deductions = slip.components.where((c) => c.isDeduction).toList();
 
     final pdf = pw.Document();
@@ -766,12 +772,15 @@ class SalaryDetailScreen extends StatelessWidget {
             ),
             child: pw.Column(
               children: [
-                summaryRow('Total Pendapatan', _fmt(slip.totalIncome)),
+                summaryRow('Gaji Bersih', _fmt(slip.gajiBersih)),
                 pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
+                summaryRow('Tunjangan', _fmt(slip.totalTunjangan)),
+                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
+                summaryRow('Potongan', '- ${_fmt(slip.totalPotongan)}',
                     isDeduction: true),
                 pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Gaji Bersih', _fmt(slip.netSalary), isTotal: true),
+                summaryRow('Take Home Pay', _fmt(slip.takeHomePay),
+                    isTotal: true),
               ],
             ),
           ),
@@ -850,8 +859,21 @@ class SalaryDetailScreen extends StatelessWidget {
   // ─── Build ───────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final income = slip.components.where((c) => !c.isDeduction).toList();
-    final deductions = slip.components.where((c) => c.isDeduction).toList();
+    // Fase 8 -- struktur slip mengikuti aturan yang diminta:
+    //   Gaji Bersih   = pendapatan pokok (gaji pokok, bonus, lembur, THR) - PPh
+    //   Take Home Pay = Gaji Bersih + Tunjangan - Potongan
+    // Karena itu rinciannya dipecah 4 kelompok, bukan lagi hanya
+    // "pendapatan vs potongan": tunjangan & potongan sekarang berdiri sendiri
+    // DI BAWAH gaji bersih.
+    final pokok = slip.components
+        .where((c) => c.group == SalaryGroup.pendapatanPokok)
+        .toList();
+    final tunjangan =
+        slip.components.where((c) => c.group == SalaryGroup.tunjangan).toList();
+    final pajak =
+        slip.components.where((c) => c.group == SalaryGroup.pajak).toList();
+    final potongan =
+        slip.components.where((c) => c.group == SalaryGroup.potongan).toList();
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
@@ -932,20 +954,91 @@ class SalaryDetailScreen extends StatelessWidget {
                   const SizedBox(height: 10),
                   _buildSummaryCard(),
                   const SizedBox(height: 20),
+
+                  // 1. Pendapatan pokok
                   _buildSectionTitle(
-                      Icons.trending_up_rounded, 'Rincian Pendapatan'),
+                      Icons.trending_up_rounded, 'Pendapatan Pokok'),
                   const SizedBox(height: 8),
-                  _buildSalaryTable(income, isDeduction: false),
+                  _buildSalaryTable(pokok, isDeduction: false),
+
+                  // 2. PPh 21 -> menghasilkan GAJI BERSIH
+                  if (pajak.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _buildSectionTitle(Icons.receipt_long_rounded, 'Pajak'),
+                    const SizedBox(height: 8),
+                    _buildSalaryTable(pajak, isDeduction: true),
+                  ],
+                  // const SizedBox(height: 12),
+                  // _buildLineTotal('Gaji Bersih', slip.gajiBersih,
+                  //     'Pendapatan pokok dikurangi PPh 21'),
+
+                  // 3. Tunjangan -- di bawah gaji bersih, sesuai permintaan
                   const SizedBox(height: 20),
                   _buildSectionTitle(
-                      Icons.trending_down_rounded, 'Rincian Potongan'),
+                      Icons.card_giftcard_rounded, 'Tunjangan'),
                   const SizedBox(height: 8),
-                  _buildSalaryTable(deductions, isDeduction: true),
+                  _buildSalaryTable(tunjangan, isDeduction: false),
+
+                  // 4. Potongan -- di bawah gaji bersih, sesuai permintaan
+                  const SizedBox(height: 20),
+                  _buildSectionTitle(
+                      Icons.trending_down_rounded, 'Potongan'),
+                  const SizedBox(height: 8),
+                  _buildSalaryTable(potongan, isDeduction: true),
+
+                  // 5. Take home pay
+                  // const SizedBox(height: 16),
+                  // _buildLineTotal('Take Home Pay', slip.takeHomePay,
+                  //     highlight: true),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Baris total besar (Gaji Bersih / Take Home Pay).
+  Widget _buildLineTotal(String label, int amount, String note,
+      {bool highlight = false}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: highlight ? AppColors.brandNavy : AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: highlight ? AppColors.brandNavy : AppColors.slate200),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color:
+                            highlight ? Colors.white : AppColors.slate900)),
+                const SizedBox(height: 2),
+                Text(note,
+                    style: GoogleFonts.inter(
+                        fontSize: 10,
+                        color: highlight
+                            ? Colors.white.withOpacity(0.7)
+                            : AppColors.slate600)),
+              ],
+            ),
+          ),
+          Text(_fmt(amount),
+              style: GoogleFonts.inter(
+                  fontSize: highlight ? 18 : 15,
+                  fontWeight: FontWeight.w900,
+                  color:
+                      highlight ? AppColors.brandLime : AppColors.slate900)),
+        ],
       ),
     );
   }
@@ -1004,11 +1097,11 @@ class SalaryDetailScreen extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          Text('Gaji Bersih (Take Home Pay)',
+          Text('Take Home Pay',
               style: GoogleFonts.inter(
                   fontSize: 12, color: Colors.white.withOpacity(0.7))),
           const SizedBox(height: 6),
-          Text(_fmt(slip.netSalary),
+          Text(_fmt(slip.takeHomePay),
               style: GoogleFonts.inter(
                 fontSize: 30,
                 fontWeight: FontWeight.w900,
@@ -1564,7 +1657,7 @@ class SalaryDetailScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment
             .end, // Membantu merapikan info transfer di bagian bawah
         children: [
-          _summaryRow('Total Pendapatan', _fmt(slip.totalIncome),
+          _summaryRow('Gaji Bersih', _fmt(slip.totalIncome),
               isDeduction: false),
 
           // BERUBAH: Menambahkan detail info tunjangan, bonus, dan revisi (jika ada)
@@ -1594,7 +1687,7 @@ class SalaryDetailScreen extends StatelessWidget {
           _summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
               isDeduction: true),
           _divider(),
-          _summaryRow('Gaji Bersih', _fmt(slip.netSalary), isTotal: true),
+          _summaryRow('Take Home Pay', _fmt(slip.netSalary), isTotal: true),
 
           // BERUBAH: Menambahkan info ditransfer menggunakan apa di bawah gaji bersih
           const SizedBox(height: 10),

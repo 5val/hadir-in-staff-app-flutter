@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/api_client.dart';
+import '../services/subordinate_service.dart';
 import 'all_subordinate_leave_history_screen.dart';
 
 class SubordinateRequestsScreen extends StatefulWidget {
@@ -15,27 +17,62 @@ class SubordinateRequestsScreen extends StatefulWidget {
 }
 
 class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
-  void _updateRequestStatus(LeaveRequest app, RequestStatus status) {
+  // Fase 8: layar ini dulu memodifikasi list dummy
+  // `SampleData.subordinateLeaveRequests` di memori — status pengajuan
+  // bawahan tidak pernah berubah di database, dan "persetujuan" hilang
+  // begitu app ditutup. Sekarang semua lewat backend.
+  SubordinateRequests _data = SubordinateRequests.empty;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
     setState(() {
-      final idx =
-          SampleData.subordinateLeaveRequests.indexWhere((r) => r.id == app.id);
-      if (idx != -1) {
-        final updated = LeaveRequest(
-          id: app.id,
-          employeeName: app.employeeName,
-          type: app.type,
-          startDate: app.startDate,
-          endDate: app.endDate,
-          status: status,
-          reason: app.reason,
-          submittedAt: app.submittedAt,
-          allowances: app.allowances,
-          adminNote: app.adminNote,
-          attachmentPaths: app.attachmentPaths,
-        );
-        SampleData.subordinateLeaveRequests[idx] = updated;
-      }
+      _loading = true;
+      _error = null;
     });
+    try {
+      final data = await SubordinateService.load();
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _respond(LeaveRequest app, bool approve) async {
+    try {
+      await SubordinateService.respondLeave(leaveId: app.id, approve: approve);
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(approve
+              ? 'Pengajuan ${app.employeeName ?? ''} disetujui.'
+              : 'Pengajuan ${app.employeeName ?? ''} ditolak.'),
+          backgroundColor:
+              approve ? AppColors.brandLimeDark : AppColors.slate700,
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    }
   }
 
   void _showActionDialog(bool approve, LeaveRequest app) {
@@ -66,18 +103,9 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
             ),
             onPressed: () {
               Navigator.pop(context);
-              _updateRequestStatus(
-                  app, approve ? RequestStatus.approved : RequestStatus.rejected);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    approve
-                        ? 'Pengajuan berhasil disetujui'
-                        : 'Pengajuan berhasil ditolak',
-                  ),
-                  backgroundColor: AppColors.brandNavy,
-                ),
-              );
+              // Fase 8: benar-benar mengubah status di database (dan memicu
+              // potong sisa cuti + notifikasi ke staff) lewat backend.
+              _respond(app, approve);
             },
             child: Text(approve ? 'Setujui' : 'Tolak'),
           ),
@@ -97,7 +125,7 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final apps = SampleData.subordinateLeaveRequests
+    final apps = _data.leave
         .where((r) => r.status == RequestStatus.pending)
         .toList();
 
@@ -128,7 +156,28 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
           ),
         ],
       ),
-      body: apps.isEmpty
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.cloud_off_rounded,
+                            size: 44, color: AppColors.slate400),
+                        const SizedBox(height: 10),
+                        Text(_error!,
+                            textAlign: TextAlign.center, style: AppText.body2),
+                        const SizedBox(height: 14),
+                        ElevatedButton(
+                            onPressed: _load, child: const Text('Coba Lagi')),
+                      ],
+                    ),
+                  ),
+                )
+              : apps.isEmpty
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),

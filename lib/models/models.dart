@@ -267,6 +267,26 @@ class AttendanceRecord {
   final bool overtimeApplied;
   final RequestStatus overtimeStatus;
 
+  // ── Fase 8: kolom nyata dari tabel `attendance` ──────────────────
+  /// Total menit istirahat hari itu (`Attendance.breakDurasi`), akumulatif.
+  /// Ini satu-satunya data istirahat yang disimpan — TIDAK ada jam mulai/
+  /// selesai istirahat sebagai data yang ditampilkan.
+  final int breakMinutes;
+
+  /// Sedang istirahat sekarang (`Attendance.breakMulaiAt` masih terisi).
+  final bool isOnBreak;
+
+  /// Kapan istirahat yang sedang berjalan dimulai — dipakai HANYA untuk
+  /// menghitung timer berjalan di layar, tidak pernah ditampilkan sebagai jam.
+  final DateTime? breakStartedAt;
+
+  /// Uang makan yang didapat hari itu (`Attendance.uangMakan`), rupiah.
+  final int uangMakan;
+
+  /// Foto absensi (URL Drive / path server), kosong bila tidak ada.
+  final String fotoMasuk;
+  final String fotoKeluar;
+
   const AttendanceRecord({
     required this.id,
     required this.date,
@@ -283,6 +303,12 @@ class AttendanceRecord {
     this.overtimeReason,
     this.overtimeApplied = false,
     this.overtimeStatus = RequestStatus.pending,
+    this.breakMinutes = 0,
+    this.isOnBreak = false,
+    this.breakStartedAt,
+    this.uangMakan = 0,
+    this.fotoMasuk = '',
+    this.fotoKeluar = '',
   });
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/attendance).
@@ -326,6 +352,10 @@ class AttendanceRecord {
         v == null ? null : (v is num ? v.toInt() : int.tryParse('$v'));
     final lokasi = (j['lokasi'] ?? '').toString();
 
+    // Fase 8: `breakMulaiAt` non-null berarti staff SEDANG istirahat.
+    final breakMulaiAt =
+        DateTime.tryParse((j['breakMulaiAt'] ?? '').toString())?.toLocal();
+
     return AttendanceRecord(
       id: (j['id'] ?? '').toString(),
       date: base,
@@ -336,16 +366,31 @@ class AttendanceRecord {
       useGps: true,
       lateMinutes: asIntN(j['keterlambatan']),
       overtimeMinutes: asIntN(j['lembur']),
+      breakMinutes: asIntN(j['breakDurasi']) ?? 0,
+      isOnBreak: breakMulaiAt != null,
+      breakStartedAt: breakMulaiAt,
+      uangMakan: asIntN(j['uangMakan']) ?? 0,
+      fotoMasuk: (j['fotoMasuk'] ?? '').toString(),
+      fotoKeluar: (j['fotoKeluar'] ?? '').toString(),
     );
   }
 
+  /// Durasi kerja bersih = (checkout - checkin) - durasi istirahat.
+  ///
+  /// Fase 8: durasi istirahat kini diambil dari [breakMinutes] (kolom
+  /// `Attendance.breakDurasi` di DB) — sebelumnya dihitung dari
+  /// breakStart/breakEnd yang tidak pernah terisi dari backend sama sekali,
+  /// sehingga istirahat tidak pernah benar-benar dipotong dari jam kerja.
   Duration? get workDuration {
     if (checkIn == null || checkOut == null) return null;
     final raw = checkOut!.difference(checkIn!);
-    final breakDur = (breakStart != null && breakEnd != null)
-        ? breakEnd!.difference(breakStart!)
-        : Duration.zero;
-    return raw - breakDur;
+    final breakDur = breakMinutes > 0
+        ? Duration(minutes: breakMinutes)
+        : ((breakStart != null && breakEnd != null)
+            ? breakEnd!.difference(breakStart!)
+            : Duration.zero);
+    final net = raw - breakDur;
+    return net.isNegative ? Duration.zero : net;
   }
 
   AttendanceRecord copyWith({
@@ -364,6 +409,12 @@ class AttendanceRecord {
     String? overtimeReason,
     bool? overtimeApplied,
     RequestStatus? overtimeStatus,
+    int? breakMinutes,
+    bool? isOnBreak,
+    DateTime? breakStartedAt,
+    int? uangMakan,
+    String? fotoMasuk,
+    String? fotoKeluar,
   }) {
     return AttendanceRecord(
       id: id ?? this.id,
@@ -381,6 +432,12 @@ class AttendanceRecord {
       overtimeReason: overtimeReason ?? this.overtimeReason,
       overtimeApplied: overtimeApplied ?? this.overtimeApplied,
       overtimeStatus: overtimeStatus ?? this.overtimeStatus,
+      breakMinutes: breakMinutes ?? this.breakMinutes,
+      isOnBreak: isOnBreak ?? this.isOnBreak,
+      breakStartedAt: breakStartedAt ?? this.breakStartedAt,
+      uangMakan: uangMakan ?? this.uangMakan,
+      fotoMasuk: fotoMasuk ?? this.fotoMasuk,
+      fotoKeluar: fotoKeluar ?? this.fotoKeluar,
     );
   }
 }
@@ -470,6 +527,13 @@ class LeaveRequest {
       reason: (j['alasan'] ?? '').toString(),
       adminNote: tolak.isEmpty ? null : tolak,
       submittedAt: parseTs(j['diajukanPada']),
+      // Fase 8: terisi ketika backend menyertakan relasi `staff` — yaitu
+      // pada endpoint pengajuan BAWAHAN, di mana kartu harus menampilkan
+      // nama pengaju. Untuk pengajuan sendiri relasi ini tidak dikirim dan
+      // nilainya tetap null (layar riwayat sendiri memang tidak memakainya).
+      employeeName: j['staff'] is Map
+          ? ((j['staff'] as Map)['nama'] ?? '').toString()
+          : null,
     );
   }
 }
@@ -481,18 +545,47 @@ enum RequestStatus { pending, approved, rejected }
 enum AllowanceType { health, accommodation, transport, spp }
 
 // ── Salary Slip ───────────────────────────────────────────────
+/// Kelompok komponen gaji — Fase 8.
+///
+/// Struktur slip mengikuti aturan yang diminta:
+///   Gaji Bersih   = pendapatan pokok (gaji pokok, bonus, lembur, THR)
+///                   dikurangi PPh 21
+///   Take Home Pay = Gaji Bersih + Tunjangan − Potongan
+///
+/// Karena itu komponen tidak lagi cukup dibedakan "pendapatan vs potongan"
+/// saja — tunjangan harus bisa dipisahkan dari pendapatan pokok, dan PPh
+/// harus bisa dipisahkan dari potongan lain.
+enum SalaryGroup {
+  /// Gaji pokok, bonus tepat waktu/kehadiran, lembur, THR.
+  pendapatanPokok,
+
+  /// Tunjangan + fasilitas + uang makan — ditampilkan DI BAWAH gaji bersih.
+  tunjangan,
+
+  /// PPh 21 — dipotong untuk mendapat "gaji bersih".
+  pajak,
+
+  /// Denda keterlambatan, potongan alpha, BPJS — dipotong dari gaji bersih
+  /// untuk mendapat take home pay.
+  potongan,
+}
+
 class SalaryComponent {
   final String label;
   final String note;
   final int amount;
-  final bool isDeduction;
+  final SalaryGroup group;
 
   const SalaryComponent({
     required this.label,
     this.note = '',
     required this.amount,
-    this.isDeduction = false,
+    required this.group,
   });
+
+  /// Kompatibilitas dengan layar lama yang hanya mengenal "potongan atau bukan".
+  bool get isDeduction =>
+      group == SalaryGroup.pajak || group == SalaryGroup.potongan;
 }
 
 class LeaveRecord {
@@ -592,31 +685,59 @@ class SalarySlip {
         (month >= 1 && month <= 12) ? '${monthNames[month]} $year' : periodeRaw;
 
     final components = <SalaryComponent>[];
-    void income(String label, String note, int amount) {
-      if (amount != 0) {
-        components.add(SalaryComponent(label: label, note: note, amount: amount));
-      }
-    }
-
-    void deduction(String label, String note, int amount) {
+    void add(SalaryGroup group, String label, String note, int amount) {
       if (amount != 0) {
         components.add(SalaryComponent(
-            label: label, note: note, amount: amount, isDeduction: true));
+            label: label, note: note, amount: amount, group: group));
       }
     }
 
-    income('Gaji Pokok', '', gi('gajiPokok'));
-    income('Bonus Tepat Waktu', '', gi('bonusTepat'));
-    income('Bonus Kehadiran', '', gi('bonusKehadiran'));
-    income('Tunjangan Transport', 'Dibayarkan per bulan', gi('tunjanganTransport'));
-    income('Tunjangan Makan', '', gi('tunjanganMakan'));
-    income('Tunjangan Kesehatan', 'Dibayarkan per bulan', gi('tunjanganKesehatan'));
-    income('Tunjangan Tambahan', '', gi('tunjanganTambahan'));
-    income('Lembur', '${gi('lemburJam')} jam', gi('lemburTotal'));
-    deduction('Denda Keterlambatan', '', gi('dendaTerlambat'));
-    deduction('Potongan Alpha', '', gi('potonganAlpha'));
-    deduction('BPJS', '', gi('potonganBPJS'));
-    deduction('PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
+    // ── Pendapatan pokok ──────────────────────────────────────
+    add(SalaryGroup.pendapatanPokok, 'Gaji Pokok', '', gi('gajiPokok'));
+    add(SalaryGroup.pendapatanPokok, 'Bonus Tepat Waktu',
+        'Per hari check-in tepat waktu', gi('bonusTepat'));
+    add(SalaryGroup.pendapatanPokok, 'Bonus Kehadiran',
+        'Hadir penuh (hari izin tidak membatalkan)', gi('bonusKehadiran'));
+    add(SalaryGroup.pendapatanPokok, 'Lembur', '${gi('lemburJam')} jam',
+        gi('lemburTotal'));
+    add(SalaryGroup.pendapatanPokok, 'THR', '', gi('thrAmount'));
+
+    // ── Tunjangan (dinamis dari DB) ───────────────────────────
+    //
+    // Fase 8: dibaca dari `tunjanganBreakdown`/`fasilitasBreakdown` —
+    // sebelumnya app membaca 4 kolom lama (tunjanganTransport/Makan/
+    // Kesehatan/Tambahan) yang backend sudah tandai DEPRECATED dan selalu
+    // isi 0, jadi bagian tunjangan di slip praktis selalu kosong meskipun
+    // staff punya tunjangan.
+    final tunjanganRaw = j['tunjanganBreakdown'];
+    if (tunjanganRaw is List) {
+      for (final item in tunjanganRaw.whereType<Map>()) {
+        final nama = (item['nama'] ?? 'Tunjangan').toString();
+        final jumlah = (item['jumlah'] as num?)?.toInt() ?? 0;
+        final periode = (item['periode'] ?? '').toString();
+        add(SalaryGroup.tunjangan, nama,
+            periode == 'harian' ? 'Dibayar per hari hadir' : '', jumlah);
+      }
+    }
+
+    final fasilitasRaw = j['fasilitasBreakdown'];
+    if (fasilitasRaw is List) {
+      for (final item in fasilitasRaw.whereType<Map>()) {
+        final kategori = (item['kategori'] ?? 'Fasilitas').toString();
+        final nominal = (item['nominal'] as num?)?.toInt() ?? 0;
+        add(SalaryGroup.tunjangan, kategori, 'Fasilitas', nominal);
+      }
+    }
+
+    // Uang makan — dijumlahkan server dari Attendance.uangMakan per hari.
+    add(SalaryGroup.tunjangan, 'Uang Makan',
+        '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'));
+
+    // ── Pajak & potongan ──────────────────────────────────────
+    add(SalaryGroup.pajak, 'PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
+    add(SalaryGroup.potongan, 'Denda Keterlambatan', '', gi('dendaTerlambat'));
+    add(SalaryGroup.potongan, 'Potongan Alpha', '', gi('potonganAlpha'));
+    add(SalaryGroup.potongan, 'BPJS', '', gi('potonganBPJS'));
 
     final bank = AppSession.staff?.namaBank ?? '';
 
@@ -637,15 +758,36 @@ class SalarySlip {
     );
   }
 
-  int get totalIncome => components
-      .where((c) => !c.isDeduction)
+  int _sum(SalaryGroup group) => components
+      .where((c) => c.group == group)
       .fold(0, (sum, c) => sum + c.amount);
 
-  int get totalDeduction => components
-      .where((c) => c.isDeduction)
-      .fold(0, (sum, c) => sum + c.amount);
+  /// Pendapatan pokok: gaji pokok + bonus + lembur + THR.
+  int get pendapatanPokok => _sum(SalaryGroup.pendapatanPokok);
 
-  int get netSalary => totalIncome - totalDeduction;
+  /// Total tunjangan (termasuk fasilitas & uang makan).
+  int get totalTunjangan => _sum(SalaryGroup.tunjangan);
+
+  /// PPh 21.
+  int get pajak => _sum(SalaryGroup.pajak);
+
+  /// Potongan selain pajak: denda keterlambatan, alpha, BPJS.
+  int get totalPotongan => _sum(SalaryGroup.potongan);
+
+  /// GAJI BERSIH = gaji pokok (dan pendapatan pokok lainnya) − PPh 21.
+  ///
+  /// Fase 8, sesuai aturan yang diminta: "gaji bersih: gaji pokok - pph, dan
+  /// lainnya". Tunjangan TIDAK masuk di sini — ia ditampilkan terpisah di
+  /// bawah gaji bersih, lalu ikut ke take home pay.
+  int get gajiBersih => pendapatanPokok - pajak;
+
+  /// TAKE HOME PAY = gaji bersih + tunjangan − potongan.
+  int get takeHomePay => gajiBersih + totalTunjangan - totalPotongan;
+
+  // ── Kompatibilitas layar lama ────────────────────────────────
+  int get totalIncome => pendapatanPokok + totalTunjangan;
+  int get totalDeduction => pajak + totalPotongan;
+  int get netSalary => takeHomePay;
 }
 
 // ── Notification ──────────────────────────────────────────────
@@ -1036,403 +1178,11 @@ class SampleData {
     ),
   ];
 
-  static final List<SalarySlip> salaryHistory = [
-    // ── Mei 2024 ──────────────────────────────────────────────
-    SalarySlip(
-      period: 'Mei 2024',
-      periodStart: DateTime(2024, 5, 1),
-      periodEnd: DateTime(2024, 5, 31),
-      transferBy: 'BCA Transfer',
-      workingDays: 23,
-      presentDays: 23,
-      lateDays: 0,
-      overtimeHours: 2,
-      leaveDays: 0,
-      permissionDays: 0,
-      leaveHistory: [
-        LeaveRecord(
-          reason: 'Acara Keluarga',
-          startDate: DateTime(2024, 5, 10),
-          endDate: DateTime(2024, 5, 10),
-          totalDays: 1,
-          status: 'Ditolak', // Contoh pengajuan cuti yang ditolak
-        ),
-      ],
-      permissionHistory: const [],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '23 hari × Rp 30.000',
-            amount: 690000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran Penuh',
-            note: 'Hadir 23/23 hari kerja',
-            amount: 1150000),
-        SalaryComponent(
-            label: 'Lembur (2 jam)', note: '2 jam × Rp 75.000', amount: 150000),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 350000,
-            isDeduction: true),
-      ],
-    ),
-
-    // ── April 2024 ────────────────────────────────────────────
-    SalarySlip(
-      period: 'April 2024',
-      periodStart: DateTime(2024, 4, 1),
-      periodEnd: DateTime(2024, 4, 30),
-      transferBy: 'BCA Transfer',
-      workingDays: 22,
-      presentDays: 20, // 2 hari tidak hadir (1 Cuti, 1 Izin)
-      lateDays: 2,
-      overtimeHours: 0,
-      leaveDays: 1,
-      permissionDays: 1,
-      leaveHistory: [
-        LeaveRecord(
-          reason: 'Cuti Tahunan',
-          startDate: DateTime(2024, 4, 15),
-          endDate: DateTime(2024, 4, 15),
-          totalDays: 1,
-          status: 'Disetujui',
-        ),
-      ],
-      permissionHistory: [
-        LeaveRecord(
-          reason: 'Sakit (Tanpa Surat Dokter)',
-          startDate: DateTime(2024, 4, 22),
-          endDate: DateTime(2024, 4, 22),
-          totalDays: 1,
-          status: 'Disetujui',
-        ),
-      ],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '20 hari × Rp 30.000',
-            amount: 600000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran',
-            note: 'Hadir 20/22 hari (parsial)',
-            amount: 1000000),
-        SalaryComponent(
-            label: 'Potongan Keterlambatan',
-            note: '2 hari terlambat × Rp 25.000',
-            amount: 50000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 350000,
-            isDeduction: true),
-      ],
-    ),
-
-    // ── Maret 2024 ────────────────────────────────────────────
-    SalarySlip(
-      period: 'Maret 2024',
-      periodStart: DateTime(2024, 3, 1),
-      periodEnd: DateTime(2024, 3, 31),
-      transferBy: 'BCA Transfer',
-      workingDays: 21,
-      presentDays: 21,
-      lateDays: 0,
-      overtimeHours: 5,
-      leaveDays: 0,
-      permissionDays: 0,
-      leaveHistory: const [],
-      permissionHistory: const [],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '21 hari × Rp 30.000',
-            amount: 630000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran Penuh',
-            note: 'Hadir 21/21 hari kerja',
-            amount: 1050000),
-        SalaryComponent(
-            label: 'Lembur (5 jam)', note: '5 jam × Rp 75.000', amount: 375000),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 350000,
-            isDeduction: true),
-      ],
-    ),
-
-    // ── Februari 2024 ─────────────────────────────────────────
-    SalarySlip(
-      period: 'Februari 2024',
-      periodStart: DateTime(2024, 2, 1),
-      periodEnd: DateTime(2024, 2, 29),
-      transferBy: 'BCA Transfer',
-      workingDays: 20,
-      presentDays: 19, // 1 hari tidak hadir (Izin)
-      lateDays: 1,
-      overtimeHours: 3,
-      leaveDays: 0,
-      permissionDays: 1,
-      leaveHistory: const [],
-      permissionHistory: [
-        LeaveRecord(
-          reason: 'Keperluan Mendadak',
-          startDate: DateTime(2024, 2, 12),
-          endDate: DateTime(2024, 2, 12),
-          totalDays: 1,
-          status: 'Disetujui',
-        ),
-      ],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '19 hari × Rp 30.000',
-            amount: 570000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran',
-            note: 'Hadir 19/20 hari (parsial)',
-            amount: 950000),
-        SalaryComponent(
-            label: 'Lembur (3 jam)', note: '3 jam × Rp 75.000', amount: 225000),
-        SalaryComponent(
-            label: 'Potongan Keterlambatan',
-            note: '1 hari terlambat × Rp 25.000',
-            amount: 25000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 350000,
-            isDeduction: true),
-      ],
-    ),
-
-    // ── Januari 2024 ──────────────────────────────────────────
-    SalarySlip(
-      period: 'Januari 2024',
-      periodStart: DateTime(2024, 1, 1),
-      periodEnd: DateTime(2024, 1, 31),
-      transferBy: 'BCA Transfer',
-      workingDays: 23,
-      presentDays: 22, // 1 hari tidak hadir (Cuti)
-      lateDays: 1,
-      overtimeHours: 4,
-      leaveDays: 1,
-      permissionDays: 0,
-      leaveHistory: [
-        LeaveRecord(
-          reason: 'Cuti Tahunan',
-          startDate: DateTime(2024, 1, 5),
-          endDate: DateTime(2024, 1, 5),
-          totalDays: 1,
-          status: 'Disetujui',
-        ),
-      ],
-      permissionHistory: const [],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '22 hari × Rp 30.000',
-            amount: 660000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran',
-            note: 'Hadir 22/23 hari (parsial)',
-            amount: 1100000),
-        SalaryComponent(
-            label: 'Lembur (4 jam)', note: '4 jam × Rp 75.000', amount: 300000),
-        SalaryComponent(
-            label: 'Potongan Keterlambatan',
-            note: '1 hari terlambat × Rp 25.000',
-            amount: 25000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 350000,
-            isDeduction: true),
-      ],
-    ),
-
-    // ── Desember 2023 ─────────────────────────────────────────
-    SalarySlip(
-      period: 'Desember 2023',
-      periodStart: DateTime(2023, 12, 1),
-      periodEnd: DateTime(2023, 12, 31),
-      transferBy: 'BCA Transfer',
-      workingDays: 21,
-      presentDays: 21,
-      lateDays: 0,
-      overtimeHours: 8,
-      leaveDays:
-          2, // Cuti bersama biasanya dihitung hadir, jadi presentDays tetap 21
-      permissionDays: 0,
-      leaveHistory: [
-        LeaveRecord(
-          reason: 'Cuti Akhir Tahun',
-          startDate: DateTime(2023, 12, 27),
-          endDate: DateTime(2023, 12, 28),
-          totalDays: 2,
-          status: 'Disetujui',
-        ),
-      ],
-      permissionHistory: const [],
-      components: const [
-        SalaryComponent(
-            label: 'Gaji Pokok',
-            note: 'Jabatan IT Supervisor',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'Tunjangan Transport',
-            note: 'Dibayarkan per bulan',
-            amount: 500000),
-        SalaryComponent(
-            label: 'Tunjangan Makan',
-            note: '21 hari × Rp 30.000',
-            amount: 630000),
-        SalaryComponent(
-            label: 'Tunjangan Kesehatan',
-            note: 'Dibayarkan per bulan',
-            amount: 200000),
-        SalaryComponent(
-            label: 'Bonus Kehadiran Penuh',
-            note: 'Hadir 21/21 hari kerja',
-            amount: 1050000),
-        SalaryComponent(
-            label: 'Lembur (8 jam)', note: '8 jam × Rp 75.000', amount: 600000),
-        SalaryComponent(
-            label: 'Bonus Akhir Tahun',
-            note: 'THR / Bonus tahunan',
-            amount: 10000000),
-        SalaryComponent(
-            label: 'BPJS Kesehatan',
-            note: '1% dari gaji pokok',
-            amount: 100000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'BPJS Ketenagakerjaan',
-            note: '2% dari gaji pokok',
-            amount: 200000,
-            isDeduction: true),
-        SalaryComponent(
-            label: 'PPh 21',
-            note: 'Pajak penghasilan bulanan',
-            amount: 1200000,
-            isDeduction: true),
-      ],
-    ),
-  ];
+  /// Fase 8: daftar slip gaji contoh DIHAPUS. Slip gaji sekarang selalu
+  /// datang dari backend (`GET /mobile/staff/:id/gaji/slip`, lihat
+  /// `SalaryService`) — tidak ada satu pun layar yang membaca daftar ini,
+  /// dan membiarkannya hanya mengundang layar baru memakai angka karangan.
+  static final List<SalarySlip> salaryHistory = <SalarySlip>[];
 
   static final List<AppNotification> notifications = [
     AppNotification(
@@ -1537,6 +1287,12 @@ class StaffProfile {
   final String jamPulang; // "17:00"
   final String lokasiNama;
   final String lokasiAlamat;
+  // Fase 8: titik & radius geofence lokasi kerja, dipakai layar absensi untuk
+  // memberi tahu staff apakah ia sudah berada di area kantor. Null = staff
+  // belum ditempatkan pada Lokasi mana pun (server pun melewati pengecekan).
+  final double? lokasiLatitude;
+  final double? lokasiLongitude;
+  final int lokasiRadius;
 
   const StaffProfile({
     required this.id,
@@ -1563,6 +1319,9 @@ class StaffProfile {
     required this.jamPulang,
     required this.lokasiNama,
     required this.lokasiAlamat,
+    this.lokasiLatitude,
+    this.lokasiLongitude,
+    this.lokasiRadius = 100,
   });
 
   factory StaffProfile.fromJson(Map<String, dynamic> j) {
@@ -1599,6 +1358,9 @@ class StaffProfile {
       jamPulang: (shift['jamPulang'] ?? '17:00').toString(),
       lokasiNama: (lokasi['nama'] ?? '-').toString(),
       lokasiAlamat: (lokasi['alamat'] ?? '-').toString(),
+      lokasiLatitude: (lokasi['latitude'] as num?)?.toDouble(),
+      lokasiLongitude: (lokasi['longitude'] as num?)?.toDouble(),
+      lokasiRadius: asInt(lokasi['radius']) == 0 ? 100 : asInt(lokasi['radius']),
     );
   }
 

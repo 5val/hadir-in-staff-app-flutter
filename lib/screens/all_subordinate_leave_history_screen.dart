@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/api_client.dart';
+import '../services/subordinate_service.dart';
 
 /// Read-only history of all subordinate leave requests — visible to supervisors.
 class AllSubordinateLeaveHistoryScreen extends StatefulWidget {
@@ -19,8 +21,42 @@ class _AllSubordinateLeaveHistoryScreenState
   LeaveType?     _filterType;
   RequestStatus? _filterStatus;
 
+  /// Fase 8: riwayat lengkap pengajuan bawahan dari database
+  /// (`GET .../subordinates/requests?status=all`) — sebelumnya layar ini
+  /// membaca `SampleData.subordinateLeaveRequests` yang isinya dummy.
+  List<LeaveRequest> _all = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await SubordinateService.load(status: 'all');
+      if (!mounted) return;
+      setState(() {
+        _all = data.leave;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
   List<LeaveRequest> get _filtered {
-    var list = List<LeaveRequest>.from(SampleData.subordinateLeaveRequests);
+    var list = List<LeaveRequest>.from(_all);
     if (_filterType   != null) list = list.where((r) => r.type   == _filterType).toList();
     if (_filterStatus != null) list = list.where((r) => r.status == _filterStatus).toList();
     list.sort((a, b) => b.submittedAt.compareTo(a.submittedAt));
@@ -220,7 +256,30 @@ class _AllSubordinateLeaveHistoryScreenState
 
           // ── List ──────────────────────────────────────────
           Expanded(
-            child: _filtered.isEmpty
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.cloud_off_rounded,
+                              size: 44, color: AppColors.slate400),
+                          const SizedBox(height: 10),
+                          Text(_error!,
+                              textAlign: TextAlign.center,
+                              style: AppText.body2),
+                          const SizedBox(height: 14),
+                          ElevatedButton(
+                              onPressed: _load,
+                              child: const Text('Coba Lagi')),
+                        ],
+                      ),
+                    ),
+                  )
+                : _filtered.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,

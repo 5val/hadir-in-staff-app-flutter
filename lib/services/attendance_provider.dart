@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import 'attendance_service.dart';
+import 'calendar_service.dart';
 
 /// Status kehadiran karyawan hari ini
 enum AttendanceProviderStatus {
@@ -12,115 +13,93 @@ enum AttendanceProviderStatus {
   checkedOut, // Sudah check-out, selesai hari ini
 }
 
-/// Aturan jam istirahat & checkout — satu sumber kebenaran untuk seluruh app
+/// Aturan jam kerja — Fase 8: seluruhnya berasal dari SHIFT staff di database.
+///
+/// Sebelumnya kelas ini berisi konstanta hardcode yang salah dan saling
+/// bertentangan dengan data nyata:
+///   - `breakStartHour = 12` / `breakEndHour = 13` — jendela istirahat
+///     karangan yang tidak ada di database mana pun. Tombol istirahat hanya
+///     aktif pukul 12:00–13:00, padahal shift staff bisa berbeda-beda.
+///   - `checkoutCutoffHour = 24` dan `normalCheckoutHour = 24` — inilah
+///     sumber bug "jam kerja mulai dari 24.00.00" yang dilaporkan: jam pulang
+///     dianggap pukul 24, sehingga check-out praktis tidak pernah "boleh"
+///     dan seluruh perhitungan sisa jam kerja meleset sehari penuh.
+///
+/// Sekarang jam masuk/pulang dibaca dari `Shift.jamMasuk`/`Shift.jamPulang`
+/// (endpoint hari-libur mengembalikannya bersama kalender kerja), dan
+/// istirahat tidak lagi dibatasi jendela jam apa pun — staff menekan
+/// break-in/break-out kapan pun ia istirahat, yang dicatat hanyalah DURASI.
 class AttendanceRules {
-  // ── Jam istirahat ───────────────────────────────────────────────
-  /// Jam mulai istirahat (12:00)
-  static const int breakStartHour = 12;
-  static const int breakStartMinute = 0;
+  AttendanceRules._();
 
-  /// Jam selesai istirahat (13:00)
-  static const int breakEndHour = 13;
-  static const int breakEndMinute = 0;
+  static TimeOfDay? _jamMasuk;
+  static TimeOfDay? _jamPulang;
 
-  // ── Batas checkout ──────────────────────────────────────────────
-  /// Check-out hanya tersedia setelah jam ini (12:00 siang)
-  static const int checkoutCutoffHour = 24;
-  static const int checkoutCutoffMinute = 0;
-
-  // ── Jam pulang normal & toleransi pulang awal ────────────────────
-  /// Jam pulang normal (17:00 / jam 5 sore)
-  static const int normalCheckoutHour = 24;
-  static const int normalCheckoutMinute = 0;
-
-  /// Toleransi pulang awal dalam jam.
-  /// Misal: 1 → karyawan boleh pulang mulai jam 16:00 tanpa peringatan.
-  /// Set ke 0 untuk menonaktifkan toleransi.
-  static const int earlyCheckoutToleranceHours = 1;
-
-  // ── Helper (berbasis DateTime.now()) ────────────────────────────
-
-  /// True jika sekarang tepat dalam rentang 12:00–13:00
-  static bool get isBreakTime {
-    final now = DateTime.now();
-    final start = DateTime(
-        now.year, now.month, now.day, breakStartHour, breakStartMinute);
-    final end =
-        DateTime(now.year, now.month, now.day, breakEndHour, breakEndMinute);
-    return now.isAfter(start) && now.isBefore(end);
+  /// Diisi dari [WorkCalendar] setelah kalender kerja termuat.
+  static void hydrateFromShift({required String jamMasuk, required String jamPulang}) {
+    _jamMasuk = _parse(jamMasuk) ?? _jamMasuk;
+    _jamPulang = _parse(jamPulang) ?? _jamPulang;
   }
 
-  static bool get isBeforeBreakTime {
-    final now = DateTime.now();
-    final start = DateTime(
-        now.year, now.month, now.day, breakStartHour, breakStartMinute);
-    return now.isBefore(start);
+  static TimeOfDay? _parse(String hhmm) {
+    final parts = hhmm.split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null || h > 23 || m > 59) return null;
+    return TimeOfDay(hour: h, minute: m);
   }
 
-  static bool get isAfterBreakTime {
-    final now = DateTime.now();
-    final end =
-        DateTime(now.year, now.month, now.day, breakEndHour, breakEndMinute);
-    return now.isAfter(end);
-  }
+  /// Jam pulang shift. Null bila kalender belum termuat — pemanggil harus
+  /// memperlakukan itu sebagai "belum tahu", BUKAN memakai angka karangan.
+  static TimeOfDay? get jamPulang => _jamPulang;
+  static TimeOfDay? get jamMasuk => _jamMasuk;
 
-  /// Jam mulai toleransi pulang awal (normalCheckoutHour - earlyCheckoutToleranceHours)
-  static int get earlyCheckoutStartHour =>
-      normalCheckoutHour - earlyCheckoutToleranceHours;
+  static String get jamPulangLabel => _fmt(_jamPulang);
+  static String get jamMasukLabel => _fmt(_jamMasuk);
 
-  /// True jika sekarang sudah >= jam toleransi pulang awal
-  /// (misal toleransi 1 jam → true mulai jam 16:00)
-  static bool get isWithinEarlyCheckoutWindow {
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day, earlyCheckoutStartHour,
-        normalCheckoutMinute);
-    return now.isAfter(start) || now.isAtSameMomentAs(start);
-  }
+  static String _fmt(TimeOfDay? t) => t == null
+      ? '--:--'
+      : '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
-  /// True jika sekarang sudah >= jam pulang normal (17:00)
+  /// Sudah melewati jam pulang shift?
   static bool get isAfterNormalCheckout {
+    final pulang = _jamPulang;
+    if (pulang == null) return false;
     final now = DateTime.now();
-    final normal = DateTime(
-        now.year, now.month, now.day, normalCheckoutHour, normalCheckoutMinute);
-    return now.isAfter(normal) || now.isAtSameMomentAs(normal);
+    final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
+    return !now.isBefore(target);
   }
 
-  /// True jika check-out bisa dilakukan tanpa popup peringatan:
-  /// sudah >= jam pulang normal ATAU masih dalam toleransi pulang awal.
-  static bool get canCheckoutWithoutWarning =>
-      isAfterNormalCheckout ||
-      (earlyCheckoutToleranceHours > 0 && isWithinEarlyCheckoutWindow);
-
-  /// Tombol istirahat aktif HANYA saat jam 12:00–13:00
-  static bool get canStartBreak => isBreakTime;
-
-  /// Check-out tersedia setelah jam 12:00 siang
-  static bool get canCheckout {
+  /// Berapa lama lagi sampai jam pulang (null bila sudah lewat/belum diketahui).
+  static Duration? get timeUntilCheckout {
+    final pulang = _jamPulang;
+    if (pulang == null) return null;
     final now = DateTime.now();
-    final cutoff = DateTime(
-        now.year, now.month, now.day, checkoutCutoffHour, checkoutCutoffMinute);
-    return now.isAfter(cutoff);
+    final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
+    return now.isBefore(target) ? target.difference(now) : null;
   }
-
-  static String get breakWindowLabel =>
-      '${breakStartHour.toString().padLeft(2, '0')}:${breakStartMinute.toString().padLeft(2, '0')}'
-      ' – '
-      '${breakEndHour.toString().padLeft(2, '0')}:${breakEndMinute.toString().padLeft(2, '0')}';
 }
 
-/// Shared state untuk status absensi — dipakai HomeTab dan FAB di MainScreen
+/// Shared state untuk status absensi — dipakai HomeTab dan FAB di MainScreen.
+///
+/// Fase 8: state ini bukan lagi "kebenaran" — ia CERMIN dari baris
+/// `attendance` hari ini di database. Setiap aksi (check-in/out, break)
+/// memanggil backend dulu, lalu men-hidrasi ulang dari record yang dikembalikan.
+/// Sebelumnya break murni hidup di memori app: hilang saat app ditutup, tidak
+/// pernah sampai ke DB, dan durasinya tidak masuk laporan mana pun.
 class AttendanceProvider extends ChangeNotifier {
   AttendanceProviderStatus _status = AttendanceProviderStatus.notCheckedIn;
   DateTime? _checkInTime;
   DateTime? _checkOutTime;
-  DateTime? _breakStartTime;
-  DateTime? _breakEndTime;
+
+  /// Record hari ini apa adanya dari server (null bila belum absen).
+  AttendanceRecord? _today;
 
   AttendanceProviderStatus get status => _status;
   DateTime? get checkInTime => _checkInTime;
   DateTime? get checkOutTime => _checkOutTime;
-  DateTime? get breakStartTime => _breakStartTime;
-  DateTime? get breakEndTime => _breakEndTime;
+  AttendanceRecord? get today => _today;
 
   bool get isNotCheckedIn => _status == AttendanceProviderStatus.notCheckedIn;
   bool get isCheckedIn => _status == AttendanceProviderStatus.checkedIn;
@@ -128,8 +107,38 @@ class AttendanceProvider extends ChangeNotifier {
   bool get isBreakEnded => _status == AttendanceProviderStatus.breakEnded;
   bool get isCheckedOut => _status == AttendanceProviderStatus.checkedOut;
 
-  /// FAB → alert istirahat (bukan kamera)
-  bool get needsBreakAction => _status == AttendanceProviderStatus.onBreak;
+  /// Total menit istirahat hari ini yang sudah TERCATAT di DB
+  /// (`Attendance.breakDurasi`) — belum termasuk istirahat yang sedang
+  /// berjalan; untuk itu pakai [currentBreakDuration].
+  int get breakMinutes => _today?.breakMinutes ?? 0;
+
+  /// Uang makan hari ini (rupiah), 0 bila belum check-out / tidak memenuhi syarat.
+  int get uangMakan => _today?.uangMakan ?? 0;
+
+  /// Durasi istirahat yang harus DITAMPILKAN sekarang:
+  /// akumulasi tersimpan + istirahat yang sedang berjalan (kalau ada).
+  Duration get currentBreakDuration {
+    var total = Duration(minutes: breakMinutes);
+    final startedAt = _today?.breakStartedAt;
+    if (startedAt != null) total += DateTime.now().difference(startedAt);
+    return total;
+  }
+
+  /// Durasi kerja bersih yang berjalan (sudah dikurangi istirahat).
+  ///
+  /// Fase 8 — memperbaiki "jam kerja dimulai dari 24.00.00": sebelumnya
+  /// HomeTab menghitung `now - checkInTime` mentah tanpa memotong istirahat,
+  /// dan `AttendanceRules.normalCheckoutHour` yang bernilai 24 membuat
+  /// perhitungan sisa jam ikut ngaco. Nilai di bawah tidak pernah negatif,
+  /// jadi tampilannya mulai dari 00:00:00 saat baru check-in.
+  Duration get workDuration {
+    final start = _checkInTime;
+    if (start == null) return Duration.zero;
+    final end = _checkOutTime ?? DateTime.now();
+    final gross = end.difference(start);
+    final net = gross - currentBreakDuration;
+    return net.isNegative ? Duration.zero : net;
+  }
 
   String get fabActionLabel {
     switch (_status) {
@@ -146,48 +155,21 @@ class AttendanceProvider extends ChangeNotifier {
     }
   }
 
-  void doCheckIn() {
-    _status = AttendanceProviderStatus.checkedIn;
-    _checkInTime = DateTime.now();
-    notifyListeners();
-  }
-
-  void doCheckOut() {
-    _status = AttendanceProviderStatus.checkedOut;
-    _checkOutTime = DateTime.now();
-    notifyListeners();
-  }
-
-  void startBreak() {
-    _status = AttendanceProviderStatus.onBreak;
-    _breakStartTime = DateTime.now();
-    notifyListeners();
-  }
-
-  void endBreak() {
-    _status = AttendanceProviderStatus.breakEnded;
-    _breakEndTime = DateTime.now();
-    notifyListeners();
-  }
-
-  void returnToWork() {
-    _status = AttendanceProviderStatus.checkedIn;
-    notifyListeners();
-  }
-
   void reset() {
     _status = AttendanceProviderStatus.notCheckedIn;
     _checkInTime = null;
     _checkOutTime = null;
-    _breakStartTime = null;
-    _breakEndTime = null;
+    _today = null;
     notifyListeners();
   }
 
   // ── Integrasi backend ─────────────────────────────────────────────
-  /// Sinkronkan status dari record absensi hari ini (backend). Dipanggil saat
-  /// app dibuka agar FAB & Home mencerminkan kondisi nyata.
+
+  /// Sinkronkan seluruh state dari record absensi hari ini (backend).
+  /// Satu-satunya tempat status diturunkan — tidak ada jalur lain yang
+  /// menetapkan status "dari tebakan app".
   void hydrateFromToday(AttendanceRecord? rec) {
+    _today = rec;
     if (rec == null) {
       _status = AttendanceProviderStatus.notCheckedIn;
       _checkInTime = null;
@@ -197,8 +179,12 @@ class AttendanceProvider extends ChangeNotifier {
       _checkOutTime = rec.checkOut;
       if (rec.checkOut != null) {
         _status = AttendanceProviderStatus.checkedOut;
+      } else if (rec.isOnBreak) {
+        _status = AttendanceProviderStatus.onBreak;
       } else if (rec.checkIn != null) {
-        _status = AttendanceProviderStatus.checkedIn;
+        _status = rec.breakMinutes > 0
+            ? AttendanceProviderStatus.breakEnded
+            : AttendanceProviderStatus.checkedIn;
       } else {
         _status = AttendanceProviderStatus.notCheckedIn;
       }
@@ -206,19 +192,51 @@ class AttendanceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Check-in ke backend lalu update state. Melempar [ApiException] bila gagal.
-  Future<void> checkInRemote({String? lokasi, String? fotoPath}) async {
-    final rec = await AttendanceService.checkIn(lokasi: lokasi, fotoMasuk: fotoPath);
-    _status = AttendanceProviderStatus.checkedIn;
-    _checkInTime = rec.checkIn ?? DateTime.now();
-    notifyListeners();
+  /// Muat ulang record hari ini dari server.
+  Future<void> refreshToday() async {
+    hydrateFromToday(await AttendanceService.today());
   }
 
-  /// Check-out ke backend lalu update state. Melempar [ApiException] bila gagal.
-  Future<void> checkOutRemote({String? fotoPath}) async {
-    final rec = await AttendanceService.checkOut(fotoKeluar: fotoPath);
-    _status = AttendanceProviderStatus.checkedOut;
-    _checkOutTime = rec.checkOut ?? DateTime.now();
-    notifyListeners();
+  /// Check-in ke backend lalu update state. Melempar [ApiException] bila gagal
+  /// — termasuk saat koordinat GPS berada di luar radius lokasi kerja.
+  Future<void> checkInRemote({
+    String? fotoPath,
+    double? latitude,
+    double? longitude,
+    double? accuracy,
+  }) async {
+    final rec = await AttendanceService.checkIn(
+      fotoMasuk: fotoPath,
+      latitude: latitude,
+      longitude: longitude,
+      accuracy: accuracy,
+    );
+    hydrateFromToday(rec);
+  }
+
+  /// Check-out ke backend lalu update state.
+  Future<void> checkOutRemote({
+    String? fotoPath,
+    double? latitude,
+    double? longitude,
+    double? accuracy,
+  }) async {
+    final rec = await AttendanceService.checkOut(
+      fotoKeluar: fotoPath,
+      latitude: latitude,
+      longitude: longitude,
+      accuracy: accuracy,
+    );
+    hydrateFromToday(rec);
+  }
+
+  /// Mulai istirahat (tercatat di DB, bukan hanya di memori app).
+  Future<void> startBreakRemote() async {
+    hydrateFromToday(await AttendanceService.breakIn());
+  }
+
+  /// Selesai istirahat — server menghitung & menambah `breakDurasi`.
+  Future<void> endBreakRemote() async {
+    hydrateFromToday(await AttendanceService.breakOut());
   }
 }

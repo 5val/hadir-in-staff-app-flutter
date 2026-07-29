@@ -79,13 +79,19 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   }
 
   // ── Checkout guard ──────────────────────────────────────────
-  /// Berlaku hanya untuk actionType == checkOut
-  bool get _checkoutAllowed => AttendanceRules.canCheckout;
-  // bool get _checkoutAllowed => true;
-
-  /// Check-in hanya diizinkan sebelum jam 12:00
-  bool get _checkinAllowed => !AttendanceRules.canCheckout;
-  // bool get _checkinAllowed => true;
+  //
+  // Fase 8: gerbang berbasis JAM di layar ini dihapus. Dulu:
+  //   _checkoutAllowed = AttendanceRules.canCheckout   → "setelah pukul 24"
+  //   _checkinAllowed  = !AttendanceRules.canCheckout  → "sebelum pukul 24"
+  // Karena `checkoutCutoffHour` bernilai 24, check-out tidak pernah boleh
+  // dan layar ini selalu menampilkan "Check-out terkunci hingga pukul 24:00".
+  //
+  // Yang menentukan boleh/tidaknya sekarang adalah STATUS ABSENSI hari ini
+  // (sudah check-in atau belum), yang dipegang AttendanceProvider di layar
+  // pemanggil, plus validasi server. Layar kamera tidak lagi punya aturan
+  // jam sendiri — satu aturan, satu tempat.
+  bool get _checkoutAllowed => true;
+  bool get _checkinAllowed => true;
 
   // ── Lokasi (simulasi) ───────────────────────────────────────
   bool _checkingLocation = false;
@@ -407,9 +413,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                   GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800)),
         ]),
         content: Text(
-          'Check-out hanya tersedia setelah pukul '
-          '${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:'
-          '${AttendanceRules.checkoutCutoffMinute.toString().padLeft(2, '0')} siang.',
+          'Anda belum check-in hari ini, jadi belum bisa check-out.',
           style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
         ),
         actions: [
@@ -447,9 +451,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Check-in hanya tersedia sebelum pukul '
-              '${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00 siang. '
-              'Sudah lewat tengah hari.',
+              'Anda sudah check-in hari ini.',
               style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
             ),
             const SizedBox(height: 10),
@@ -498,8 +500,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
 
   // ── Konfirmasi → kirim hasil ────────────────────────────────
   void _confirm() {
+    // Peringatan pulang awal kini dibandingkan dengan jam pulang SHIFT staff
+    // dari database (AttendanceRules dihidrasi dari kalender kerja), bukan
+    // konstanta `normalCheckoutHour = 24`.
     if (widget.actionType == CameraActionType.checkOut &&
-        !AttendanceRules.canCheckoutWithoutWarning) {
+        !AttendanceRules.isAfterNormalCheckout) {
       _showEarlyCheckoutWarningDialog();
       return;
     }
@@ -515,10 +520,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
 
   // ── Dialog peringatan pulang awal ───────────────────────────
   void _showEarlyCheckoutWarningDialog() {
-    final normalHour =
-        AttendanceRules.normalCheckoutHour.toString().padLeft(2, '0');
-    final normalMinute =
-        AttendanceRules.normalCheckoutMinute.toString().padLeft(2, '0');
+    final jamPulang = AttendanceRules.jamPulangLabel;
 
     showDialog(
       context: context,
@@ -532,7 +534,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                   GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800)),
         ]),
         content: Text(
-          'Jam pulang normal adalah pukul $normalHour:$normalMinute. '
+          'Jam pulang shift Anda pukul $jamPulang. '
           'Apakah Anda yakin ingin check-out sekarang?',
           style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
         ),
@@ -1139,9 +1141,9 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                 const SizedBox(height: 8),
                 Text(
                   checkoutBlocked
-                      ? 'Check-out terkunci hingga pukul ${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00'
+                      ? 'Anda belum check-in hari ini'
                       : checkinBlocked
-                          ? 'Check-in ditutup — tap oval untuk Check-Out'
+                          ? 'Anda sudah check-in — tap oval untuk Check-Out'
                           : !_cameraReady
                               ? 'Menginisialisasi kamera depan...'
                               : kIsWeb
@@ -1179,8 +1181,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                 color: Colors.orange, size: 32),
             const SizedBox(height: 8),
             Text(
-              'Check-out tersedia\nsetelah pukul '
-              '${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00',
+              'Anda belum check-in\nhari ini',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                   fontSize: 12,

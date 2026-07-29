@@ -5,7 +5,11 @@ import '../services/attendance_provider.dart'; // ← shared state
 import '../services/attendance_service.dart';
 import '../services/profile_service.dart';
 import '../services/api_client.dart';
+import '../services/location_service.dart';
 import '../services/session_service.dart';
+import '../services/calendar_service.dart';
+import '../services/staff_log_service.dart';
+import '../widgets/staff_log_dialog.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
 import 'login_screen.dart';
@@ -64,13 +68,31 @@ class _MainScreenState extends State<MainScreen> {
     });
     try {
       await ProfileService.loadAndCache();
+
+      // Fase 8: muat kalender kerja (hari libur + jam shift) dari database,
+      // lalu hidrasi AttendanceRules. Ini yang mengganti konstanta hardcode
+      // `normalCheckoutHour = 24` dengan jam pulang shift yang sebenarnya.
+      // Best-effort: gagal memuat kalender tidak boleh memblokir app.
+      try {
+        final calendar = await CalendarService.load();
+        AppCalendar.instance = calendar;
+        AttendanceRules.hydrateFromShift(
+          jamMasuk: calendar.jamMasuk,
+          jamPulang: calendar.jamPulang,
+        );
+      } catch (_) {}
+
       // Sinkronkan status absensi hari ini (best-effort, tidak memblokir).
       try {
         final today = await AttendanceService.today();
         _attendance.hydrateFromToday(today);
       } catch (_) {}
+
       if (!mounted) return;
       setState(() => _loadingProfile = false);
+
+      // Popup log (naik jabatan / surat peringatan) yang belum dibaca.
+      _showPendingLogs();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -78,6 +100,23 @@ class _MainScreenState extends State<MainScreen> {
         _profileError = e.message;
       });
     }
+  }
+
+  /// Fase 8 — popup setelah login berhasil.
+  ///
+  /// Membaca `log_pesan` yang BELUM di-read (backend hanya mengembalikan
+  /// yang itu), lalu menampilkannya berurutan: ucapan selamat naik jabatan
+  /// dan/atau surat peringatan. Setelah ditutup, log ditandai read sehingga
+  /// tidak muncul lagi.
+  ///
+  /// Best-effort: kegagalan memuat log tidak boleh mengganggu masuknya staff
+  /// ke aplikasi.
+  Future<void> _showPendingLogs() async {
+    try {
+      final logs = await StaffLogService.unread();
+      if (!mounted || logs.isEmpty) return;
+      await StaffLogDialog.showAll(context, logs);
+    } catch (_) {}
   }
 
   Future<void> _logout() async {
@@ -132,17 +171,38 @@ class _MainScreenState extends State<MainScreen> {
 
     if (!mounted || result == null || !result.confirmed) return;
 
+    // Fase 8: koordinat GPS wajib menyertai absensi — server yang memutuskan
+    // apakah posisinya di dalam radius Lokasi staff (lib/geo.ts).
+    final gps = await LocationService.current();
+    if (!mounted) return;
+    if (!gps.ok) {
+      _showInfoSnackbar(gps.failure!.message);
+      return;
+    }
+
     // Simpan ke backend sesuai aksi.
     try {
       if (result.actionType == CameraActionType.checkIn) {
         await _attendance.checkInRemote(
-            lokasi: result.address, fotoPath: result.imagePath);
+          fotoPath: result.imagePath,
+          latitude: gps.position!.latitude,
+          longitude: gps.position!.longitude,
+          accuracy: gps.position!.accuracy,
+        );
         if (!mounted) return;
         _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
       } else {
-        await _attendance.checkOutRemote(fotoPath: result.imagePath);
+        await _attendance.checkOutRemote(
+          fotoPath: result.imagePath,
+          latitude: gps.position!.latitude,
+          longitude: gps.position!.longitude,
+          accuracy: gps.position!.accuracy,
+        );
         if (!mounted) return;
-        _showSuccessSnackbar('Check-out berhasil! Istirahat yang baik 🌙');
+        final uangMakan = _attendance.uangMakan;
+        _showSuccessSnackbar(uangMakan > 0
+            ? 'Check-out berhasil! Uang makan hari ini didapat 🌙'
+            : 'Check-out berhasil! Istirahat yang baik 🌙');
       }
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -193,8 +253,15 @@ class _MainScreenState extends State<MainScreen> {
       ),
     );
     if (!mounted || ok != true) return;
-    _attendance.endBreak();
-    _showSuccessSnackbar('Selamat bekerja kembali! 💪');
+    try {
+      await _attendance.endBreakRemote();
+      if (!mounted) return;
+      _showSuccessSnackbar(
+          'Selamat bekerja kembali! Total istirahat ${_attendance.breakMinutes} menit 💪');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showInfoSnackbar(e.message);
+    }
   }
 
   void _showSuccessSnackbar(String msg) {

@@ -6,7 +6,9 @@ import '../widgets/common_widgets.dart';
 import '../services/session_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_client.dart';
+import '../services/document_service.dart';
 import 'main_screen.dart';
+import 'onboarding_documents_screen.dart';
 
 enum LoginDestination { landing, leaveRequest }
 
@@ -42,7 +44,6 @@ class _LoginScreenState extends State<LoginScreen>
   String _authStaffName = "";
   int _timerSeconds = 60;
   Timer? _resendTimer;
-  String _savedPasscode = "";
 
   // Custom WA Notification animation state
   bool _showWaNotif = false;
@@ -127,32 +128,46 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   /// Tangani submit no. HP — tanpa password.
-  /// Jika user sudah punya passcode → skip OTP → langsung enterPasscode.
-  /// Jika belum → kirim OTP → createPasscode.
+  ///
+  /// Fase 8: pertanyaan "sudah punya passcode atau belum" kini dijawab
+  /// SERVER (`Staff.passcodeHash`), bukan SharedPreferences HP.
+  ///
+  /// Dulu jawabannya dibaca dari `SessionService.getPasscode()`, padahal
+  /// `clearSession()` menghapus passcode itu setiap kali staff logout.
+  /// Akibatnya staff lama yang logout selalu dianggap "belum pernah punya
+  /// passcode" → dipaksa OTP + membuat passcode baru lagi. Dengan sumber
+  /// kebenaran di database, logout / ganti HP / install ulang tidak lagi
+  /// menghapus fakta bahwa staff itu sudah punya passcode.
   Future<void> _handlePhoneSubmit() async {
     if (!_phoneFormKey.currentState!.validate()) return;
 
     final phone = _phoneCtrl.text.trim();
     setState(() => _isLoading = true);
 
-    // Cek apakah sudah ada passcode tersimpan di device ini.
-    final prefsState = await SessionService.getAuthState();
-    final savedCode = await SessionService.getPasscode();
-    if (!mounted) return;
-
-    if (prefsState['hasPasscode'] == true && (savedCode ?? "").isNotEmpty) {
-      // Sudah pernah login di device ini → cukup passcode lokal.
-      // Token backend sudah tersimpan sejak login pertama.
-      setState(() {
-        _isLoading = false;
-        _savedPasscode = savedCode!;
-        _currentStep = LoginStep.enterPasscode;
-      });
-      return;
-    }
-
-    // Login pertama di device ini → minta OTP ke backend.
     try {
+      final status = await AuthService.passcodeStatus(phone);
+      if (!mounted) return;
+
+      if (status.lockedForMinutes > 0) {
+        setState(() => _isLoading = false);
+        _showError(
+          'Akun terkunci sementara karena terlalu banyak percobaan. '
+          'Coba lagi dalam ${status.lockedForMinutes} menit.',
+        );
+        return;
+      }
+
+      if (status.hasPasscode) {
+        // Staff lama → langsung minta passcode, TANPA OTP.
+        setState(() {
+          _isLoading = false;
+          _authStaffName = status.nama;
+          _currentStep = LoginStep.enterPasscode;
+        });
+        return;
+      }
+
+      // Staff yang benar-benar baru → buktikan kepemilikan nomor lewat OTP.
       final result = await AuthService.requestOtp(phone);
       if (!mounted) return;
       setState(() {
@@ -168,6 +183,45 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _isLoading = false);
       _showError(e.message);
     }
+  }
+
+  /// Lanjutan setelah token didapat: tentukan layar berikutnya.
+  ///
+  /// Staff yang belum melengkapi dokumen onboarding (pas foto/KTP/BPJS/NPWP)
+  /// diarahkan ke [OnboardingDocumentsScreen] dan belum bisa masuk app.
+  /// Gerbangnya milik server (`GET /onboarding-status`) — app hanya menuruti.
+  Future<void> _finishLogin(String staffId) async {
+    await SessionService.saveSessionWithPhone(
+      phone: _phoneCtrl.text.trim(),
+      employeeId: staffId,
+    );
+
+    if (!mounted) return;
+
+    if (!_isInitialLogin) {
+      Navigator.pop(context, true);
+      return;
+    }
+
+    bool onboardingDone = true;
+    try {
+      onboardingDone = (await DocumentService.onboardingStatus()).completed;
+    } on ApiException {
+      // Gagal memeriksa status onboarding bukan alasan untuk mengunci staff
+      // di luar app — MainScreen akan memeriksanya lagi.
+      onboardingDone = true;
+    }
+
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (_) => onboardingDone
+            ? const MainScreen()
+            : const OnboardingDocumentsScreen(),
+      ),
+      (r) => false,
+    );
   }
 
   void _showError(String message) {
@@ -186,15 +240,25 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      final staff = await AuthService.verifyOtp(
+      final result = await AuthService.verifyOtp(
         phone: _phoneCtrl.text.trim(),
         code: _otpCtrl.text.trim(),
       );
       if (!mounted) return;
+
+      _authStaffId = result.staff.id;
+      _authStaffName = result.staff.nama;
+
+      // Staff yang sudah punya passcode (mis. login OTP karena lupa passcode)
+      // tidak perlu membuat passcode baru — langsung masuk.
+      if (result.hasPasscode) {
+        await _finishLogin(result.staff.id);
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+
       setState(() {
         _isLoading = false;
-        _authStaffId = staff.id;
-        _authStaffName = staff.nama;
         _currentStep = LoginStep.createPasscode;
       });
     } on ApiException catch (e) {
@@ -219,51 +283,59 @@ class _LoginScreenState extends State<LoginScreen>
     }
   }
 
-  /// Login kembali — verifikasi passcode yang sudah ada
+  /// Login kembali — verifikasi passcode ke SERVER.
+  ///
+  /// Fase 8: passcode tidak lagi dibandingkan dengan string di HP
+  /// (`_enterPasscodeCtrl.text != _savedPasscode`). Perbandingan lokal itu
+  /// tidak hanya rapuh saat logout — ia juga berarti passcode tersimpan apa
+  /// adanya di SharedPreferences. Sekarang yang dikirim adalah nomor +
+  /// passcode, dan server membandingkannya dengan bcrypt hash sekaligus
+  /// menerapkan penguncian setelah 5 percobaan gagal.
   void _verifyEnterPasscode() async {
     if (_enterPasscodeCtrl.text.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Masukkan 6 digit passcode"),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      return;
-    }
-
-    if (_enterPasscodeCtrl.text != _savedPasscode) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Passcode salah! Silakan coba lagi."),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      _enterPasscodeCtrl.clear();
+      _showError("Masukkan 6 digit passcode");
       return;
     }
 
     FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
 
-    // Simpan session — pakai staffId asli yang tersimpan sejak login pertama.
-    final staffId = _authStaffId ?? await SessionService.getStaffId() ?? "";
-    await SessionService.saveSessionWithPhone(
-      phone: _phoneCtrl.text.trim(),
-      employeeId: staffId,
-    );
-
-    setState(() => _isLoading = false);
-
-    if (_isInitialLogin) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (r) => false,
+    try {
+      final staff = await AuthService.loginWithPasscode(
+        phone: _phoneCtrl.text.trim(),
+        passcode: _enterPasscodeCtrl.text.trim(),
       );
-    } else {
-      Navigator.pop(context, true);
+      if (!mounted) return;
+      _authStaffId = staff.id;
+      await _finishLogin(staff.id);
+      if (mounted) setState(() => _isLoading = false);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _enterPasscodeCtrl.clear();
+      _showError(e.message);
+    }
+  }
+
+  /// Jalur "Lupa passcode" — kembali ke OTP untuk membuat passcode baru.
+  Future<void> _forgotPasscode() async {
+    setState(() => _isLoading = true);
+    try {
+      final result = await AuthService.requestOtp(_phoneCtrl.text.trim());
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _enterPasscodeCtrl.clear();
+        _currentStep = LoginStep.otp;
+      });
+      _startTimer();
+      if (result.devCode != null && result.devCode!.isNotEmpty) {
+        _showMockWaNotification(result.devCode!);
+      }
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError(e.message);
     }
   }
 
@@ -295,24 +367,27 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     if (!_isInitialLogin) {
-      // Re-verifikasi cuti & izin
-      if (_confirmPasscodeCtrl.text != _savedPasscode &&
-          _confirmPasscodeCtrl.text != "123456") {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Passcode salah! Silakan coba lagi."),
-            backgroundColor: AppColors.danger,
-          ),
-        );
-        _confirmPasscodeCtrl.clear();
-        return;
-      }
-
+      // Re-verifikasi identitas sebelum aksi sensitif (mis. ajukan cuti).
+      //
+      // Fase 8: diverifikasi ke SERVER, bukan dibandingkan dengan passcode
+      // di HP. Backdoor "123456" yang dulu selalu diterima di sini juga
+      // dihapus — siapa pun yang memegang HP staff bisa memakainya untuk
+      // lolos verifikasi.
       setState(() => _isLoading = true);
-      await Future.delayed(const Duration(milliseconds: 600));
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      Navigator.pop(context, true);
+      try {
+        await AuthService.loginWithPasscode(
+          phone: await SessionService.getSavedPhone(),
+          passcode: _confirmPasscodeCtrl.text.trim(),
+        );
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        Navigator.pop(context, true);
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _confirmPasscodeCtrl.clear();
+        _showError(e.message);
+      }
       return;
     }
 
@@ -329,33 +404,22 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     FocusScope.of(context).unfocus();
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
-    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      // Fase 8: passcode disimpan TERHASH di server (Staff.passcodeHash),
+      // bukan apa adanya di SharedPreferences. Inilah yang membuatnya
+      // bertahan setelah logout / ganti HP.
+      await AuthService.setPasscode(passcode: _confirmPasscodeCtrl.text.trim());
+      if (!mounted) return;
 
-    if (!mounted) return;
-    setState(() {
-      _isLoading = false;
-    });
-
-    // Simpan passcode & session — staffId asli dari verifikasi OTP.
-    await SessionService.savePasscode(_confirmPasscodeCtrl.text);
-    final staffId = _authStaffId ?? await SessionService.getStaffId() ?? "";
-    await SessionService.saveSessionWithPhone(
-      phone: _phoneCtrl.text.trim(),
-      employeeId: staffId,
-    );
-
-    if (_isInitialLogin) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-        (r) => false,
-      );
-    } else {
-      Navigator.pop(context, true);
+      final staffId = _authStaffId ?? await SessionService.getStaffId() ?? "";
+      await _finishLogin(staffId);
+      if (mounted) setState(() => _isLoading = false);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showError(e.message);
     }
   }
 
@@ -400,15 +464,26 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  /// Layar ini dipakai dua peran:
+  ///  - login penuh (destination landing), dan
+  ///  - re-verifikasi identitas sebelum aksi sensitif (destination
+  ///    leaveRequest), yang langsung meminta passcode.
+  ///
+  /// Fase 8: nomor HP terakhir diisikan otomatis agar staff tidak perlu
+  /// mengetiknya ulang tiap login.
   Future<void> _checkExistingState() async {
+    final savedPhone = await SessionService.getSavedPhone();
+    if (!mounted) return;
+
+    if (savedPhone.isNotEmpty && _phoneCtrl.text.isEmpty) {
+      _phoneCtrl.text = savedPhone;
+    }
+
     if (!_isInitialLogin) {
       final state = await SessionService.getAuthState();
-      if (state['isLoggedIn'] == true && state['hasPasscode'] == true) {
-        final code = await SessionService.getPasscode();
-        setState(() {
-          _savedPasscode = code ?? "";
-          _currentStep = LoginStep.confirmPasscode;
-        });
+      if (!mounted) return;
+      if (state['isLoggedIn'] == true) {
+        setState(() => _currentStep = LoginStep.confirmPasscode);
       }
     }
   }
@@ -840,6 +915,20 @@ class _LoginScreenState extends State<LoginScreen>
           onTap: _verifyEnterPasscode,
         ),
         const SizedBox(height: 12),
+        // Fase 8: jalur pemulihan. Karena passcode kini tersimpan terhash di
+        // server, app tidak bisa (dan tidak boleh) "mengingatkan" passcode —
+        // satu-satunya jalan adalah membuktikan ulang kepemilikan nomor
+        // lewat OTP, lalu membuat passcode baru.
+        TextButton(
+          onPressed: _isLoading ? null : _forgotPasscode,
+          child: Text(
+            "Lupa Passcode? Kirim OTP",
+            style: GoogleFonts.inter(
+                color: AppColors.brandNavy,
+                fontSize: 13,
+                fontWeight: FontWeight.w600),
+          ),
+        ),
         TextButton(
           onPressed: () {
             setState(() {

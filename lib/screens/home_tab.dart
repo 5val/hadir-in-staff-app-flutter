@@ -11,6 +11,10 @@ import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/attendance_provider.dart';
 import '../services/api_client.dart';
+import '../services/location_service.dart';
+import '../services/attendance_service.dart';
+import '../services/calendar_service.dart';
+import 'package:geolocator/geolocator.dart' show Position;
 import '../screens/camera_checkin_screen.dart';
 import 'break_screen.dart';
 import 'notification_screen.dart';
@@ -38,8 +42,6 @@ class _HomeTabState extends State<HomeTab> {
   final user = SampleData.currentUser;
 
   DateTime _now = DateTime.now();
-  Duration _workDur = Duration.zero;
-  Duration _breakDur = Duration.zero;
   bool _showMascot = false;
   String _mascotMsg = '';
 
@@ -48,32 +50,58 @@ class _HomeTabState extends State<HomeTab> {
   AttendanceProvider get _att => widget.attendance;
   AttendanceProviderStatus get _status => _att.status;
 
-  // Jam istirahat & checkout dari AttendanceRules
-  bool get _canStartBreak => AttendanceRules.canStartBreak; // 12:00–13:00
-  bool get _canCheckout => AttendanceRules.canCheckout; // after 12:00
+  /// Durasi kerja & istirahat kini dihitung provider dari data DB
+  /// (`Attendance.breakDurasi` + jam check-in server), bukan dari timer lokal
+  /// yang dulu hanya menghitung `now - checkInTime` tanpa memotong istirahat.
+  Duration get _workDur => _att.workDuration;
+  Duration get _breakDur => _att.currentBreakDuration;
 
-  // Location
+  /// Fase 8: istirahat tidak lagi dibatasi jendela jam karangan (dulu hanya
+  /// aktif 12:00–13:00). Staff boleh istirahat kapan pun selama sudah
+  /// check-in dan belum check-out — yang dicatat hanya DURASI-nya.
+  bool get _canStartBreak =>
+      _status == AttendanceProviderStatus.checkedIn ||
+      _status == AttendanceProviderStatus.breakEnded;
+
+  /// Check-out boleh dilakukan kapan pun setelah check-in.
+  ///
+  /// Dulu digerbangi `AttendanceRules.canCheckout` yang berpatokan
+  /// `checkoutCutoffHour = 24` — artinya "setelah pukul 24", yang tidak
+  /// pernah tercapai dalam satu hari kerja, sehingga tombol check-out
+  /// praktis selalu mati dan teksnya berbunyi "Tersedia setelah pukul 24:00".
+  bool get _canCheckout =>
+      _status != AttendanceProviderStatus.notCheckedIn &&
+      _status != AttendanceProviderStatus.checkedOut;
+
+  // Location (GPS nyata — lihat _checkLocation)
   bool _locationChecked = false;
   bool _locationOn = false;
+  /// Fase 8: kini benar-benar terisi, dari `Position.isMocked` milik
+  /// geolocator (Android). Sebelumnya kartu peringatan "fake location
+  /// terdeteksi" ada di UI tapi flag-nya tidak pernah di-set oleh siapa pun,
+  /// jadi peringatan itu mustahil muncul.
   bool _fakeLocation = false;
   bool _checkingLoc = false;
   bool _locationInRange = false;
+  String _locationMessage = '';
+  Position? _lastPosition;
+
+  /// Lokasi kerja staff dari database (nama + alamat), bukan teks hardcode.
+  String get _officeName => AppSession.staff?.lokasiNama ?? 'Lokasi Kerja';
+  String get _officeAddress => AppSession.staff?.lokasiAlamat ?? '-';
 
   Timer? _clockTimer, _workTimer;
-
-  static const _officeName = 'Kantor Pusat Hadir-In';
-  static const _officeAddress = 'Jl. Sudirman No. 1, Jakarta Pusat';
 
   @override
   void initState() {
     super.initState();
     _clockTimer = Timer.periodic(const Duration(seconds: 1),
         (_) => setState(() => _now = DateTime.now()));
+    // Timer hanya memicu repaint; angkanya dihitung provider dari data DB.
     _workTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if ((_status == AttendanceProviderStatus.checkedIn ||
-              _status == AttendanceProviderStatus.breakEnded) &&
-          _att.checkInTime != null) {
-        setState(() => _workDur = _now.difference(_att.checkInTime!));
+      if (_status != AttendanceProviderStatus.notCheckedIn &&
+          _status != AttendanceProviderStatus.checkedOut) {
+        setState(() {});
       }
     });
     _att.addListener(_onAttChanged);
@@ -91,6 +119,18 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Helpers ───────────────────────────────────────────────────
+  /// Format rupiah sederhana (tanpa paket intl currency) — dipakai kartu
+  /// uang makan yang angkanya datang dari `Attendance.uangMakan`.
+  static String _rupiah(int value) {
+    final s = value.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write('.');
+      buf.write(s[i]);
+    }
+    return 'Rp$buf';
+  }
+
   String _fmtDur(Duration d) => '${d.inHours.toString().padLeft(2, '0')}:'
       '${(d.inMinutes % 60).toString().padLeft(2, '0')}:'
       '${(d.inSeconds % 60).toString().padLeft(2, '0')}';
@@ -130,16 +170,74 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Location check ─────────────────────────────────────────────
+  //
+  // Fase 8 — dulu baris ini berbunyi:
+  //     _locationInRange = Random().nextBool(); // Simulasi random lokasi
+  // yang secara harfiah MENGUNDI apakah staff dianggap berada di kantor.
+  // Sekarang koordinat asli dibaca dari GPS HP, lalu dibandingkan dengan
+  // titik & radius Lokasi staff dari database.
+  //
+  // Perlu ditegaskan: hasil di sini hanya untuk TAMPILAN (mengaktifkan
+  // tombol & memberi tahu staff kalau ia di luar area). Keputusan yang
+  // mengikat dibuat SERVER saat check-in/check-out — app yang memutuskan
+  // sendiri selalu bisa dilewati dengan memanggil API secara langsung.
   Future<void> _checkLocation() async {
     setState(() => _checkingLoc = true);
-    await Future.delayed(const Duration(seconds: 2));
+
+    final result = await LocationService.current();
     if (!mounted) return;
+
+    if (!result.ok) {
+      setState(() {
+        _checkingLoc = false;
+        _locationChecked = true;
+        _locationOn = false;
+        _fakeLocation = false;
+        _locationInRange = false;
+        _lastPosition = null;
+        _locationMessage = result.failure!.message;
+      });
+      return;
+    }
+
+    final pos = result.position!;
+    final lat = AppSession.staff?.lokasiLatitude;
+    final lng = AppSession.staff?.lokasiLongitude;
+    final radius = AppSession.staff?.lokasiRadius ?? 100;
+
+    // Staff tanpa lokasi kerja (mis. staff lapangan yang belum ditempatkan):
+    // tidak ada geofence untuk dilanggar — server pun melewati pengecekannya.
+    if (lat == null || lng == null) {
+      setState(() {
+        _checkingLoc = false;
+        _locationChecked = true;
+        _locationOn = true;
+        _fakeLocation = pos.isMocked;
+        _locationInRange = !pos.isMocked;
+        _lastPosition = pos;
+        _locationMessage = 'Lokasi kerja belum ditetapkan admin.';
+      });
+      return;
+    }
+
+    final distance = LocationService.distanceMeters(
+      lat1: pos.latitude,
+      lon1: pos.longitude,
+      lat2: lat,
+      lon2: lng,
+    ).round();
+    final inRange = distance <= radius + pos.accuracy.round().clamp(0, 50);
+
     setState(() {
       _checkingLoc = false;
       _locationChecked = true;
       _locationOn = true;
-      _fakeLocation = false;
-      _locationInRange = Random().nextBool(); // Simulasi random lokasi
+      _fakeLocation = pos.isMocked;
+      _lastPosition = pos;
+      _locationInRange = inRange && !pos.isMocked;
+      _locationMessage = inRange
+          ? 'Berada di area $_officeName (~$distance m dari titik kantor).'
+          : 'Anda $distance m dari $_officeName, di luar radius $radius m.';
     });
   }
 
@@ -159,21 +257,38 @@ class _HomeTabState extends State<HomeTab> {
       ),
     );
     if (!mounted || result == null || !result.confirmed) return;
+
+    // Ambil fix GPS SEGAR tepat saat absen — bukan memakai hasil pengecekan
+    // beberapa menit lalu, karena staff bisa saja sudah berpindah.
+    final gps = await LocationService.current();
+    if (!mounted) return;
+    if (!gps.ok) {
+      _showSnackbar(gps.failure!.message, color: AppColors.danger);
+      return;
+    }
+
     try {
       await _att.checkInRemote(
-          lokasi: result.address, fotoPath: result.imagePath);
+        fotoPath: result.imagePath,
+        latitude: gps.position!.latitude,
+        longitude: gps.position!.longitude,
+        accuracy: gps.position!.accuracy,
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
+      // Termasuk penolakan geofence dari server (HTTP 403) — pesannya sudah
+      // menyebutkan jarak & radius, jadi ditampilkan apa adanya.
       _showSnackbar(e.message, color: AppColors.danger);
       return;
     }
     if (!mounted) return;
     setState(() {
       _checkInPhotoPath = result.imagePath;
-      _checkInLocation = result.address ?? _officeAddress;
-      _checkInDisplayTime = DateTime.now();
+      _checkInLocation = _att.today?.locationLabel ?? _officeAddress;
+      _checkInDisplayTime = _att.checkInTime ?? DateTime.now();
     });
     _showSnackbar('Check-in berhasil! Selamat bekerja 💪');
+    _checkLocation();
   }
 
   Future<void> _openCameraForCheckOut() async {
@@ -201,21 +316,37 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Break ──────────────────────────────────────────────────────
-  void _startBreak() {
+  // Fase 8: istirahat tercatat di DB lewat endpoint break-in/break-out.
+  // Sebelumnya hanya state di memori app: hilang begitu app ditutup, tidak
+  // pernah sampai ke database, dan durasinya tidak masuk laporan mana pun.
+  Future<void> _startBreak() async {
     if (!_canStartBreak) {
       _showBreakNotAllowedSnackbar();
       return;
     }
-    _att.startBreak();
-    _showSnackbar('Istirahat dimulai, jangan lupa kembali!');
+    try {
+      await _att.startBreakRemote();
+      if (!mounted) return;
+      _showSnackbar('Istirahat dimulai, jangan lupa kembali!');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showSnackbar(e.message, color: AppColors.danger);
+    }
   }
 
-  void _returnFromBreak() {
-    _att.returnToWork();
-    setState(() {
-      _showMascot = true;
-      _mascotMsg = 'Selamat bekerja kembali! 💪\nLanjut produktif!';
-    });
+  Future<void> _returnFromBreak() async {
+    try {
+      await _att.endBreakRemote();
+      if (!mounted) return;
+      setState(() {
+        _showMascot = true;
+        _mascotMsg = 'Selamat bekerja kembali! 💪\nTotal istirahat: '
+            '${_att.breakMinutes} menit';
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      _showSnackbar(e.message, color: AppColors.danger);
+    }
   }
 
   // ── Snackbars ──────────────────────────────────────────────────
@@ -233,25 +364,17 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   void _showBreakNotAllowedSnackbar() {
-    final now = DateTime.now();
-    final breakStart = DateTime(now.year, now.month, now.day,
-        AttendanceRules.breakStartHour, AttendanceRules.breakStartMinute);
-    final isBeforeBreak = now.isBefore(breakStart);
-
     _showSnackbar(
-      isBeforeBreak
-          ? '⏰ Jam istirahat belum mulai. Istirahat tersedia pukul ${AttendanceRules.breakWindowLabel}.'
-          : '✅ Jam istirahat sudah selesai (${AttendanceRules.breakWindowLabel}).',
+      _status == AttendanceProviderStatus.notCheckedIn
+          ? '⏰ Anda belum check-in hari ini.'
+          : '✅ Anda sudah check-out hari ini.',
       color: AppColors.warning,
     );
   }
 
   void _showCheckoutBlockedSnackbar() {
-    _showSnackbar(
-      '🕐 Check-out hanya tersedia setelah pukul '
-      '${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00 siang.',
-      color: AppColors.slate700,
-    );
+    _showSnackbar('🕐 Anda belum check-in hari ini.',
+        color: AppColors.slate700);
   }
 
   // ── Logout ─────────────────────────────────────────────────────
@@ -297,11 +420,11 @@ class _HomeTabState extends State<HomeTab> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.1),
+                color: AppColors.brandLimeDark.withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.sos_rounded,
-                  color: AppColors.danger, size: 20),
+                  color: AppColors.brandLimeDark, size: 20),
             ),
             const SizedBox(width: 10),
             Text('Hubungi Admin/HR',
@@ -395,7 +518,7 @@ class _HomeTabState extends State<HomeTab> {
           backgroundColor: AppColors.slate50,
           floatingActionButton: FloatingActionButton.extended(
             onPressed: _showSosDialog,
-            backgroundColor: AppColors.danger,
+            backgroundColor: AppColors.brandLimeDark,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.phone, size: 22),
             label: Text('SOS',
@@ -858,6 +981,12 @@ class _HomeTabState extends State<HomeTab> {
                             letterSpacing: 0.5)),
                   ],
                 ),
+                // Jarak nyata ke titik kantor (dari GPS + master Lokasi),
+                // supaya staff tahu seberapa jauh ia harus mendekat.
+                if (_locationMessage.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(_locationMessage, style: AppText.caption),
+                ],
               ],
             ),
           ),
@@ -970,10 +1099,13 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Attendance Section ────────────────────────────────────────
   Widget _buildAttendanceSection() {
+    // Pengingat check-out dibandingkan dengan jam pulang SHIFT staff dari
+    // database (AttendanceRules dihidrasi dari kalender kerja), bukan lagi
+    // konstanta `normalCheckoutHour = 24` yang tidak pernah tercapai.
     final showCheckoutReminder =
         _status != AttendanceProviderStatus.checkedOut &&
             _status != AttendanceProviderStatus.notCheckedIn &&
-            _now.hour >= AttendanceRules.normalCheckoutHour;
+            AttendanceRules.isAfterNormalCheckout;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,7 +1144,7 @@ class _HomeTabState extends State<HomeTab> {
 
   Widget _buildAttendanceContent() {
     final canGpsAction =
-        _locationOn && !_fakeLocation && _locationChecked && _locationInRange;
+        _locationOn && _locationChecked && _locationInRange;
 
     switch (_status) {
       // ── Belum check-in ────────────────────────────────────────
@@ -1077,16 +1209,15 @@ class _HomeTabState extends State<HomeTab> {
                                 ? Colors.white
                                 : AppColors.slate700)),
                     const SizedBox(height: 4),
-                    if (checkoutActive && !_canCheckout)
-                      Text(
-                        'Tersedia setelah pukul ${AttendanceRules.checkoutCutoffHour.toString().padLeft(2, '0')}:00',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: checkoutActive
-                              ? Colors.white.withOpacity(0.75)
-                              : AppColors.slate400,
-                        ),
+                    Text(
+                      'Jam pulang shift: ${AttendanceRules.jamPulangLabel}',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: checkoutActive
+                            ? Colors.white.withOpacity(0.75)
+                            : AppColors.slate400,
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -1114,9 +1245,23 @@ class _HomeTabState extends State<HomeTab> {
                     Text('Sedang Istirahat',
                         style:
                             AppText.label.copyWith(color: AppColors.slate900)),
-                    Text('Jam istirahat: ${AttendanceRules.breakWindowLabel}',
+                    // Fase 8: yang ditampilkan DURASI, bukan jam istirahat —
+                    // di database memang hanya durasi yang disimpan.
+                    Text('Durasi: ${_fmtDur(_breakDur)}',
                         style: AppText.body2),
                   ],
+                ),
+              ),
+              SizedBox(
+                height: 38,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.warning),
+                  onPressed: _returnFromBreak,
+                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                  label: Text('Break Out',
+                      style: GoogleFonts.inter(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
@@ -1185,17 +1330,14 @@ class _HomeTabState extends State<HomeTab> {
     }
   }
 
-  // ── Break button dengan jam window ────────────────────────────
+  // ── Tombol Break In ───────────────────────────────────────────
+  //
+  // Fase 8: tidak ada lagi jendela jam. Tombolnya aktif selama staff sudah
+  // check-in & belum check-out; yang tercatat hanya durasinya.
   Widget _buildBreakButton(bool breakActive) {
-    // Tentukan pesan hint berdasarkan jam
-    final String hint;
-    if (AttendanceRules.isBeforeBreakTime) {
-      hint = 'Istirahat tersedia pukul ${AttendanceRules.breakWindowLabel}';
-    } else if (AttendanceRules.isAfterBreakTime) {
-      hint = 'Jam istirahat sudah lewat (${AttendanceRules.breakWindowLabel})';
-    } else {
-      hint = 'Jam istirahat: ${AttendanceRules.breakWindowLabel}';
-    }
+    final hint = breakActive
+        ? 'Tekan untuk mulai istirahat'
+        : 'Anda belum check-in / sudah check-out';
 
     return Tooltip(
       message: !breakActive ? hint : '',
@@ -1257,7 +1399,7 @@ class _HomeTabState extends State<HomeTab> {
   // ── Check-in Blocked (setelah jam 12) ─────────────────────────
   Widget _buildCheckinBlockedAfterNoon() {
     final canGpsAction =
-        _locationOn && !_fakeLocation && _locationChecked && _locationInRange;
+        _locationOn && _locationChecked && _locationInRange;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(8),
@@ -1443,20 +1585,21 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Today's Timeline (2×2 Grid) ──────────────────────────────
   Widget _buildTimeline() {
-    final hasBreak = _att.breakStartTime != null;
+    final hasBreak = _att.breakMinutes > 0 || _att.isOnBreak;
     final isOnBreak = _status == AttendanceProviderStatus.onBreak;
-    final breakDone = _status == AttendanceProviderStatus.breakEnded;
 
-    // Hitung jam kerja tampilan
+    // Jam kerja tampilan. Fase 8: _workDur sudah bersih (dikurangi
+    // istirahat) dan tidak pernah negatif, jadi tampilannya mulai dari
+    // 00:00:00 saat baru check-in — bukan 24:00:00 seperti sebelumnya.
     final workHours = _workDur.inHours;
     final workMins = _workDur.inMinutes % 60;
-    final workLabel =
-        _workDur.inMinutes > 0 ? '${workHours}j ${workMins}m' : '--';
+    final workLabel = _att.checkInTime == null
+        ? '--'
+        : '${workHours}j ${workMins}m';
 
     // Durasi istirahat
-    final breakLabel = hasBreak
-        ? (isOnBreak ? _fmtDur(_breakDur) : '${_breakDur.inMinutes}m')
-        : '--';
+    final breakLabel =
+        hasBreak ? (isOnBreak ? _fmtDur(_breakDur) : '${_breakDur.inMinutes}m') : '--';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1545,6 +1688,38 @@ class _HomeTabState extends State<HomeTab> {
             //           ? AppColors.brandLime.withOpacity(0.12)
             //           : AppColors.slate100),
             // ),
+            // ── Istirahat ─────────────────────────────────
+            //
+            // Fase 8: kartu ini dulu dikomentari seluruhnya karena satu-
+            // satunya data yang bisa ditampilkan adalah "jam istirahat"
+            // dari state lokal yang tak pernah terisi. Sekarang yang
+            // ditampilkan DURASI dari `Attendance.breakDurasi` — sesuai
+            // keputusan bahwa di database memang hanya durasi yang ada.
+            _TimelineGridCard(
+              icon: Icons.free_breakfast_rounded,
+              iconColor: isOnBreak
+                  ? AppColors.warning
+                  : (hasBreak ? AppColors.brandLimeDark : AppColors.slate400),
+              iconBg: isOnBreak
+                  ? AppColors.warning.withOpacity(0.15)
+                  : (hasBreak
+                      ? AppColors.brandLime.withOpacity(0.15)
+                      : AppColors.slate100),
+              label: 'Istirahat',
+              value: breakLabel,
+              sub: isOnBreak
+                  ? 'Sedang istirahat'
+                  : (hasBreak ? 'Total hari ini' : 'Belum istirahat'),
+              badge: isOnBreak ? 'LIVE' : (hasBreak ? 'SELESAI' : '-'),
+              badgeColor: isOnBreak
+                  ? AppColors.warning
+                  : (hasBreak ? AppColors.brandLimeDark : AppColors.slate400),
+              badgeBg: isOnBreak
+                  ? AppColors.warning.withOpacity(0.12)
+                  : (hasBreak
+                      ? AppColors.brandLime.withOpacity(0.12)
+                      : AppColors.slate100),
+            ),
             // ── Jam Kerja ─────────────────────────────────
             _TimelineGridCard(
               icon: Icons.timer_rounded,
@@ -1567,257 +1742,52 @@ class _HomeTabState extends State<HomeTab> {
                   ? AppColors.brandCyan.withOpacity(0.12)
                   : AppColors.slate100,
             ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  // ── Attendance History Preview (home - navigate to full page) ─
-  Widget _buildAttendanceHistoryPreview() {
-    final history = SampleData.recentAttendance.take(3).toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Riwayat Kehadiran',
-                style: AppText.headline3.copyWith(color: AppColors.slate900)),
-            TextButton(
-              onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const AttendanceHistoryFullScreen())),
-              child: Text('Lihat Semua',
-                  style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.brandNavy,
-                      letterSpacing: 0.3)),
+            // ── Uang Makan ────────────────────────────────
+            //
+            // Fase 8: diisi server saat check-out (Attendance.uangMakan) bila
+            // check-in tepat waktu DAN pulang tidak lebih awal.
+            _TimelineGridCard(
+              icon: Icons.restaurant_rounded,
+              iconColor: _att.uangMakan > 0
+                  ? AppColors.brandLimeDark
+                  : AppColors.slate400,
+              iconBg: _att.uangMakan > 0
+                  ? AppColors.brandLime.withOpacity(0.15)
+                  : AppColors.slate100,
+              label: 'Uang Makan',
+              value: _att.uangMakan > 0 ? _rupiah(_att.uangMakan) : '--',
+              sub: _att.uangMakan > 0
+                  ? 'Didapat hari ini'
+                  : (_status == AttendanceProviderStatus.checkedOut
+                      ? 'Tidak memenuhi syarat'
+                      : 'Dihitung saat check-out'),
+              badge: _att.uangMakan > 0 ? 'DIDAPAT' : '-',
+              badgeColor: _att.uangMakan > 0
+                  ? AppColors.brandLimeDark
+                  : AppColors.slate400,
+              badgeBg: _att.uangMakan > 0
+                  ? AppColors.brandLime.withOpacity(0.12)
+                  : AppColors.slate100,
             ),
           ],
-        ),
-        const SizedBox(height: 8),
-        Column(
-          children: history.map((rec) {
-            // Keep the existing logic for the preview
-            final isHoliday = rec.status == AttendanceStatus.holiday;
-            final isLate = !isHoliday &&
-                rec.checkIn != null &&
-                rec.checkIn!.hour >
-                    user.currentShift.startTime
-                        .hour; // Only late if not holiday
-            final absent =
-                !isHoliday && rec.checkIn == null; // Only absent if not holiday
-
-            Color statusColor;
-            Color statusBg;
-            String statusLabel;
-
-            if (isHoliday) {
-              statusColor = AppColors.brandNavy;
-              statusBg = AppColors.brandNavy.withOpacity(0.08);
-              statusLabel = 'LIBUR';
-            } else if (absent) {
-              statusColor = AppColors.danger;
-              statusBg = AppColors.danger.withOpacity(0.08);
-              statusLabel = 'ABSEN';
-            } else if (isLate) {
-              statusColor = AppColors.warning;
-              statusBg = AppColors.warning.withOpacity(0.08);
-              statusLabel = 'TERLAMBAT';
-            } else {
-              statusColor = AppColors.brandLimeDark;
-              statusBg = AppColors.brandLime.withOpacity(0.15);
-              statusLabel = 'TEPAT WAKTU';
-            }
-
-            // If it's a holiday, check-in/out times are not relevant
-            final checkInTime = isHoliday
-                ? '--:--'
-                : (rec.checkIn != null ? _fmtHM24(rec.checkIn!) : '--:--');
-            final checkOutTime = isHoliday
-                ? '--:--'
-                : (rec.checkOut != null ? _fmtHM24(rec.checkOut!) : '--:--');
-
-            // Hitung total jam kerja
-            String totalWork = '--:--';
-            if (rec.checkIn != null && rec.checkOut != null) {
-              final dur = rec.checkOut!.difference(rec.checkIn!);
-              totalWork =
-                  '${dur.inHours.toString().padLeft(2, '0')}:${(dur.inMinutes % 60).toString().padLeft(2, '0')}';
-            }
-
-            // Tanggal
-            final day = DateFormat('d', 'id_ID').format(rec.date);
-            final dayName =
-                DateFormat('EEE', 'id_ID').format(rec.date).toUpperCase();
-            final monthYear = DateFormat('MMM', 'id_ID').format(rec.date);
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.slate100),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.slate200.withOpacity(0.5),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Row(
-                  children: [
-                    // ── Tanggal kotak ─────────────────────────
-                    Container(
-                      width: 48,
-                      height: 52,
-                      decoration: BoxDecoration(
-                        // Use the new status colors
-                        color: isHoliday
-                            ? AppColors.brandNavy.withOpacity(0.08)
-                            : (absent
-                                ? AppColors.danger.withOpacity(0.08)
-                                : AppColors.brandNavy),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(dayName,
-                              style: GoogleFonts.inter(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w700,
-                                  color: isHoliday
-                                      ? AppColors.brandNavy.withOpacity(0.6)
-                                      : (absent
-                                          ? AppColors.danger.withOpacity(0.6)
-                                          : Colors.white.withOpacity(0.7)),
-                                  letterSpacing: 0.5)),
-                          Text(day,
-                              style: GoogleFonts.inter(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                  color: isHoliday
-                                      ? AppColors.brandNavy
-                                      : (absent
-                                          ? AppColors.danger
-                                          : Colors.white),
-                                  height: 1.0)),
-                          Text(monthYear,
-                              style: GoogleFonts.inter(
-                                  fontSize: 8,
-                                  color: isHoliday
-                                      ? AppColors.brandNavy.withOpacity(0.5)
-                                      : (absent
-                                          ? AppColors.danger.withOpacity(0.5)
-                                          : Colors.white.withOpacity(0.55)))),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // ── Info waktu ────────────────────────────
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Adjust content based on holiday status
-                          if (!isHoliday && !absent) ...[
-                            Row(
-                              children: [
-                                _HistoryTimeCol(
-                                  label: 'Check In',
-                                  value: checkInTime,
-                                ),
-                                const SizedBox(width: 14),
-                                _HistoryTimeCol(
-                                  label: 'Check Out',
-                                  value: checkOutTime,
-                                ),
-                                const SizedBox(width: 14),
-                                _HistoryTimeCol(
-                                  label: 'Total Jam',
-                                  value: totalWork,
-                                  highlight: true,
-                                ),
-                              ],
-                            ),
-                          ] else if (isHoliday) ...[
-                            Text('Hari Libur',
-                                style: GoogleFonts.inter(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.brandNavy)),
-                          ] else if (absent) ...[
-                            Text('Tidak Hadir',
-                                style: GoogleFonts.inter(
-                                    fontSize: 14,
-                                    fontWeight:
-                                        FontWeight.w700, // This is for absent
-                                    color: AppColors.danger)),
-                          ],
-                          const SizedBox(height: 6),
-                          // Baris 2: Lokasi
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded,
-                                  size: 11, color: AppColors.slate400),
-                              const SizedBox(width: 3),
-                              Expanded(
-                                child: Text(
-                                  // Adjust location text for holiday
-                                  isHoliday
-                                      ? 'Tidak ada aktivitas'
-                                      : 'Office, West Jakarta, Indonesia',
-                                  style: GoogleFonts.inter(
-                                      fontSize: 10, color: AppColors.slate400),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // ── Status badge ──────────────────────────
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: statusBg,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(statusLabel,
-                          style: GoogleFonts.inter(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w800,
-                              color: statusColor,
-                              letterSpacing: 0.3)),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
         ),
       ],
     );
   }
 }
 
-// ── Timeline Grid Card (2×2) ──────────────────────────────────────
+/// Kartu kecil di grid "Timeline Hari Ini" (Check-In, Istirahat, Jam Kerja,
+/// Uang Makan).
 class _TimelineGridCard extends StatelessWidget {
   final IconData icon;
-  final Color iconColor, iconBg;
-  final String label, value, sub, badge;
-  final Color badgeColor, badgeBg;
+  final Color iconColor;
+  final Color iconBg;
+  final String label;
+  final String value;
+  final String sub;
+  final String badge;
+  final Color badgeColor;
+  final Color badgeBg;
 
   const _TimelineGridCard({
     required this.icon,
@@ -1928,13 +1898,6 @@ class _HistoryTimeCol extends StatelessWidget {
   }
 }
 
-class _ProfileQuickView extends StatelessWidget {
-  const _ProfileQuickView();
-  @override
-  Widget build(BuildContext context) =>
-      const Scaffold(body: Center(child: Text('Profile')));
-}
-
 // ── Full Attendance History Screen ────────────────────────────────
 class AttendanceHistoryFullScreen extends StatefulWidget {
   const AttendanceHistoryFullScreen({super.key});
@@ -1949,40 +1912,80 @@ class _AttendanceHistoryFullScreenState
 
   // Batas 3 bulan terakhir
   late final DateTime _cutoff;
-  late final List<_HistoryDay> _days;
+  List<_HistoryDay> _days = [];
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
     _cutoff = DateTime(now.year, now.month - 2, 1); // 3 bulan terakhir
-    _days = _buildDayList(now);
+    _load();
   }
 
-  List<_HistoryDay> _buildDayList(DateTime now) {
+  /// Fase 8: riwayat kehadiran dibaca dari DATABASE.
+  ///
+  /// Sebelumnya layar ini mencocokkan tiap tanggal dengan
+  /// `SampleData.recentAttendance` — daftar absensi karangan — sehingga
+  /// "Riwayat Kehadiran" 3 bulan yang dilihat staff tidak ada hubungannya
+  /// dengan absensinya yang sebenarnya.
+  ///
+  /// Hari non-kerja juga tidak lagi ditebak dari akhir pekan saja: hari
+  /// kerja mengikuti `Shift.hariKerja` dan tanggal merah mengikuti master
+  /// `hari_libur` (keduanya dari [AppCalendar]).
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final now = DateTime.now();
+      // Ambil per bulan agar mencakup seluruh rentang 3 bulan.
+      final months = <String>{
+        for (var i = 0; i < 3; i++)
+          '${DateTime(now.year, now.month - i).year.toString().padLeft(4, '0')}-'
+              '${DateTime(now.year, now.month - i).month.toString().padLeft(2, '0')}',
+      };
+
+      final records = <AttendanceRecord>[];
+      for (final month in months) {
+        records.addAll(await AttendanceService.history(month: month, limit: 100));
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _days = _buildDayList(now, records);
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  List<_HistoryDay> _buildDayList(DateTime now, List<AttendanceRecord> records) {
+    final byDate = <String, AttendanceRecord>{
+      for (final r in records) WorkCalendar.dateKey(r.date): r,
+    };
+    final calendar = AppCalendar.instance;
+
     final List<_HistoryDay> result = [];
-    // Dari hari ini mundur ke cutoff
     DateTime cursor = DateTime(now.year, now.month, now.day);
     while (!cursor.isBefore(_cutoff)) {
-      final weekday = cursor.weekday; // 6=Sat, 7=Sun
-      final isWeekend =
-          weekday == DateTime.saturday || weekday == DateTime.sunday;
-
-      if (isWeekend) {
-        result.add(_HistoryDay(date: cursor, isWeekend: true, record: null));
-      } else {
-        // Cari record dari SampleData
-        final rec =
-            SampleData.recentAttendance.cast<AttendanceRecord?>().firstWhere(
-                  (r) =>
-                      r != null &&
-                      r.date.year == cursor.year &&
-                      r.date.month == cursor.month &&
-                      r.date.day == cursor.day,
-                  orElse: () => null,
-                );
-        result.add(_HistoryDay(date: cursor, isWeekend: false, record: rec));
-      }
+      final rec = byDate[WorkCalendar.dateKey(cursor)];
+      // "isWeekend" di sini berarti "bukan hari kerja" — termasuk tanggal
+      // merah. Tetap tampilkan record bila ternyata staff memang absen di
+      // hari itu (mis. lembur di hari libur).
+      final bukanHariKerja = !calendar.isSelectable(cursor);
+      result.add(_HistoryDay(
+        date: cursor,
+        isWeekend: bukanHariKerja && rec == null,
+        record: rec,
+      ));
       cursor = cursor.subtract(const Duration(days: 1));
     }
     return result;
@@ -2032,7 +2035,29 @@ class _AttendanceHistoryFullScreenState
         //   ),
         // ),
       ),
-      body: ListView(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.cloud_off_rounded,
+                            size: 44, color: AppColors.slate400),
+                        const SizedBox(height: 10),
+                        Text(_error!,
+                            textAlign: TextAlign.center,
+                            style: AppText.body2),
+                        const SizedBox(height: 14),
+                        ElevatedButton(
+                            onPressed: _load, child: const Text('Coba Lagi')),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView(
         padding: const EdgeInsets.symmetric(vertical: 12),
         children: grouped.entries.map((entry) {
           return Column(

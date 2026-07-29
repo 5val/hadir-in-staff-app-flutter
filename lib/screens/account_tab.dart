@@ -5,6 +5,8 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
+import '../services/auth_service.dart';
+import '../services/api_client.dart';
 import 'login_screen.dart';
 import 'account_info_screen.dart';
 import 'history_screen.dart';
@@ -742,15 +744,6 @@ class _AccountTabState extends State<AccountTab> {
                 height: 50,
                 onTap: () async {
                   if (!formKey.currentState!.validate()) return;
-                  final currentPasscode = await SessionService.getPasscode();
-                  if (oldCtrl.text != currentPasscode) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Passcode lama tidak cocok!'),
-                          backgroundColor: AppColors.danger),
-                    );
-                    return;
-                  }
                   if (newCtrl.text.length < 6) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -768,7 +761,27 @@ class _AccountTabState extends State<AccountTab> {
                     );
                     return;
                   }
-                  await SessionService.savePasscode(newCtrl.text);
+
+                  // Fase 8: passcode lama diverifikasi SERVER (bcrypt), bukan
+                  // dibandingkan dengan string di SharedPreferences, dan
+                  // passcode baru disimpan terhash di `Staff.passcodeHash`
+                  // sehingga tetap berlaku setelah logout / ganti HP.
+                  try {
+                    await AuthService.setPasscode(
+                      passcode: newCtrl.text.trim(),
+                      passcodeLama: oldCtrl.text.trim(),
+                    );
+                  } on ApiException catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: AppColors.danger),
+                    );
+                    return;
+                  }
+
+                  if (!mounted) return;
                   Navigator.pop(_);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Passcode berhasil diubah!')),
