@@ -2,7 +2,7 @@
 
 App mobile staff Hadir-In (absensi). Flutter/Dart. Konsumen `hadir-in-api-backend-express-js` (`/api/mobile/*`).
 
-> **Status:** app ini belum terhubung ke backend sama sekali (0 API call). Prioritas pengembangan saat ini fokus ke `hadir-in-web-admin-react` + backend; integrasi app mobile ke backend ditunda ke fase akhir.
+> **Status (2026-07-31):** app SUDAH terhubung ke backend — 16 service file di `lib/services/` masing-masing konsumsi endpoint `/api/mobile/*` (auth, attendance, document/onboarding, overtime, subordinate, location, calendar, staff-log/popup, salary, leave, notification, profile). Jangan asumsikan lagi "0 API call" — cek `lib/services/api_client.dart` buat base client-nya.
 
 ## Stack
 - Flutter (SDK >=3.0.0 <4.0.0), Dart
@@ -15,19 +15,23 @@ App mobile staff Hadir-In (absensi). Flutter/Dart. Konsumen `hadir-in-api-backen
 ## Struktur
 ```
 lib/
-├── models/       # attendance.dart, user.dart (stub kosong) — domain real ada di models.dart (SampleData hardcode)
-├── services/     # attendance_provider.dart (ChangeNotifier), google_drive_service.dart, session_service.dart
-├── screens/      # UI screens
+├── models/       # models.dart — semua domain model + parsing response API (SalarySlip, Attendance, StaffLog, dst)
+├── services/     # api_client.dart (base HTTP client) + 1 service per domain:
+│                 #   auth_service, session_service, attendance_service, attendance_provider (ChangeNotifier),
+│                 #   document_service (onboarding+dokumen), overtime_service (lembur), staff_log_service (popup naik jabatan/SP),
+│                 #   subordinate_service, location_service, calendar_service (hari libur), salary_service, leave_service,
+│                 #   notification_service, profile_service, google_drive_service
+├── screens/      # UI screens (login, main/tab shell, onboarding_documents, salary, leave, overtime history dihapus → masuk home_tab, dst)
 ├── theme/        # design tokens
-├── widgets/      # komponen reusable
+├── widgets/      # komponen reusable (mis. staff_log_dialog — popup promosi/SP)
 assets/images/    # logo & maskot Hadir-In
 ```
-> Fase 1 cleanup selesai: `lib/screens copy/`, `lib/main copy.dart`, `pubspec copy.yaml`, `lib/app_flutter.zip`, dan `lib/providers/` (dead duplicate) sudah dihapus.
 
 ## Konvensi
 - Linter: `package:flutter_lints/flutter.yaml` (`analysis_options.yaml`), belum ada override kustom.
 - Baca `docs/APP-UI-GUIDELINE.md`, `docs/UI-DESIGN-GUIDE.md`, `docs/COLOR-PALETTE.md` sebelum bikin UI baru — desain sistem sudah didefinisikan di situ.
-- Sesi login pakai `SessionService` (local `shared_preferences` saja — phone/employeeId/passcode), tidak ada token server. Jangan asumsikan ada auth backend sampai integrasi API dikerjakan.
+- Sesi login pakai `SessionService` (local `shared_preferences` — phone/employeeId/passcode) DITAMBAH panggilan API asli lewat `api_client.dart`; jangan asumsikan lagi "belum ada backend" — cek service terkait dulu sebelum nulis integrasi baru dari nol.
+- **Gap diketahui (2026-07-31):** `models.dart` (`SalarySlip.takeHomePay`/`netSalary`) menghitung ULANG take-home pay dari breakdown komponen di client, bukan baca `gajiNetto` langsung dari server. Ini termasuk uang makan (`Attendance.uangMakan`, dijumlah live oleh `routes/mobile/gaji.ts`) padahal backend BELUM menjumlah uang makan ke slip resmi (`payroll-calc.ts`/`gajiNetto`) — begitu `PayrollSettings.uangMakanPerHariAmount` diisi, angka yang ditampilkan app bisa lebih besar dari yang beneran ditransfer. Perbaikan: ganti ke baca `gajiNetto` server langsung, jangan rekonstruksi manual. Lihat `hadir-in-web-admin-react/docs/product/SPRINT2-PRD.md` EPIC 5b.
 
 ## Commands
 ```bash
@@ -42,4 +46,4 @@ flutter build apk        # / build ios, dst
 `android/app/google-services.json` dan `ios/Runner/GoogleService-Info.plist` di-gitignore (mengandung client ID Google) — minta file asli ke pemilik project kalau butuh build ulang, jangan commit ulang.
 
 ## Repo terkait
-- `../hadir-in-api-backend-express-js` — endpoint mobile ada di `src/routes/mobile/index.ts`, tapi belum dikonsumsi app ini. Integrasi ditunda.
+- `../hadir-in-api-backend-express-js` — endpoint mobile ada di `src/routes/mobile/index.ts`, sudah dikonsumsi penuh oleh app ini. Kontrak endpoint per fitur ada di `docs/api-contracts/sprint2.md` (dan sprint sebelumnya) — cek dulu sebelum ubah shape request/response.
