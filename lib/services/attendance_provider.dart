@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/testing_config.dart';
 import '../models/models.dart';
 import 'attendance_service.dart';
 import 'calendar_service.dart';
@@ -63,10 +64,14 @@ class AttendanceRules {
       : '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   /// Sudah melewati jam pulang shift?
+  ///
+  /// TESTING — `TestingConfig.now()` mengembalikan jam asli HP di mode normal,
+  /// dan `TestingConfig.clockTime` saat mode testing aktif. Dipakai supaya
+  /// dialog "Belum Jam Pulang!" tidak menghalangi pengujian check-out.
   static bool get isAfterNormalCheckout {
     final pulang = _jamPulang;
     if (pulang == null) return false;
-    final now = DateTime.now();
+    final now = TestingConfig.now();
     final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
     return !now.isBefore(target);
   }
@@ -75,7 +80,7 @@ class AttendanceRules {
   static Duration? get timeUntilCheckout {
     final pulang = _jamPulang;
     if (pulang == null) return null;
-    final now = DateTime.now();
+    final now = TestingConfig.now();
     final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
     return now.isBefore(target) ? target.difference(now) : null;
   }

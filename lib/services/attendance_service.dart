@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../config/testing_config.dart';
 import '../models/models.dart';
 import 'api_client.dart';
 import 'session_service.dart';
@@ -64,6 +65,11 @@ class AttendanceService {
     final id = await _staffId();
     final foto = await _encodePhoto(fotoMasuk);
 
+    // TESTING — `time` hanya ikut terkirim saat TestingConfig.enabled &
+    // fakeTime = true. Di mode normal nilainya null, field-nya tidak
+    // dikirim, dan backend memakai jam SERVER seperti biasa.
+    final jamTesting = TestingConfig.checkInTimeOverride;
+
     final res = await ApiClient.instance.post(
       '/mobile/staff/$id/attendance/check-in',
       body: {
@@ -73,6 +79,7 @@ class AttendanceService {
         if (latitude != null) 'latitude': latitude,
         if (longitude != null) 'longitude': longitude,
         if (accuracy != null) 'accuracy': accuracy,
+        if (jamTesting != null) 'time': jamTesting,
       },
     );
     return AttendanceRecord.fromApi(res.asMap);
@@ -88,6 +95,9 @@ class AttendanceService {
     final id = await _staffId();
     final foto = await _encodePhoto(fotoKeluar);
 
+    // TESTING — lihat catatan `time` di [checkIn].
+    final jamTesting = TestingConfig.checkOutTimeOverride;
+
     final res = await ApiClient.instance.post(
       '/mobile/staff/$id/attendance/check-out',
       body: {
@@ -97,6 +107,7 @@ class AttendanceService {
         if (latitude != null) 'latitude': latitude,
         if (longitude != null) 'longitude': longitude,
         if (accuracy != null) 'accuracy': accuracy,
+        if (jamTesting != null) 'time': jamTesting,
       },
     );
     return AttendanceRecord.fromApi(res.asMap);

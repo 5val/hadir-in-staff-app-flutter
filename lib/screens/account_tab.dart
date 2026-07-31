@@ -13,6 +13,7 @@ import 'history_screen.dart';
 import 'salary_screen.dart';
 import 'auth_wrapper.dart';
 import 'all_attendance_history_screen.dart';
+import 'onboarding_documents_screen.dart';
 
 /// Account / Profile Tab — full sections per design spec
 class AccountTab extends StatefulWidget {
@@ -131,6 +132,24 @@ class _AccountTabState extends State<AccountTab> {
                           setState(() {});
                         },
                       ),
+                      // Dokumen onboarding (pas foto, KTP, BPJS, NPWP) —
+                      // jalan masuk untuk melengkapi/mengganti dokumen setelah
+                      // staff berada di dalam app. Tanpa ini, dokumen yang
+                      // tidak diwajibkan server (BPJS/NPWP staff non-BPJS)
+                      // tidak pernah punya tempat untuk diunggah.
+                      if (user.role != UserRole.admin)
+                        _MenuItem(
+                          icon: Icons.folder_shared_outlined,
+                          label: 'Dokumen Saya',
+                          subtitle: 'Pas foto, KTP, BPJS, NPWP',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const OnboardingDocumentsScreen(
+                                  manageMode: true),
+                            ),
+                          ),
+                        ),
                       if (user.role != UserRole.admin)
                         _MenuItem(
                           icon: Icons.history_rounded,

@@ -68,10 +68,29 @@ class OnboardingStatus {
 
   OnboardingStatus({required this.completed, required this.documents});
 
-  /// Hanya dokumen yang wajib untuk staff ini — inilah yang ditampilkan
-  /// layar onboarding (jumlahnya bisa 2 atau 4, tidak di-hardcode).
+  /// Hanya dokumen yang WAJIB untuk staff ini (2 atau 4, ditentukan server:
+  /// BPJS & NPWP wajib hanya bila BPJS staff aktif). Inilah yang menentukan
+  /// boleh/tidaknya masuk app.
   List<OnboardingDocument> get requiredDocuments =>
       documents.where((d) => d.required).toList();
+
+  /// Dokumen yang boleh diunggah tapi TIDAK memblokir masuk app (mis. BPJS &
+  /// NPWP untuk staff magang/freelance yang BPJS-nya tidak aktif).
+  List<OnboardingDocument> get optionalDocuments =>
+      documents.where((d) => !d.required).toList();
+
+  /// Semua dokumen yang dilacak backend (PasFoto, KTP, BPJS, NPWP) —
+  /// layar onboarding menampilkan SEMUANYA, bukan hanya yang wajib, supaya
+  /// staff tetap bisa mengunggah BPJS & NPWP walau server tidak mewajibkannya.
+  /// Yang wajib ditaruh di atas agar jelas mana yang menggerbangi akses.
+  List<OnboardingDocument> get allDocuments =>
+      [...requiredDocuments, ...optionalDocuments];
+
+  /// True bila TIDAK ada lagi dokumen yang bisa diunggah (wajib maupun
+  /// opsional). Dipakai layar onboarding untuk memutuskan boleh langsung
+  /// lompat ke app tanpa menampilkan daftar.
+  bool get allSubmitted =>
+      documents.isNotEmpty && documents.every((d) => d.submitted);
 
   factory OnboardingStatus.fromApi(Map<String, dynamic> j) => OnboardingStatus(
         completed: j['completed'] == true,

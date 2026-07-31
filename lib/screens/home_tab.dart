@@ -5,6 +5,7 @@ import 'package:hadirin_staff_app/screens/account_tab.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../config/testing_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
@@ -41,7 +42,9 @@ class HomeTab extends StatefulWidget {
 class _HomeTabState extends State<HomeTab> {
   final user = SampleData.currentUser;
 
-  DateTime _now = DateTime.now();
+  /// Jam yang ditampilkan. TestingConfig.now() = jam asli HP di mode normal,
+  /// jam hardcode saat MODE TESTING aktif (lib/config/testing_config.dart).
+  DateTime _now = TestingConfig.now();
   bool _showMascot = false;
   String _mascotMsg = '';
 
@@ -96,7 +99,7 @@ class _HomeTabState extends State<HomeTab> {
   void initState() {
     super.initState();
     _clockTimer = Timer.periodic(const Duration(seconds: 1),
-        (_) => setState(() => _now = DateTime.now()));
+        (_) => setState(() => _now = TestingConfig.now()));
     // Timer hanya memicu repaint; angkanya dihitung provider dari data DB.
     _workTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_status != AttendanceProviderStatus.notCheckedIn &&
@@ -301,8 +304,27 @@ class _HomeTabState extends State<HomeTab> {
       ),
     );
     if (!mounted || result == null || !result.confirmed) return;
+
+    // Check-out juga wajib membawa koordinat: server memvalidasinya dengan
+    // geofence yang sama seperti check-in (lib/geo.ts) dan menyimpannya ke
+    // `latitudeKeluar/longitudeKeluar/jarakKeluar`. Sebelumnya jalur ini
+    // mengirim foto saja, sehingga staff yang punya lokasi kerja selalu
+    // ditolak 400 "Lokasi GPS tidak terbaca" — padahal jalur FAB di
+    // main_screen.dart sudah mengirimnya dengan benar.
+    final gps = await LocationService.current();
+    if (!mounted) return;
+    if (!gps.ok) {
+      _showSnackbar(gps.failure!.message, color: AppColors.danger);
+      return;
+    }
+
     try {
-      await _att.checkOutRemote(fotoPath: result.imagePath);
+      await _att.checkOutRemote(
+        fotoPath: result.imagePath,
+        latitude: gps.position!.latitude,
+        longitude: gps.position!.longitude,
+        accuracy: gps.position!.accuracy,
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       _showSnackbar(e.message, color: AppColors.danger);
@@ -540,6 +562,12 @@ class _HomeTabState extends State<HomeTab> {
                       children: [
                         _buildHeaderInfo(),
                         const SizedBox(height: 8),
+                        // Penanda MODE TESTING — hilang sendiri begitu
+                        // TestingConfig.enabled dikembalikan ke false.
+                        if (TestingConfig.enabled) ...[
+                          _buildTestingBanner(),
+                          const SizedBox(height: 8),
+                        ],
                         _buildLocationStatus(),
                         const SizedBox(height: 8),
                         if (_status == AttendanceProviderStatus.checkedIn ||
@@ -851,6 +879,48 @@ class _HomeTabState extends State<HomeTab> {
             ),
           ),
       ],
+    );
+  }
+
+  // ── Banner MODE TESTING ───────────────────────────────────────
+  //
+  // Sengaja mencolok: selama banner ini terlihat, angka absensi yang tercatat
+  // BUKAN data sungguhan (lokasi dan/atau jam di-hardcode). Matikan lewat
+  // `TestingConfig.enabled = false` di lib/config/testing_config.dart.
+  Widget _buildTestingBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.science_rounded, color: AppColors.warning, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(TestingConfig.bannerLabel,
+                    style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.warning)),
+                Text(
+                  'Check-in ${TestingConfig.checkInTime} · '
+                  'Check-out ${TestingConfig.checkOutTime} · '
+                  'Koordinat titik kantor',
+                  style: GoogleFonts.inter(
+                      fontSize: 10, color: AppColors.slate700),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

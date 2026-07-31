@@ -11,7 +11,7 @@ class ApiConfig {
   const ApiConfig._();
 
   /// IP komputer/dev-server di jaringan lokal.
-  static const String host = '192.168.0.102';
+  static const String host = '192.168.1.23';
 
   /// Port backend Express (lihat PORT di .env backend, default 4000).
   static const int port = 4000;

@@ -1,13 +1,15 @@
 import 'dart:async';
-import 'dart:math';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import '../config/testing_config.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../services/attendance_provider.dart';
+import '../services/location_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 // ---------------------------------------------------------------------------
@@ -93,16 +95,29 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   bool get _checkoutAllowed => true;
   bool get _checkinAllowed => true;
 
-  // ── Lokasi (simulasi) ───────────────────────────────────────
+  // ── Lokasi ──────────────────────────────────────────────────
+  //
+  // Sebelumnya blok ini bertuliskan "(simulasi)" dan `_fetchLocation()`
+  // mengundi hasilnya dengan `Random().nextBool()` plus tiga alamat karangan.
+  // Sekarang koordinat dibaca lewat LocationService (GPS asli, atau koordinat
+  // hardcode saat MODE TESTING — lihat lib/config/testing_config.dart) lalu
+  // dibandingkan dengan titik & radius Lokasi staff dari database.
   bool _checkingLocation = false;
   bool _locationChecked = false;
   bool _locationInRange = false;
   String _currentAddress = '';
   double _distanceMeters = 0;
-  static const double _officeRadiusMeters = 200;
+
+  /// Radius geofence lokasi kerja staff (meter), dari master Lokasi di DB —
+  /// bukan lagi konstanta 200 m yang tidak pernah ada di data mana pun.
+  double get _officeRadiusMeters =>
+      (AppSession.staff?.lokasiRadius ?? 100).toDouble();
 
   // ── Clock ───────────────────────────────────────────────────
-  DateTime _now = DateTime.now();
+  // TestingConfig.now() = jam asli HP di mode normal, jam hardcode di mode
+  // testing — supaya jam yang TERLIHAT di layar sama dengan jam yang DIKIRIM
+  // ke server saat check-in/check-out.
+  DateTime _now = TestingConfig.now();
   Timer? _clockTimer;
 
   // ── Overlay ─────────────────────────────────────────────────
@@ -128,7 +143,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
         CurvedAnimation(parent: _resultCtrl, curve: Curves.elasticOut));
 
     _clockTimer = Timer.periodic(const Duration(seconds: 1),
-        (_) => setState(() => _now = DateTime.now()));
+        (_) => setState(() => _now = TestingConfig.now()));
 
     // Inisialisasi face detector
     if (!kIsWeb) {
@@ -329,30 +344,68 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   }
 
   // ── Lokasi (simulasi acak) ──────────────────────────────────
+  /// Membaca posisi sekarang lalu menghitung jaraknya ke titik kantor.
+  ///
+  /// Hasilnya hanya untuk TAMPILAN di layar kamera; keputusan yang mengikat
+  /// tetap dibuat server saat check-in/check-out (lib/geo.ts).
   Future<void> _fetchLocation() async {
     setState(() {
       _checkingLocation = true;
       _locationChecked = false;
     });
-    await Future.delayed(const Duration(seconds: 2));
+
+    final result = await LocationService.current();
     if (!mounted) return;
 
-    final rng = Random();
-    final inRange = rng.nextBool(); // 50/50 untuk testing
-    const addresses = [
-      'Jl. Sudirman No. 1, Kel. Karet Tengsin, Jakarta Pusat',
-      'Jl. Gatot Subroto No. 5, Kel. Menteng Atas, Jakarta Selatan',
-      'Jl. HR Rasuna Said Kav. 1, Kel. Kuningan Timur, Jakarta',
-    ];
+    if (!result.ok) {
+      setState(() {
+        _checkingLocation = false;
+        _locationChecked = true;
+        _locationInRange = false;
+        _distanceMeters = 0;
+        _currentAddress = result.failure!.message;
+      });
+      return;
+    }
+
+    final pos = result.position!;
+    final lat = AppSession.staff?.lokasiLatitude;
+    final lng = AppSession.staff?.lokasiLongitude;
+    final alamat = AppSession.staff?.lokasiAlamat ?? '';
+
+    // Staff tanpa lokasi kerja: tidak ada geofence untuk dilanggar — server
+    // pun melewati pengecekannya, jadi di sini dianggap "dalam area".
+    if (lat == null || lng == null) {
+      setState(() {
+        _checkingLocation = false;
+        _locationChecked = true;
+        _distanceMeters = 0;
+        _locationInRange = true;
+        _currentAddress = TestingConfig.locationOverrideActive
+            ? TestingConfig.fakeAddressLabel
+            : (alamat.isNotEmpty ? alamat : 'Lokasi kerja belum ditetapkan');
+      });
+      return;
+    }
+
+    final distance = LocationService.distanceMeters(
+      lat1: pos.latitude,
+      lon1: pos.longitude,
+      lat2: lat,
+      lon2: lng,
+    );
 
     setState(() {
       _checkingLocation = false;
       _locationChecked = true;
-      _currentAddress = addresses[rng.nextInt(addresses.length)];
-      _distanceMeters = inRange
-          ? (rng.nextDouble() * _officeRadiusMeters * 0.9).roundToDouble()
-          : (_officeRadiusMeters + rng.nextDouble() * 300 + 50).roundToDouble();
-      _locationInRange = inRange;
+      _distanceMeters = distance;
+      _locationInRange =
+          distance <= _officeRadiusMeters + pos.accuracy.clamp(0, 50);
+      _currentAddress = TestingConfig.locationOverrideActive
+          ? TestingConfig.fakeAddressLabel
+          : (alamat.isNotEmpty
+              ? alamat
+              : AppSession.staff?.lokasiNama ?? 'Lokasi kerja');
     });
   }
 

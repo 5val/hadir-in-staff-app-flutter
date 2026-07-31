@@ -23,8 +23,21 @@ import 'login_screen.dart';
 /// wajib pernah dikirim, staff boleh masuk. Penolakan oleh HRD kemudian
 /// hanya memunculkan notifikasi untuk mengunggah ulang, tidak mengunci app
 /// lagi (aturan yang sudah ditetapkan backend, bukan diputuskan di sini).
+///
+/// PERBAIKAN: layar ini dulu hanya merender `requiredDocuments`, sehingga
+/// staff yang BPJS-nya tidak aktif hanya pernah melihat 2 kartu (pas foto &
+/// KTP) dan TIDAK PUNYA JALAN untuk mengunggah BPJS/NPWP sama sekali —
+/// begitu dua dokumen wajib itu terkirim, `completed` langsung true dan layar
+/// melompat ke app. Sekarang keempat dokumen selalu ditampilkan; yang tidak
+/// diwajibkan server diberi label OPSIONAL dan tidak memblokir tombol masuk.
 class OnboardingDocumentsScreen extends StatefulWidget {
-  const OnboardingDocumentsScreen({super.key});
+  /// Mode kelola: dibuka dari menu Akun untuk melengkapi/mengganti dokumen
+  /// setelah staff berada di dalam app. Bedanya hanya navigasi — layar tidak
+  /// lagi menjadi "gerbang", jadi tombolnya menutup halaman, bukan
+  /// mendorong MainScreen baru.
+  final bool manageMode;
+
+  const OnboardingDocumentsScreen({super.key, this.manageMode = false});
 
   @override
   State<OnboardingDocumentsScreen> createState() =>
@@ -59,7 +72,10 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
         _status = status;
         _loading = false;
       });
-      if (status.completed) _goToApp();
+      // Lompat otomatis HANYA bila benar-benar tidak ada lagi yang bisa
+      // diunggah. Dulu syaratnya `status.completed` (dokumen WAJIB saja),
+      // sehingga kartu BPJS & NPWP tidak pernah sempat terlihat.
+      if (!widget.manageMode && status.allSubmitted) _goToApp();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -70,6 +86,10 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
   }
 
   void _goToApp() {
+    if (widget.manageMode) {
+      Navigator.pop(context);
+      return;
+    }
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const MainScreen()),
@@ -160,26 +180,36 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final docs = _status?.requiredDocuments ?? const <OnboardingDocument>[];
+    // Keempat dokumen yang dilacak backend, bukan hanya yang wajib.
+    final docs = _status?.allDocuments ?? const <OnboardingDocument>[];
     final done = docs.where((d) => d.submitted).length;
+
+    // Gerbang masuk app tetap milik server: hanya dokumen WAJIB yang
+    // menentukan. BPJS/NPWP opsional boleh dilewati.
+    final requiredDocs =
+        _status?.requiredDocuments ?? const <OnboardingDocument>[];
+    final canEnter = requiredDocs.isNotEmpty &&
+        requiredDocs.every((d) => d.submitted);
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
       appBar: AppBar(
         backgroundColor: AppColors.brandNavy,
         elevation: 0,
-        automaticallyImplyLeading: false,
-        title: Text('Lengkapi Data Diri',
+        automaticallyImplyLeading: widget.manageMode,
+        iconTheme: const IconThemeData(color: AppColors.white),
+        title: Text(widget.manageMode ? 'Dokumen Saya' : 'Lengkapi Data Diri',
             style: AppText.headline3.copyWith(color: AppColors.white)),
         actions: [
-          TextButton(
-            onPressed: _logout,
-            child: Text('Keluar',
-                style: GoogleFonts.inter(
-                    color: AppColors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600)),
-          ),
+          if (!widget.manageMode)
+            TextButton(
+              onPressed: _logout,
+              child: Text('Keluar',
+                  style: GoogleFonts.inter(
+                      color: AppColors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600)),
+            ),
         ],
       ),
       body: _loading
@@ -195,12 +225,19 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                       const SizedBox(height: 20),
                       ...docs.map(_buildDocCard),
                       const SizedBox(height: 24),
-                      if (docs.isNotEmpty && done >= docs.length)
+                      // Tombol masuk aktif begitu dokumen WAJIB terkirim —
+                      // BPJS/NPWP yang opsional boleh menyusul lewat menu
+                      // Akun → Dokumen Saya.
+                      if (canEnter)
                         SizedBox(
                           height: 48,
                           child: ElevatedButton(
                             onPressed: _goToApp,
-                            child: const Text('Masuk ke Aplikasi'),
+                            child: Text(widget.manageMode
+                                ? 'Selesai'
+                                : (done >= docs.length
+                                    ? 'Masuk ke Aplikasi'
+                                    : 'Lanjut ke Aplikasi (lengkapi nanti)')),
                           ),
                         ),
                     ],
@@ -269,7 +306,9 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           Text(
             'Unggah dokumen berikut untuk mengaktifkan akun Anda. '
             'Dokumen akan diperiksa HRD, tapi Anda sudah bisa memakai aplikasi '
-            'segera setelah semuanya terkirim.',
+            'segera setelah dokumen wajib terkirim. Dokumen bertanda OPSIONAL '
+            'tetap boleh diunggah dan bisa dilengkapi kapan saja lewat menu '
+            'Akun → Dokumen Saya.',
             style: AppText.body2,
           ),
           const SizedBox(height: 12),
@@ -335,9 +374,33 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(doc.label,
-                        style: AppText.body1
-                            .copyWith(fontWeight: FontWeight.w700)),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(doc.label,
+                              style: AppText.body1
+                                  .copyWith(fontWeight: FontWeight.w700)),
+                        ),
+                        // Penanda dokumen yang tidak diwajibkan server untuk
+                        // staff ini (mis. BPJS/NPWP saat BPJS-nya tidak aktif).
+                        if (!doc.required) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.slate100,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text('OPSIONAL',
+                                style: GoogleFonts.inter(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.slate700)),
+                          ),
+                        ],
+                      ],
+                    ),
                     const SizedBox(height: 2),
                     Text(doc.description, style: AppText.caption),
                   ],
