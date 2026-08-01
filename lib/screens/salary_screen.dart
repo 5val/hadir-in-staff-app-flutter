@@ -772,15 +772,28 @@ class SalaryDetailScreen extends StatelessWidget {
             ),
             child: pw.Column(
               children: [
-                summaryRow('Gaji Bersih', _fmt(slip.gajiBersih)),
+                // Sprint 2 EPIC 9 — baris ringkasan HARUS menjumlah tepat ke
+                // Take Home Pay (`gajiNetto` server), sama seperti kartu
+                // ringkasan di layar:
+                //   Pendapatan Pokok − Total Potongan + Tunjangan Tunai = THP
+                summaryRow('Pendapatan Pokok', _fmt(slip.pendapatanPokok)),
                 pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Tunjangan', _fmt(slip.totalTunjangan)),
-                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Potongan', '- ${_fmt(slip.totalPotongan)}',
+                summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
                     isDeduction: true),
+                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
+                summaryRow('Tunjangan Tunai', _fmt(slip.totalTunjanganUang)),
                 pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
                 summaryRow('Take Home Pay', _fmt(slip.takeHomePay),
                     isTotal: true),
+                if (slip.tunjanganDiluarThp > 0) ...[
+                  pw.SizedBox(height: 6),
+                  pw.Text(
+                    'Tunjangan barang, fasilitas & uang makan senilai '
+                    '${_fmt(slip.tunjanganDiluarThp)} tercantum di rincian, '
+                    'tetapi tidak menambah Take Home Pay.',
+                    style: regular(8, color: PdfColor.fromInt(0xFF94A3B8)),
+                  ),
+                ],
               ],
             ),
           ),
@@ -802,7 +815,10 @@ class SalaryDetailScreen extends StatelessWidget {
               ]),
               ...income.asMap().entries.map((e) => pw.TableRow(children: [
                     td(e.value.label, isBold: true, isAlt: e.key.isOdd),
-                    td(e.value.note, color: slate500, isAlt: e.key.isOdd),
+                    // PDF tidak punya badge — pakai catatan versi panjang
+                    // supaya item non-THP tetap jelas di slip cetak.
+                    td(e.value.noteWithThpNotice,
+                        color: slate500, isAlt: e.key.isOdd),
                     td(_fmt(e.value.amount),
                         align: pw.TextAlign.right,
                         isBold: true,
@@ -828,7 +844,8 @@ class SalaryDetailScreen extends StatelessWidget {
               ]),
               ...deductions.asMap().entries.map((e) => pw.TableRow(children: [
                     td(e.value.label, isBold: true, isAlt: e.key.isOdd),
-                    td(e.value.note, color: slate500, isAlt: e.key.isOdd),
+                    td(e.value.noteWithThpNotice,
+                        color: slate500, isAlt: e.key.isOdd),
                     td('- ${_fmt(e.value.amount)}',
                         align: pw.TextAlign.right,
                         color: dangerColor,
@@ -1569,7 +1586,7 @@ class SalaryDetailScreen extends StatelessWidget {
                 ),
                 children: [
                   _td(comp.label, isBold: true),
-                  _td(comp.note, isMuted: true),
+                  _tdNote(comp),
                   _td(
                     isDeduction ? '- ${_fmt(comp.amount)}' : _fmt(comp.amount),
                     isDeduction: isDeduction,
@@ -1595,6 +1612,41 @@ class SalaryDetailScreen extends StatelessWidget {
               color: Colors.white,
             )),
       );
+
+  /// Kolom "Keterangan": teks catatan + badge kalau komponen ini TIDAK ikut
+  /// menambah Take Home Pay (tunjangan barang, fasilitas, uang makan).
+  /// Item-nya tetap tampil — staff berhak tahu haknya — tapi harus jelas
+  /// kenapa jumlah rincian tunjangan tidak sama dengan yang menambah THP.
+  Widget _tdNote(SalaryComponent comp) {
+    if (!comp.excludedFromThp) return _td(comp.note, isMuted: true);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (comp.note.isNotEmpty)
+            Text(comp.note,
+                style: GoogleFonts.inter(
+                    fontSize: 12, color: AppColors.slate700)),
+          if (comp.note.isNotEmpty) const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: AppColors.slate100,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: AppColors.slate200),
+            ),
+            child: Text('Di luar THP',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.slate600,
+                )),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _td(
     String text, {
@@ -1622,23 +1674,20 @@ class SalaryDetailScreen extends StatelessWidget {
 
   // ── Summary Card ─────────────────────────────────────────────
   Widget _buildSummaryCard() {
-    // BERUBAH: Hitung total kalkulasi komponen secara dinamis jika tersedia
-    int totalTunjangan = 0;
-    int totalBonus = 0;
-    int totalRevisi = 0;
-    bool hasRevisi = false;
-
-    for (var c in slip.components) {
-      final labelLower = c.label.toLowerCase();
-      if (labelLower.contains('tunjangan')) {
-        totalTunjangan += c.amount;
-      } else if (labelLower.contains('bonus')) {
-        totalBonus += c.amount;
-      } else if (labelLower.contains('revisi')) {
-        hasRevisi = true;
-        totalRevisi += c.isDeduction ? -c.amount : c.amount;
-      }
-    }
+    // Sprint 2 EPIC 9 — ringkasan ini HARUS bisa dijumlah sendiri oleh staff
+    // dan ketemu angka Take Home Pay yang sama dengan yang ditransfer:
+    //
+    //   Pendapatan Pokok − Total Potongan + Tunjangan Tunai = Take Home Pay
+    //
+    // Identitas ini persis formula server (payroll-calc.ts):
+    //   gajiNetto = (grossForTax − totalPotongan) + totalTunjanganUang
+    //
+    // Sebelumnya baris di sini memakai tebakan berdasarkan teks label
+    // (`label.contains('tunjangan')`) — meleset untuk tunjangan bernama bebas
+    // seperti "Transport"/"Sepatu Kerja", dan barisnya tidak pernah menjumlah
+    // ke Take Home Pay. Sekarang semuanya dari angka slip, bukan nama label.
+    final tunjanganTunai = slip.totalTunjanganUang;
+    final diluarThp = slip.tunjanganDiluarThp;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1657,42 +1706,47 @@ class SalaryDetailScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment
             .end, // Membantu merapikan info transfer di bagian bawah
         children: [
-          _summaryRow('Gaji Bersih', _fmt(slip.totalIncome),
-              isDeduction: false),
-
-          // BERUBAH: Menambahkan detail info tunjangan, bonus, dan revisi (jika ada)
-          if (totalTunjangan > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: _summaryRow('  • Total Tunjangan', _fmt(totalTunjangan)),
-            ),
-          if (totalBonus > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: _summaryRow('  • Total Bonus', _fmt(totalBonus)),
-            ),
-          if (hasRevisi)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: _summaryRow(
-                '  • Total Revisi',
-                totalRevisi < 0
-                    ? '- ${_fmt(totalRevisi.abs())}'
-                    : _fmt(totalRevisi),
-                isDeduction: totalRevisi < 0,
-              ),
-            ),
-
+          _summaryRow('Pendapatan Pokok', _fmt(slip.pendapatanPokok)),
           _divider(),
           _summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
               isDeduction: true),
+          if (slip.pajak > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: _summaryRow('  • PPh 21', '- ${_fmt(slip.pajak)}',
+                  isDeduction: true),
+            ),
+          if (slip.totalPotongan > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: _summaryRow(
+                  '  • Potongan lain', '- ${_fmt(slip.totalPotongan)}',
+                  isDeduction: true),
+            ),
+          _divider(),
+          _summaryRow('Tunjangan Tunai', _fmt(tunjanganTunai)),
+          // if (diluarThp > 0)
+          //   Padding(
+          //     padding: const EdgeInsets.only(top: 4),
+          //     child: Text(
+          //       'Tunjangan barang, fasilitas & uang makan senilai '
+          //       '${_fmt(diluarThp)} tampil di rincian, tetapi tidak menambah '
+          //       'Take Home Pay.',
+          //       textAlign: TextAlign.right,
+          //       style: GoogleFonts.inter(
+          //         fontSize: 10,
+          //         height: 1.35,
+          //         color: Colors.white.withOpacity(0.6),
+          //       ),
+          //     ),
+          //   ),
           _divider(),
           _summaryRow('Take Home Pay', _fmt(slip.netSalary), isTotal: true),
 
           // BERUBAH: Menambahkan info ditransfer menggunakan apa di bawah gaji bersih
           const SizedBox(height: 10),
           Text(
-            'Ditransfer via ${slip.transferBy ?? "Bank Transfer"}', // Sesuaikan parameter model Anda (misal: slip.paymentMethod / slip.transferBy)
+            'Ditransfer via ${slip.transferBy}',
             style: GoogleFonts.inter(
               fontSize: 11,
               fontWeight: FontWeight.w500,

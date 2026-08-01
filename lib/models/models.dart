@@ -576,16 +576,37 @@ class SalaryComponent {
   final int amount;
   final SalaryGroup group;
 
+  /// Sprint 2 EPIC 9: komponen ini TAMPIL di rincian tapi TIDAK ikut menambah
+  /// Take Home Pay (`gajiNetto` server). Yang masuk kategori ini:
+  ///   - tunjangan dengan `bentuk: "barang"` (kena pajak, tapi bukan uang tunai)
+  ///   - semua item Fasilitas (natura — hanya kelebihan di atas batas yang kena
+  ///     pajak, nominalnya sendiri tidak pernah ditransfer)
+  ///   - uang makan (dijumlah live dari Attendance, backend belum wire ke
+  ///     `gajiNetto`)
+  /// Dipakai UI untuk menandai baris dengan badge, supaya staff tidak bingung
+  /// kenapa jumlah rincian tunjangan lebih besar dari yang menambah THP.
+  final bool excludedFromThp;
+
   const SalaryComponent({
     required this.label,
     this.note = '',
     required this.amount,
     required this.group,
+    this.excludedFromThp = false,
   });
 
   /// Kompatibilitas dengan layar lama yang hanya mengenal "potongan atau bukan".
   bool get isDeduction =>
       group == SalaryGroup.pajak || group == SalaryGroup.potongan;
+
+  /// [note] + penjelasan eksplisit kalau komponen ini tidak menambah THP.
+  /// Dipakai di media yang tidak bisa menampilkan badge (PDF cetak slip);
+  /// di layar, badge "Di luar THP" yang membawa informasi ini.
+  String get noteWithThpNotice {
+    if (!excludedFromThp) return note;
+    const notice = 'tidak termasuk Take Home Pay';
+    return note.isEmpty ? notice : '$note — $notice';
+  }
 }
 
 class LeaveRecord {
@@ -619,6 +640,18 @@ class SalarySlip {
   final List<LeaveRecord>? leaveHistory;
   final List<LeaveRecord>? permissionHistory;
 
+  /// ANGKA TAKE HOME PAY RESMI dari server (`slip_gaji.gajiNetto`) — jumlah
+  /// yang benar-benar ditransfer HRD. JANGAN dihitung ulang di client: server
+  /// (`payroll-calc.ts`) sudah memakai formula resmi
+  /// `gajiNetto = totalPendapatan + totalTunjanganUang`, di mana
+  /// `totalPendapatan` sudah memperhitungkan PPh 21 dan potongan BPJS staff.
+  final int gajiNetto;
+
+  /// `slip_gaji.totalTunjanganUang` — HANYA tunjangan `bentuk: "uang"`, yaitu
+  /// bagian tunjangan yang benar-benar menambah [gajiNetto]. Tunjangan
+  /// `bentuk: "barang"`, Fasilitas, dan uang makan TIDAK termasuk di sini.
+  final int totalTunjanganUang;
+
   const SalarySlip({
     required this.period,
     required this.periodStart,
@@ -633,6 +666,8 @@ class SalarySlip {
     required this.permissionDays,
     required this.leaveHistory,
     required this.permissionHistory,
+    required this.gajiNetto,
+    required this.totalTunjanganUang,
   });
 
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
@@ -685,10 +720,16 @@ class SalarySlip {
         (month >= 1 && month <= 12) ? '${monthNames[month]} $year' : periodeRaw;
 
     final components = <SalaryComponent>[];
-    void add(SalaryGroup group, String label, String note, int amount) {
+    void add(SalaryGroup group, String label, String note, int amount,
+        {bool excludedFromThp = false}) {
       if (amount != 0) {
         components.add(SalaryComponent(
-            label: label, note: note, amount: amount, group: group));
+          label: label,
+          note: note,
+          amount: amount,
+          group: group,
+          excludedFromThp: excludedFromThp,
+        ));
       }
     }
 
@@ -709,35 +750,58 @@ class SalarySlip {
     // Kesehatan/Tambahan) yang backend sudah tandai DEPRECATED dan selalu
     // isi 0, jadi bagian tunjangan di slip praktis selalu kosong meskipun
     // staff punya tunjangan.
+    // Sprint 2 EPIC 9b: setiap item punya `bentuk` ("uang" | "barang") —
+    // field ini sudah lama dikirim backend tapi tidak pernah dibaca app.
+    // Tunjangan `barang` tetap kena pajak dan tetap ditampilkan, TAPI tidak
+    // pernah ikut ke `gajiNetto`/THP karena tidak pernah dicairkan tunai.
     final tunjanganRaw = j['tunjanganBreakdown'];
     if (tunjanganRaw is List) {
       for (final item in tunjanganRaw.whereType<Map>()) {
         final nama = (item['nama'] ?? 'Tunjangan').toString();
         final jumlah = (item['jumlah'] as num?)?.toInt() ?? 0;
         final periode = (item['periode'] ?? '').toString();
-        add(SalaryGroup.tunjangan, nama,
-            periode == 'harian' ? 'Dibayar per hari hadir' : '', jumlah);
+        final bentuk = (item['bentuk'] ?? 'uang').toString();
+        final isBarang = bentuk == 'barang';
+        final note = [
+          if (periode == 'harian') 'Dibayar per hari hadir',
+          if (isBarang) 'Berbentuk barang',
+        ].join(', ');
+        add(SalaryGroup.tunjangan, nama, note, jumlah,
+            excludedFromThp: isBarang);
       }
     }
 
+    // Fasilitas (natura) — hanya kelebihan di atas batas per kategori yang
+    // kena pajak (PP 55/2022 + PMK 66/2023), dan nominalnya TIDAK PERNAH
+    // masuk ke `gajiNetto`/THP.
     final fasilitasRaw = j['fasilitasBreakdown'];
     if (fasilitasRaw is List) {
       for (final item in fasilitasRaw.whereType<Map>()) {
         final kategori = (item['kategori'] ?? 'Fasilitas').toString();
         final nominal = (item['nominal'] as num?)?.toInt() ?? 0;
-        add(SalaryGroup.tunjangan, kategori, 'Fasilitas', nominal);
+        add(SalaryGroup.tunjangan, kategori, 'Fasilitas (natura)', nominal,
+            excludedFromThp: true);
       }
     }
 
     // Uang makan — dijumlahkan server dari Attendance.uangMakan per hari.
+    // Backend BELUM me-wire angka ini ke `gajiNetto` (keputusan pajaknya masih
+    // menunggu klien), jadi jujur ditandai belum termasuk THP. Kalau nanti
+    // backend memasukkannya ke `gajiNetto`, cukup hapus catatan + flag ini —
+    // angka THP-nya sendiri otomatis benar karena dibaca dari server.
     add(SalaryGroup.tunjangan, 'Uang Makan',
-        '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'));
+        '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'),
+        excludedFromThp: true);
 
     // ── Pajak & potongan ──────────────────────────────────────
     add(SalaryGroup.pajak, 'PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
     add(SalaryGroup.potongan, 'Denda Keterlambatan', '', gi('dendaTerlambat'));
     add(SalaryGroup.potongan, 'Potongan Alpha', '', gi('potonganAlpha'));
-    add(SalaryGroup.potongan, 'BPJS', '', gi('potonganBPJS'));
+    // Sprint 2 EPIC 9c: `potonganBPJS` sekarang BISA nonzero (BPJS skema split
+    // — sebagian ditanggung perusahaan, sebagian dipotong dari gaji staff).
+    // Dulu selalu 0 sehingga baris ini praktis tidak pernah tampil.
+    add(SalaryGroup.potongan, 'Potongan BPJS',
+        'BPJS bagian staff (dipotong dari gaji)', gi('potonganBPJS'));
 
     final bank = AppSession.staff?.namaBank ?? '';
 
@@ -755,6 +819,8 @@ class SalarySlip {
       permissionDays: gi('permissionDays'),
       leaveHistory: parseHistory('leaveHistory'),
       permissionHistory: parseHistory('permissionHistory'),
+      gajiNetto: gi('gajiNetto'),
+      totalTunjanganUang: gi('totalTunjanganUang'),
     );
   }
 
@@ -765,8 +831,17 @@ class SalarySlip {
   /// Pendapatan pokok: gaji pokok + bonus + lembur + THR.
   int get pendapatanPokok => _sum(SalaryGroup.pendapatanPokok);
 
-  /// Total tunjangan (termasuk fasilitas & uang makan).
+  /// Total tunjangan YANG DITAMPILKAN di rincian (termasuk tunjangan barang,
+  /// fasilitas & uang makan). Ini angka TAMPILAN — bukan angka yang menambah
+  /// Take Home Pay. Yang menambah THP hanya [totalTunjanganUang].
   int get totalTunjangan => _sum(SalaryGroup.tunjangan);
+
+  /// Bagian dari [totalTunjangan] yang TIDAK menambah Take Home Pay
+  /// (tunjangan bentuk barang + fasilitas + uang makan).
+  int get tunjanganDiluarThp {
+    final selisih = totalTunjangan - totalTunjanganUang;
+    return selisih < 0 ? 0 : selisih;
+  }
 
   /// PPh 21.
   int get pajak => _sum(SalaryGroup.pajak);
@@ -781,13 +856,29 @@ class SalarySlip {
   /// bawah gaji bersih, lalu ikut ke take home pay.
   int get gajiBersih => pendapatanPokok - pajak;
 
-  /// TAKE HOME PAY = gaji bersih + tunjangan − potongan.
-  int get takeHomePay => gajiBersih + totalTunjangan - totalPotongan;
+  /// TAKE HOME PAY = `gajiNetto` dari server, BUKAN hitung ulang di client.
+  ///
+  /// Server sudah menghitung dengan formula resmi (termasuk aturan Fasilitas &
+  /// tunjangan-barang yang tidak masuk THP, dan potongan BPJS staff kalau ada)
+  /// — app hanya MENAMPILKAN, tidak boleh menduplikasi logika ini. Setiap kali
+  /// backend mengubah formula, versi hitung-manual akan salah lagi tanpa ada
+  /// yang sadar; membaca `gajiNetto` langsung membuat app otomatis ikut benar.
+  ///
+  /// Identitas yang berlaku (bisa dipakai sanity-check):
+  ///   [pendapatanPokok] − [totalDeduction] + [totalTunjanganUang] == [gajiNetto]
+  int get takeHomePay => gajiNetto;
 
   // ── Kompatibilitas layar lama ────────────────────────────────
-  int get totalIncome => pendapatanPokok + totalTunjangan;
+
+  /// Total pendapatan yang benar-benar dibayarkan tunai: pendapatan pokok +
+  /// tunjangan bentuk uang saja (tanpa barang/fasilitas/uang makan).
+  int get totalIncome => pendapatanPokok + totalTunjanganUang;
+
+  /// Seluruh potongan = PPh 21 + denda + alpha + potongan BPJS. Sama dengan
+  /// `slip_gaji.totalPotongan` di server.
   int get totalDeduction => pajak + totalPotongan;
-  int get netSalary => takeHomePay;
+
+  int get netSalary => gajiNetto;
 }
 
 // ── Notification ──────────────────────────────────────────────
