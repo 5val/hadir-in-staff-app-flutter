@@ -287,6 +287,20 @@ class AttendanceRecord {
   final String fotoMasuk;
   final String fotoKeluar;
 
+  /// MOMEN NYATA baris absensi ini dibuat (`Attendance.createdAt`) —
+  /// yaitu detik saat tombol check-in benar-benar ditekan, menurut jam SERVER.
+  ///
+  /// Berbeda dari [checkIn] yang merupakan JAM TERCATAT ("08:05") dan bisa
+  /// saja bukan waktu sungguhan (mis. jam yang di-hardcode saat pengujian,
+  /// atau entri manual admin). Timer "waktu kerja" di layar dihitung dari
+  /// SINI supaya selalu mulai 00:00:00 tepat saat check-in, bukan melompat ke
+  /// selisih terhadap jam masuk yang tercatat.
+  final DateTime? recordedAt;
+
+  /// Terakhir kali baris ini diubah (`Attendance.updatedAt`). Dipakai sebagai
+  /// perkiraan momen check-out untuk membekukan timer setelah pulang.
+  final DateTime? lastUpdatedAt;
+
   const AttendanceRecord({
     required this.id,
     required this.date,
@@ -309,6 +323,8 @@ class AttendanceRecord {
     this.uangMakan = 0,
     this.fotoMasuk = '',
     this.fotoKeluar = '',
+    this.recordedAt,
+    this.lastUpdatedAt,
   });
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/attendance).
@@ -372,6 +388,9 @@ class AttendanceRecord {
       uangMakan: asIntN(j['uangMakan']) ?? 0,
       fotoMasuk: (j['fotoMasuk'] ?? '').toString(),
       fotoKeluar: (j['fotoKeluar'] ?? '').toString(),
+      recordedAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal(),
+      lastUpdatedAt:
+          DateTime.tryParse((j['updatedAt'] ?? '').toString())?.toLocal(),
     );
   }
 

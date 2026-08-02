@@ -1658,9 +1658,12 @@ class _HomeTabState extends State<HomeTab> {
     final hasBreak = _att.breakMinutes > 0 || _att.isOnBreak;
     final isOnBreak = _status == AttendanceProviderStatus.onBreak;
 
-    // Jam kerja tampilan. Fase 8: _workDur sudah bersih (dikurangi
-    // istirahat) dan tidak pernah negatif, jadi tampilannya mulai dari
-    // 00:00:00 saat baru check-in — bukan 24:00:00 seperti sebelumnya.
+    // Sudah check-in hari ini? Dipakai untuk status kartu "Jam Kerja".
+    final isWorking = _att.checkInTime != null;
+
+    // Jam kerja tampilan: _workDur dihitung dari MOMEN check-in (bukan jam
+    // masuk yang tercatat) dan sudah dikurangi istirahat, jadi mulai dari
+    // 0j 0m tepat saat check-in lalu naik dari situ.
     final workHours = _workDur.inHours;
     final workMins = _workDur.inMinutes % 60;
     final workLabel = _att.checkInTime == null
@@ -1791,24 +1794,27 @@ class _HomeTabState extends State<HomeTab> {
                       : AppColors.slate100),
             ),
             // ── Jam Kerja ─────────────────────────────────
+            //
+            // Status kartu ini bergantung pada SUDAH CHECK-IN atau belum,
+            // bukan pada `_workDur > 0`. Sejak timer dihitung dari detik 0,
+            // menit pertama setelah check-in bernilai 0 menit — dengan syarat
+            // lama kartunya akan tetap berbunyi "Belum mulai bekerja" padahal
+            // staff sudah masuk.
             _TimelineGridCard(
               icon: Icons.timer_rounded,
-              iconColor: _workDur.inMinutes > 0
+              iconColor: isWorking
                   ? AppColors.brandCyanDark
                   : AppColors.slate400,
-              iconBg: _workDur.inMinutes > 0
+              iconBg: isWorking
                   ? AppColors.brandCyan.withOpacity(0.15)
                   : AppColors.slate100,
               label: 'Jam Kerja',
               value: workLabel,
-              sub: _workDur.inMinutes > 0
-                  ? 'Waktu kerja aktif'
-                  : 'Belum mulai bekerja',
-              badge: _workDur.inMinutes > 0 ? 'LIVE' : '-',
-              badgeColor: _workDur.inMinutes > 0
-                  ? AppColors.brandCyanDark
-                  : AppColors.slate400,
-              badgeBg: _workDur.inMinutes > 0
+              sub: isWorking ? 'Waktu kerja aktif' : 'Belum mulai bekerja',
+              badge: isWorking ? 'LIVE' : '-',
+              badgeColor:
+                  isWorking ? AppColors.brandCyanDark : AppColors.slate400,
+              badgeBg: isWorking
                   ? AppColors.brandCyan.withOpacity(0.12)
                   : AppColors.slate100,
             ),

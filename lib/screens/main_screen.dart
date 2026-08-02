@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../services/attendance_provider.dart'; // ← shared state
 import '../services/attendance_service.dart';
 import '../services/profile_service.dart';
+import '../services/document_service.dart';
 import '../services/api_client.dart';
 import '../services/location_service.dart';
 import '../services/session_service.dart';
@@ -18,6 +19,7 @@ import 'leave_tab.dart';
 import 'salary_screen.dart';
 import 'account_tab.dart';
 import 'manager_dashboard_tab.dart';
+import 'onboarding_documents_screen.dart';
 
 /// Bottom-nav wrapper — Home | Leave & Time Off | [FAB] | Salary | Account
 ///
@@ -48,6 +50,10 @@ class _MainScreenState extends State<MainScreen> {
   bool _loadingProfile = true;
   String? _profileError;
 
+  /// Gerbang onboarding: true = dokumen wajib belum lengkap, app belum boleh
+  /// dibuka. Lihat [_hydrateProfile].
+  bool _needsOnboarding = false;
+
   bool get _isAdmin => AppSession.isAdmin;
 
   @override
@@ -68,6 +74,38 @@ class _MainScreenState extends State<MainScreen> {
     });
     try {
       await ProfileService.loadAndCache();
+
+      // ── GERBANG ONBOARDING ───────────────────────────────────────────
+      //
+      // BUGFIX: gerbang ini dulu HANYA dipasang di login_screen, sehingga
+      // setiap jalur masuk lain melewatinya begitu saja:
+      //   • buka app dengan sesi masih aktif (auth_wrapper → MainScreen),
+      //   • buka kunci dengan passcode (passcode_unlock_screen → MainScreen),
+      //   • baru selesai membuat passcode (passcode_unlock_screen → MainScreen).
+      // Akibatnya staff yang keluar app di tengah layar unggah dokumen bisa
+      // masuk penuh ke aplikasi hanya dengan mengetik passcode-nya.
+      //
+      // Sekarang pemeriksaannya di sini — satu-satunya pintu menuju isi app —
+      // jadi jalur masuk mana pun (termasuk yang dibuat nanti) ikut tergerbang.
+      // Aturannya tetap milik server (`completed`): dokumen WAJIB harus sudah
+      // pernah diunggah. Penolakan HRD tidak mengunci app lagi, hanya memicu
+      // notifikasi untuk mengunggah ulang.
+      var blocked = false;
+      try {
+        blocked = !(await DocumentService.onboardingStatus()).completed;
+      } on ApiException {
+        // Gagal memeriksa (mis. jaringan) bukan alasan mengunci staff di luar
+        // app — biarkan masuk, pemeriksaan diulang saat app dibuka lagi.
+        blocked = false;
+      }
+      if (blocked) {
+        if (!mounted) return;
+        setState(() {
+          _loadingProfile = false;
+          _needsOnboarding = true;
+        });
+        return;
+      }
 
       // Fase 8: muat kalender kerja (hari libur + jam shift) dari database,
       // lalu hidrasi AttendanceRules. Ini yang mengganti konstanta hardcode
@@ -309,6 +347,13 @@ class _MainScreenState extends State<MainScreen> {
         onRetry: _hydrateProfile,
         onLogout: _logout,
       );
+    }
+
+    // Dokumen wajib belum lengkap → app belum boleh dibuka. Ditampilkan
+    // sebagai layar, bukan navigasi, supaya tidak ada route MainScreen
+    // "setengah terbuka" yang bisa dikembalikan dengan tombol back.
+    if (_needsOnboarding) {
+      return const OnboardingDocumentsScreen();
     }
 
     // Admin: tampilan khusus (hanya dashboard, tidak ada FAB)

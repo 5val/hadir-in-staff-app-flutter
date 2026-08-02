@@ -6,6 +6,7 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/auth_service.dart';
+import '../services/document_service.dart';
 import '../services/api_client.dart';
 import 'login_screen.dart';
 import 'account_info_screen.dart';
@@ -27,10 +28,26 @@ class _AccountTabState extends State<AccountTab> {
   bool _notifEnabled = true;
   String _soundNotifMode = 'Sound';
 
+  /// Status dokumen onboarding (pas foto, KTP, BPJS, NPWP) milik staff ini.
+  /// Dipakai untuk memberi tahu bila ada dokumen yang DITOLAK admin/manajer
+  /// dan perlu diunggah ulang. Best-effort: gagal memuat tidak menampilkan
+  /// apa-apa, tidak menampilkan peringatan palsu.
+  OnboardingStatus? _docStatus;
+
+  /// Dokumen yang ditolak HRD dan menunggu revisi.
+  List<OnboardingDocument> get _rejectedDocs =>
+      _docStatus?.documents.where((d) => d.isRejected).toList() ?? const [];
+
+  /// Dokumen wajib yang belum pernah diunggah sama sekali.
+  List<OnboardingDocument> get _missingRequiredDocs =>
+      _docStatus?.requiredDocuments.where((d) => !d.submitted).toList() ??
+      const [];
+
   @override
   void initState() {
     super.initState();
     _loadSoundNotif();
+    _loadDocStatus();
   }
 
   Future<void> _loadSoundNotif() async {
@@ -38,6 +55,42 @@ class _AccountTabState extends State<AccountTab> {
     setState(() {
       _soundNotifMode = mode;
     });
+  }
+
+  Future<void> _loadDocStatus() async {
+    try {
+      final status = await DocumentService.onboardingStatus();
+      if (!mounted) return;
+      setState(() => _docStatus = status);
+    } on ApiException {
+      // Diamkan — menu tetap bisa dibuka, hanya badge-nya yang tidak muncul.
+    }
+  }
+
+  /// Ringkasan status dokumen untuk baris menu.
+  String get _documentsSubtitle {
+    if (_docStatus == null) return 'Pas foto, KTP, BPJS, NPWP';
+    if (_rejectedDocs.isNotEmpty) {
+      final nama = _rejectedDocs.map((d) => d.label).join(', ');
+      return '$nama ditolak — perlu diunggah ulang';
+    }
+    if (_missingRequiredDocs.isNotEmpty) {
+      return '${_missingRequiredDocs.length} dokumen wajib belum diunggah';
+    }
+    return 'Pas foto, KTP, BPJS, NPWP';
+  }
+
+  /// Buka layar dokumen, lalu segarkan badge setelah kembali (staff mungkin
+  /// baru saja mengunggah ulang dokumen yang ditolak).
+  Future<void> _openDocuments() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const OnboardingDocumentsScreen(manageMode: true),
+      ),
+    );
+    if (!mounted) return;
+    _loadDocStatus();
   }
 
   Future<void> _logout() async {
@@ -112,6 +165,17 @@ class _AccountTabState extends State<AccountTab> {
                   _buildProfileSection(),
                   const SizedBox(height: 20),
 
+                  // ── Notifikasi dokumen ditolak ────────
+                  // Muncul hanya bila admin/manajer menolak salah satu
+                  // dokumen. Backend sudah membuat notifikasi
+                  // `document_rejected` di inbox; kartu ini mengangkatnya ke
+                  // halaman Profile supaya tidak terlewat, lengkap dengan
+                  // alasan penolakannya dan jalan pintas untuk revisi.
+                  if (_rejectedDocs.isNotEmpty) ...[
+                    _buildRejectedDocsAlert(),
+                    const SizedBox(height: 20),
+                  ],
+
                   // ── Account Section ───────────────────
                   _buildSection(
                     title: 'Akun',
@@ -141,14 +205,16 @@ class _AccountTabState extends State<AccountTab> {
                         _MenuItem(
                           icon: Icons.folder_shared_outlined,
                           label: 'Dokumen Saya',
-                          subtitle: 'Pas foto, KTP, BPJS, NPWP',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const OnboardingDocumentsScreen(
-                                  manageMode: true),
-                            ),
-                          ),
+                          subtitle: _documentsSubtitle,
+                          // Badge merah = ada dokumen yang ditolak HRD dan
+                          // harus diunggah ulang.
+                          trailing: _rejectedDocs.isEmpty
+                              ? null
+                              : _CountBadge(
+                                  count: _rejectedDocs.length,
+                                  label: 'DITOLAK',
+                                ),
+                          onTap: _openDocuments,
                         ),
                       if (user.role != UserRole.admin)
                         _MenuItem(
@@ -497,6 +563,88 @@ class _AccountTabState extends State<AccountTab> {
   }
 
   // ── Section Builder ───────────────────────────────────────
+  // ── Kartu peringatan dokumen ditolak ──────────────────────
+  Widget _buildRejectedDocsAlert() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.report_problem_rounded,
+                  color: AppColors.danger, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _rejectedDocs.length == 1
+                      ? 'Dokumen ditolak, perlu diunggah ulang'
+                      : '${_rejectedDocs.length} dokumen ditolak, perlu diunggah ulang',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.danger),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Alasan penolakan per dokumen, apa adanya dari catatan HRD.
+          ..._rejectedDocs.map(
+            (d) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 5, right: 8),
+                    width: 5,
+                    height: 5,
+                    decoration: const BoxDecoration(
+                        color: AppColors.danger, shape: BoxShape.circle),
+                  ),
+                  Expanded(
+                    child: Text(
+                      (d.catatanAdmin ?? '').isEmpty
+                          ? d.label
+                          : '${d.label} — ${d.catatanAdmin}',
+                      style: GoogleFonts.inter(
+                          fontSize: 11, color: AppColors.slate700, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            width: double.infinity,
+            height: 38,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: _openDocuments,
+              icon: const Icon(Icons.file_upload_outlined, size: 16),
+              label: Text('Unggah Ulang Sekarang',
+                  style: GoogleFonts.inter(
+                      fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSection({
     required String title,
     required IconData icon,
@@ -970,6 +1118,31 @@ class _MenuItem {
     required this.onTap,
     this.showDivider = true,
   });
+}
+
+/// Lencana kecil merah untuk baris menu (mis. "2 DITOLAK").
+class _CountBadge extends StatelessWidget {
+  final int count;
+  final String label;
+
+  const _CountBadge({required this.count, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.danger,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text('$count $label',
+          style: GoogleFonts.inter(
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: 0.5)),
+    );
+  }
 }
 
 class _StatChip extends StatelessWidget {

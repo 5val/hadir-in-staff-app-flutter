@@ -131,15 +131,34 @@ class AttendanceProvider extends ChangeNotifier {
 
   /// Durasi kerja bersih yang berjalan (sudah dikurangi istirahat).
   ///
-  /// Fase 8 — memperbaiki "jam kerja dimulai dari 24.00.00": sebelumnya
-  /// HomeTab menghitung `now - checkInTime` mentah tanpa memotong istirahat,
-  /// dan `AttendanceRules.normalCheckoutHour` yang bernilai 24 membuat
-  /// perhitungan sisa jam ikut ngaco. Nilai di bawah tidak pernah negatif,
-  /// jadi tampilannya mulai dari 00:00:00 saat baru check-in.
+  /// Titik nolnya adalah MOMEN NYATA check-in (`Attendance.createdAt`, jam
+  /// server) — BUKAN jam masuk yang tercatat (`checkIn` = "08:05").
+  ///
+  /// Kenapa: dua angka itu tidak selalu sama. Jam tercatat bisa berupa jam
+  /// yang di-hardcode saat pengujian, entri manual admin, atau jam server yang
+  /// berbeda beberapa menit dari jam HP. Dulu timer dihitung
+  /// `now - jamMasukTercatat`, sehingga begitu selesai check-in angkanya
+  /// langsung meloncat ke selisih jam itu (mis. "06:32:10") alih-alih mulai
+  /// dari 00:00:00. Sekarang hitungannya benar-benar dari detik 0 saat tombol
+  /// check-in ditekan, dan tetap benar walau app ditutup lalu dibuka lagi
+  /// karena patokannya tersimpan di database, bukan di memori app.
+  ///
+  /// Setelah check-out timer dibekukan memakai `updatedAt` (momen baris ini
+  /// terakhir diubah = momen check-out). Ini angka TAMPILAN; jam kerja resmi
+  /// untuk penggajian tetap dihitung backend dari `checkIn`/`checkOut`.
   Duration get workDuration {
-    final start = _checkInTime;
+    final rec = _today;
+    if (rec == null || rec.checkIn == null) return Duration.zero;
+
+    // Fallback ke jam masuk tercatat hanya bila `createdAt` tidak terkirim
+    // (mis. record lama / entri manual admin).
+    final start = rec.recordedAt ?? _checkInTime;
     if (start == null) return Duration.zero;
-    final end = _checkOutTime ?? DateTime.now();
+
+    final end = _checkOutTime != null
+        ? (rec.lastUpdatedAt ?? DateTime.now())
+        : DateTime.now();
+
     final gross = end.difference(start);
     final net = gross - currentBreakDuration;
     return net.isNegative ? Duration.zero : net;
