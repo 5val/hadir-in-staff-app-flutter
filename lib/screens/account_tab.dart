@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter/src/scheduler/binding.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
@@ -173,6 +175,18 @@ class _AccountTabState extends State<AccountTab> {
                   // alasan penolakannya dan jalan pintas untuk revisi.
                   if (_rejectedDocs.isNotEmpty) ...[
                     _buildRejectedDocsAlert(),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // ── Hubungi Admin ──────────────────────
+                  // Sprint 2 OTP/auth overhaul (Piece 4): staff tidak lagi
+                  // bisa ganti nomor HP terdaftar sendiri di app — kalau
+                  // butuh, harus lewat admin office. `kontakAdminPhone`
+                  // (office-level, diisi HRD di Portal Office) ditampilkan
+                  // di sini. Disembunyikan total bila HRD belum mengisinya
+                  // (bukan status error/kosong yang terlihat rusak).
+                  if ((AppSession.staff?.kontakAdminPhone ?? '').isNotEmpty) ...[
+                    _buildContactAdminCard(AppSession.staff!.kontakAdminPhone),
                     const SizedBox(height: 20),
                   ],
 
@@ -638,6 +652,143 @@ class _AccountTabState extends State<AccountTab> {
               label: Text('Unggah Ulang Sekarang',
                   style: GoogleFonts.inter(
                       fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Kartu "Hubungi Admin" ──────────────────────────────────
+  //
+  // Sprint 2 OTP/auth overhaul: tidak ada endpoint self-service untuk staff
+  // mengganti nomor HP-nya sendiri (hanya verifikasi pertama kali oleh
+  // admin) — kartu ini menjelaskan kenapa & memberi jalan pintas kontak.
+  //
+  // Buka WhatsApp/dialer beneran lewat `url_launcher`. Kalau gagal (mis. WA
+  // tidak terinstal), fallback ke salin nomor ke clipboard supaya staff
+  // tetap punya cara pakai nomornya.
+  String _normalizeToWaNumber(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('62')) return digits;
+    if (digits.startsWith('0')) return '62${digits.substring(1)}';
+    return '62$digits';
+  }
+
+  Future<void> _copyPhoneFallback(String phone) async {
+    await Clipboard.setData(ClipboardData(text: phone));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Tidak bisa membuka aplikasi — nomor ($phone) disalin'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _launchWhatsApp(String phone) async {
+    final uri = Uri.parse('https://wa.me/${_normalizeToWaNumber(phone)}');
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok) await _copyPhoneFallback(phone);
+  }
+
+  Future<void> _launchDial(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone);
+    final ok = await launchUrl(uri);
+    if (!ok) await _copyPhoneFallback(phone);
+  }
+
+  Widget _buildContactAdminCard(String phone) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.brandCyan.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.brandCyanDark.withOpacity(0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.brandCyanDark.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.support_agent_rounded,
+                color: AppColors.brandCyanDark, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Ganti nomor HP terdaftar? Hubungi admin',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.slate900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Nomor HP yang sudah terverifikasi hanya bisa diganti oleh admin kantor Anda.',
+                  style: GoogleFonts.inter(
+                      fontSize: 11, color: AppColors.slate700, height: 1.4),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  phone,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.brandCyanDark,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _launchWhatsApp(phone),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.brandCyanDark,
+                          side:
+                              BorderSide(color: AppColors.brandCyanDark.withOpacity(0.4)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.chat_rounded, size: 15),
+                        label: Text('WhatsApp',
+                            style: GoogleFonts.inter(
+                                fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _launchDial(phone),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.brandCyanDark,
+                          side:
+                              BorderSide(color: AppColors.brandCyanDark.withOpacity(0.4)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.call_rounded, size: 15),
+                        label: Text('Telepon',
+                            style: GoogleFonts.inter(
+                                fontSize: 12, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

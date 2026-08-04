@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
-import 'otp_verification_screen.dart';
 
 class AccountInfoScreen extends StatefulWidget {
   const AccountInfoScreen({super.key});
@@ -33,24 +32,15 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     super.dispose();
   }
 
+  // Sprint 2 OTP/auth overhaul (Piece 4): nomor HP terverifikasi TIDAK BISA
+  // diubah sendiri oleh staff di app lagi — satu-satunya jalan resmi adalah
+  // lewat admin office (lihat kartu "Hubungi Admin" di tab Akun). Field
+  // nomor HP di layar ini sekarang read-only; alur OTP-verifikasi-nomor-baru
+  // yang dulu ada di sini (lewat `OtpVerificationScreen`) sudah dihapus.
   void _saveChanges() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final newPhone = _phoneCtrl.text.trim();
     final newEmail = _emailCtrl.text.trim();
-    final currentPhone = AppSession.currentUser.phoneNumber;
-
-    // Check if phone number is already used by someone else
-    final existingUser = AppSession.findUserByPhone(newPhone);
-    if (existingUser != null && existingUser.id != AppSession.currentUser.id) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Nomor telepon sudah terpakai!'),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      return;
-    }
 
     setState(() {
       _isSaving = true;
@@ -64,26 +54,14 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
       _isSaving = false;
     });
 
-    if (newPhone != currentPhone) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => OtpVerificationScreen(
-            newPhone: newPhone,
-            newEmail: newEmail,
-          ),
-        ),
-      );
-    } else {
-      AppSession.updateEmail(newEmail);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profil berhasil diperbarui!'),
-          backgroundColor: AppColors.brandNavy,
-        ),
-      );
-      Navigator.pop(context);
-    }
+    AppSession.updateEmail(newEmail);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Profil berhasil diperbarui!'),
+        backgroundColor: AppColors.brandNavy,
+      ),
+    );
+    Navigator.pop(context);
   }
 
   @override
@@ -218,23 +196,28 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                       const SizedBox(height: 16),
                       Text('Nomor Telepon (WhatsApp)', style: AppText.label),
                       const SizedBox(height: 6),
+                      // Sprint 2 OTP/auth overhaul: staff tidak lagi bisa
+                      // ganti nomor HP terverifikasi sendiri — field ini
+                      // read-only, hubungi admin office bila perlu diubah
+                      // (lihat kartu "Hubungi Admin" di tab Akun).
                       TextFormField(
                         controller: _phoneCtrl,
+                        readOnly: true,
+                        enabled: false,
                         keyboardType: TextInputType.phone,
-                        style: const TextStyle(color: AppColors.slate900),
+                        style: const TextStyle(color: AppColors.slate600),
                         decoration: const InputDecoration(
                           hintText: 'Masukkan nomor telepon',
                           prefixIcon: Icon(Icons.phone_android_outlined),
+                          suffixIcon: Icon(Icons.lock_outline_rounded,
+                              size: 16, color: AppColors.slate400),
                         ),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Nomor telepon wajib diisi';
-                          }
-                          if (v.trim().length < 9) {
-                            return 'Nomor telepon tidak valid';
-                          }
-                          return null;
-                        },
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Nomor HP hanya bisa diubah oleh admin kantor Anda.',
+                        style: GoogleFonts.inter(
+                            fontSize: 11, color: AppColors.slate400),
                       ),
                     ],
                   ),

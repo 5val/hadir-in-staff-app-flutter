@@ -28,6 +28,8 @@ dependencies:
   # Fase 8: pilih file/foto untuk upload dokumen onboarding
   # (pas foto / KTP / BPJS / NPWP).
   image_picker: ^1.1.2
+  # Sprint 2 OTP/auth overhaul: buka WhatsApp/dialer dari kartu "Hubungi Admin".
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

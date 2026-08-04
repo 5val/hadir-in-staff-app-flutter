@@ -804,13 +804,12 @@ class SalarySlip {
     }
 
     // Uang makan — dijumlahkan server dari Attendance.uangMakan per hari.
-    // Backend BELUM me-wire angka ini ke `gajiNetto` (keputusan pajaknya masih
-    // menunggu klien), jadi jujur ditandai belum termasuk THP. Kalau nanti
-    // backend memasukkannya ke `gajiNetto`, cukup hapus catatan + flag ini —
-    // angka THP-nya sendiri otomatis benar karena dibaca dari server.
+    // Sejak 2026-08-03 backend sudah me-wire angka ini ke `gajiNetto`
+    // (PMK 66/2023: tunjangan berbentuk uang adalah objek PPh21, kena pajak
+    // dan ikut Take Home Pay, sama seperti Tunjangan tunai lainnya) — jadi
+    // TIDAK ditandai excludedFromThp lagi.
     add(SalaryGroup.tunjangan, 'Uang Makan',
-        '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'),
-        excludedFromThp: true);
+        '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'));
 
     // ── Pajak & potongan ──────────────────────────────────────
     add(SalaryGroup.pajak, 'PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
@@ -1404,6 +1403,11 @@ class StaffProfile {
   final double? lokasiLongitude;
   final int lokasiRadius;
 
+  // Sprint 2 OTP/auth overhaul: nomor kontak admin office (staff tidak lagi
+  // bisa ganti nomor HP sendiri — arahkan ke admin lewat nomor ini). Kosong
+  // bila HRD belum mengisinya di Portal Office.
+  final String kontakAdminPhone;
+
   const StaffProfile({
     required this.id,
     required this.nama,
@@ -1432,6 +1436,7 @@ class StaffProfile {
     this.lokasiLatitude,
     this.lokasiLongitude,
     this.lokasiRadius = 100,
+    this.kontakAdminPhone = '',
   });
 
   factory StaffProfile.fromJson(Map<String, dynamic> j) {
@@ -1441,6 +1446,7 @@ class StaffProfile {
     final jabatan = rel('jabatan');
     final shift = rel('shift');
     final lokasi = rel('lokasi');
+    final office = rel('office');
     int asInt(dynamic v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
 
     return StaffProfile(
@@ -1471,6 +1477,7 @@ class StaffProfile {
       lokasiLatitude: (lokasi['latitude'] as num?)?.toDouble(),
       lokasiLongitude: (lokasi['longitude'] as num?)?.toDouble(),
       lokasiRadius: asInt(lokasi['radius']) == 0 ? 100 : asInt(lokasi['radius']),
+      kontakAdminPhone: (office['kontakAdminPhone'] ?? '').toString(),
     );
   }
 

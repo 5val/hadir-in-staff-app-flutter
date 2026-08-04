@@ -166,14 +166,14 @@ void main() {
       expect(fasilitas.excludedFromThp, isTrue);
     });
 
-    test('uang makan tampil tapi ditandai belum masuk THP', () {
+    test('uang makan tampil dan TIDAK ditandai di luar THP', () {
       final slip = SalarySlip.fromApi(_slipPayload());
       final uangMakan =
           slip.components.firstWhere((c) => c.label == 'Uang Makan');
 
       expect(uangMakan.amount, 300000);
       expect(uangMakan.note, contains('15 hari'));
-      expect(uangMakan.excludedFromThp, isTrue);
+      expect(uangMakan.excludedFromThp, isFalse);
     });
 
     test('tunjanganDiluarThp = barang + fasilitas + uang makan', () {

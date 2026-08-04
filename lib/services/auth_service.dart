@@ -2,24 +2,48 @@ import 'api_client.dart';
 import 'session_service.dart';
 
 /// Hasil permintaan OTP (langkah pertama login).
+///
+/// Sprint 2 OTP/auth overhaul (2026-08-03): OTP sekarang dikirim lewat EMAIL,
+/// bukan WhatsApp lagi (`waDelivered` di respons lama berganti nama jadi
+/// [delivered], dan field [email] baru ditambahkan — lihat
+/// `docs/api-contracts/sprint2.md` backend, bagian "OTP/auth overhaul
+/// dispatch").
 class OtpRequestResult {
   final String phone;
+
+  /// Alamat email tujuan pengiriman kode OTP (`Staff.email`, selalu ada).
+  final String email;
+
   final int expiresInMinutes;
 
-  /// Kode OTP versi development (dikirim backend saat NODE_ENV != production).
-  /// Di produksi bernilai null — OTP dikirim lewat WhatsApp/SMS/email.
+  /// true bila email OTP berhasil dikirim server. false hanya mungkin di
+  /// non-production (dev/staging) — di production, gagal kirim membuat
+  /// request ini melempar [ApiException] (503) alih-alih mengembalikan
+  /// false.
+  final bool delivered;
+
+  /// Kode OTP versi development (dikirim backend saat NODE_ENV != production
+  /// DAN `!delivered`). Di produksi selalu null.
   final String? devCode;
+
+  final String message;
 
   OtpRequestResult({
     required this.phone,
+    required this.email,
     required this.expiresInMinutes,
+    required this.delivered,
     this.devCode,
+    this.message = '',
   });
 
   factory OtpRequestResult.fromMap(Map<String, dynamic> m) => OtpRequestResult(
         phone: (m['phone'] ?? '').toString(),
+        email: (m['email'] ?? '').toString(),
         expiresInMinutes: (m['expiresInMinutes'] as num?)?.toInt() ?? 10,
+        delivered: m['delivered'] == true,
         devCode: m['devCode']?.toString(),
+        message: (m['message'] ?? '').toString(),
       );
 }
 
@@ -110,23 +134,45 @@ class AuthService {
     return result.staff;
   }
 
+  /// Bentuk body request `set-passcode` — diekstrak jadi fungsi murni
+  /// (tanpa I/O) supaya gampang diuji tanpa mocking network. [passcodeLama]
+  /// SENGAJA tidak pernah dikirim (bahkan sebagai key kosong) bila null/
+  /// kosong — Piece 3 (Sprint 2 OTP/auth overhaul): backend membedakan
+  /// "field tidak ada" dari alur lupa-passcode (token verify-otp segar boleh
+  /// set passcode baru tanpa passcode lama) dengan "field ada tapi salah"
+  /// dari alur Ubah Passcode biasa (token sesi lama, passcode lama WAJIB
+  /// benar).
+  static Map<String, dynamic> buildSetPasscodeBody({
+    required String passcode,
+    String? passcodeLama,
+  }) =>
+      {
+        'passcode': passcode,
+        if (passcodeLama != null && passcodeLama.isNotEmpty)
+          'passcodeLama': passcodeLama,
+      };
+
   /// Simpan/ubah passcode di server. [passcodeLama] wajib bila staff sudah
-  /// punya passcode sebelumnya (dipakai layar "Ubah Passcode").
+  /// punya passcode sebelumnya (dipakai layar "Ubah Passcode") — KECUALI
+  /// token yang dipakai berasal dari verify-otp yang masih segar (jalur
+  /// "Lupa Passcode?"), di mana [passcodeLama] harus TIDAK diisi sama sekali
+  /// (lihat [buildSetPasscodeBody]).
   static Future<void> setPasscode({
     required String passcode,
     String? passcodeLama,
   }) async {
     await ApiClient.instance.post(
       '/mobile/auth/staff/set-passcode',
-      body: {
-        'passcode': passcode,
-        if (passcodeLama != null && passcodeLama.isNotEmpty)
-          'passcodeLama': passcodeLama,
-      },
+      body: buildSetPasscodeBody(passcode: passcode, passcodeLama: passcodeLama),
     );
   }
 
-  /// Langkah 1 (alur staff baru / lupa passcode) — minta OTP via WhatsApp.
+  /// Langkah 1 (alur staff baru / lupa passcode) — minta OTP via email.
+  ///
+  /// Server menegakkan cooldown 60 detik antar-permintaan dan maksimum 3
+  /// permintaan per 30 menit — pelanggaran keduanya melempar [ApiException]
+  /// dengan `statusCode == 429` dan pesan Indonesia siap tampil (lihat
+  /// `docs/api-contracts/sprint2.md`).
   static Future<OtpRequestResult> requestOtp(String phone) async {
     final res = await ApiClient.instance.post(
       '/mobile/auth/staff/request-otp',
@@ -136,8 +182,24 @@ class AuthService {
     return OtpRequestResult.fromMap(res.asMap);
   }
 
+  /// Coba ekstrak jumlah menit dari pesan lockout/rate-limit backend (mis.
+  /// "...Coba lagi dalam 15 menit." / "...Coba lagi setelah 30 menit.").
+  /// Backend TIDAK mengirim field terstruktur untuk sisa waktu — hanya teks
+  /// pesan siap tampil — jadi ini best-effort untuk hitung mundur di UI.
+  /// Null bila polanya tidak ditemukan; pemanggil harus tetap menampilkan
+  /// [message] asli sebagai fallback.
+  static int? parseLockoutMinutes(String message) {
+    final match = RegExp(r'(\d+)\s*menit').firstMatch(message);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
+
   /// Langkah 2 — verifikasi OTP. Bila valid, token & id staff disimpan ke
   /// [SessionService] dan data staff dikembalikan.
+  ///
+  /// Server mengunci akun 15 menit setelah 3 kali kode salah — respons
+  /// tersebut punya `statusCode == 429` (berbeda dari 400 "kode salah, masih
+  /// ada sisa percobaan"), begitu juga saat lockout itu masih aktif.
   static Future<LoginResult> verifyOtp({
     required String phone,
     required String code,

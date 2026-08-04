@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
 import '../services/session_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_client.dart';
@@ -30,10 +29,23 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
   /// Nomor HP staff — dikirim bersama passcode ke server saat verifikasi.
   /// Fase 8: passcode itu sendiri TIDAK pernah lagi disimpan/dibaca di HP.
   String _phone = "";
-  String _recoveryMethod = ""; // "WA" or "Gmail"
   String _enteredOtp = "";
   String _newPasscode = "";
   String _confirmNewPasscode = "";
+
+  // Sprint 2 OTP/auth overhaul: OTP pemulihan sekarang SELALU dikirim lewat
+  // email (backend tidak lagi punya pilihan channel WA/Gmail) — email tujuan
+  // dari respons `request-otp`, ditampilkan di subtitle.
+  String _otpEmail = "";
+
+  // Cooldown kirim ulang 60 detik (sama seperti langkah OTP login utama di
+  // `login_screen.dart`) — server juga menegakkan ini sendiri (429 bila
+  // dilanggar), ini cuma UX supaya tombol tidak langsung ditekan berkali-kali.
+  int _resendSeconds = 0;
+  Timer? _resendTimer;
+
+  // Pesan permanen saat batas kirim ulang (maks 3x/30 menit) tercapai.
+  String? _resendBlockedMessage;
 
   bool _isLoading = false;
   String _errorMessage = "";
@@ -50,8 +62,8 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
   bool _showBannerNotif = false;
   String _bannerTitle = "";
   String _bannerMessage = "";
-  Color _bannerColor = const Color(0xFF25D366);
-  IconData _bannerIcon = Icons.phone_enabled_rounded;
+  Color _bannerColor = AppColors.brandNavy;
+  IconData _bannerIcon = Icons.mail_outline_rounded;
   late AnimationController _bannerCtrl;
   late Animation<Offset> _bannerSlide;
 
@@ -99,7 +111,25 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     _shakeCtrl.dispose();
     _mascotCtrl.dispose();
     _bannerCtrl.dispose();
+    _resendTimer?.cancel();
     super.dispose();
+  }
+
+  void _startResendTimer() {
+    _resendSeconds = 60;
+    _resendTimer?.cancel();
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_resendSeconds <= 1) {
+        timer.cancel();
+        setState(() => _resendSeconds = 0);
+      } else {
+        setState(() => _resendSeconds--);
+      }
+    });
   }
 
   void _showNotification(
@@ -237,16 +267,22 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     }
   }
 
-  /// Kirim OTP pemulihan ke WhatsApp staff (endpoint OTP login yang sama).
+  /// Kirim (atau kirim ulang) OTP pemulihan ke email staff — endpoint OTP
+  /// login yang sama dipakai lagi di sini.
   ///
   /// Fase 8: kode `654321` yang dulu di-hardcode di app — dan ditampilkan
   /// sendiri lewat notifikasi palsu — dihapus. Kodenya sekarang dibuat
-  /// server dan dikirim ke WhatsApp asli; app tidak pernah mengetahuinya.
-  void _sendRecoveryOtp(String method) async {
+  /// server dan dikirim asli; app tidak pernah mengetahuinya (kecuali
+  /// `devCode` di lingkungan dev/staging).
+  ///
+  /// Sprint 2 OTP/auth overhaul: backend hanya punya SATU channel (email) —
+  /// pilihan WA/Gmail yang dulu ada di sini sudah dihapus.
+  void _sendRecoveryOtp() async {
+    if (_resendSeconds > 0 || _resendBlockedMessage != null) return;
     setState(() {
       _isLoading = true;
-      _recoveryMethod = method;
       _enteredOtp = "";
+      _errorMessage = "";
     });
 
     try {
@@ -254,22 +290,32 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _otpEmail = result.email;
+        _resendBlockedMessage = null;
         _currentStep = UnlockStep.verifyOtp;
       });
+      _startResendTimer();
 
       _showNotification(
-        "WhatsApp • Hadir-In Recovery",
+        "Email • Hadir-In Recovery",
         result.devCode != null && result.devCode!.isNotEmpty
             ? "[Hadir-In] Kode pemulihan Anda: ${result.devCode}. Jangan berikan kepada siapa pun."
-            : "Kode pemulihan telah dikirim ke WhatsApp Anda.",
-        const Color(0xFF25D366),
-        Icons.phone_enabled_rounded,
+            : "Kode pemulihan telah dikirim ke email Anda: ${result.email}.",
+        AppColors.brandNavy,
+        Icons.mail_outline_rounded,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = e.message;
+        if (e.statusCode == 429) {
+          // Batas kirim ulang (3x/30 menit) TERCAPAI, atau akun sedang
+          // lockout salah-kode (blok request-otp juga) — tampilkan pesan
+          // asli backend, jangan diam saja.
+          _resendBlockedMessage = e.message;
+        } else {
+          _errorMessage = e.message;
+        }
       });
     }
   }
@@ -342,6 +388,11 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     );
   }
 
+  /// Konfirmasi sebelum mengirim OTP pemulihan.
+  ///
+  /// Sprint 2 OTP/auth overhaul: backend sekarang cuma punya satu channel
+  /// (email) — pilihan WA/Gmail yang dulu ada di sini sudah dihapus karena
+  /// tidak lagi mencerminkan cara kerja backend.
   void _showRecoveryOptions() {
     showModalBottomSheet(
       context: context,
@@ -366,58 +417,34 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
             ),
             const SizedBox(height: 16),
             Text(
-              "Pilih Metode Pemulihan",
+              "Lupa Passcode?",
               style: AppText.headline3.copyWith(color: AppColors.slate900),
             ),
             const SizedBox(height: 4),
             Text(
-              "Pilih saluran pengiriman kode OTP untuk mereset passcode Anda",
+              "Kami akan kirim kode OTP 6 digit ke email terdaftar Anda untuk membuat passcode baru.",
               style: AppText.body2,
             ),
             const SizedBox(height: 20),
-
-            // Opsi 1: WhatsApp
             ListTile(
+              contentPadding: EdgeInsets.zero,
               leading: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF25D366).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.phone_enabled_rounded,
-                    color: Color(0xFF25D366)),
-              ),
-              title: Text("Kirim OTP via WhatsApp", style: AppText.label),
-              subtitle: Text("Kirim kode 6 digit ke nomor WA terdaftar",
-                  style: AppText.caption),
-              trailing: const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.slate400),
-              onTap: () {
-                Navigator.pop(ctx);
-                _sendRecoveryOtp("WA");
-              },
-            ),
-            const AppDivider(),
-
-            // Opsi 2: Gmail
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD44638).withOpacity(0.1),
+                  color: AppColors.brandNavy.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(Icons.mail_outline_rounded,
-                    color: Color(0xFFD44638)),
+                    color: AppColors.brandNavy),
               ),
-              title: Text("Kirim OTP via GMAIL", style: AppText.label),
-              subtitle: Text("Kirim kode 6 digit ke alamat Email kantor Anda",
+              title: Text("Kirim OTP ke Email", style: AppText.label),
+              subtitle: Text("Kirim kode 6 digit ke email terdaftar Anda",
                   style: AppText.caption),
               trailing: const Icon(Icons.chevron_right_rounded,
                   color: AppColors.slate400),
               onTap: () {
                 Navigator.pop(ctx);
-                _sendRecoveryOtp("Gmail");
+                _sendRecoveryOtp();
               },
             ),
             const SizedBox(height: 16),
@@ -575,6 +602,9 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
                             _errorMessage = "";
                             if (_currentStep == UnlockStep.verifyOtp) {
                               _currentStep = UnlockStep.enterPasscode;
+                              _resendTimer?.cancel();
+                              _resendSeconds = 0;
+                              _resendBlockedMessage = null;
                             } else if (_currentStep ==
                                 UnlockStep.resetPasscode) {
                               _currentStep = UnlockStep.verifyOtp;
@@ -642,6 +672,47 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
                           )
                         else
                           const SizedBox(height: 20),
+
+                        // Sprint 2: kirim ulang OTP pemulihan — cooldown 60
+                        // detik lokal (server juga menegakkan sendiri), atau
+                        // pesan permanen bila batas 3x/30 menit tercapai.
+                        if (_currentStep == UnlockStep.verifyOtp) ...[
+                          const SizedBox(height: 8),
+                          if (_resendBlockedMessage != null)
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 36),
+                              child: Text(
+                                _resendBlockedMessage!,
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.danger,
+                                ),
+                              ),
+                            )
+                          else if (_resendSeconds > 0)
+                            Text(
+                              "Kirim ulang OTP ($_resendSeconds s)",
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppColors.slate600,
+                              ),
+                            )
+                          else
+                            TextButton(
+                              onPressed: _isLoading ? null : _sendRecoveryOtp,
+                              child: Text(
+                                "Kirim Ulang OTP",
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.brandCyanDark,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                        ],
                       ],
                     ),
                   ),
@@ -761,7 +832,9 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
       case UnlockStep.selectRecovery:
         return "Pilih bagaimana cara memulihkan passcode";
       case UnlockStep.verifyOtp:
-        return "Masukkan 6 digit kode OTP pemulihan yang dikirimkan ke ${_recoveryMethod == "WA" ? "WhatsApp" : "Gmail"} Anda";
+        return _otpEmail.isEmpty
+            ? "Masukkan 6 digit kode OTP pemulihan yang dikirimkan ke email Anda"
+            : "Masukkan 6 digit kode OTP pemulihan yang dikirimkan ke email Anda: $_otpEmail";
       case UnlockStep.resetPasscode:
         return "Masukkan 6 digit passcode baru Anda";
       case UnlockStep.confirmResetPasscode:

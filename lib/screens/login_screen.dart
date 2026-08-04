@@ -45,7 +45,32 @@ class _LoginScreenState extends State<LoginScreen>
   int _timerSeconds = 60;
   Timer? _resendTimer;
 
-  // Custom WA Notification animation state
+  // Sprint 2 OTP/auth overhaul: alamat email tujuan OTP terakhir (dari
+  // respons `request-otp`), ditampilkan di subtitle langkah OTP.
+  String _otpEmail = "";
+
+  // Jalur "Lupa Passcode? Kirim OTP" — staff INI sudah punya passcode, tapi
+  // lupa. Backend selalu membalas `hasPasscode: true` untuk mereka, yang
+  // biasanya berarti "langsung masuk tanpa buat passcode baru". Jalur ini
+  // butuh pengecualian: harus tetap diarahkan ke buat-passcode-baru supaya
+  // staff benar-benar bisa mereset passcode yang lupa (Piece 3 backend).
+  bool _isForgotPasscodeFlow = false;
+
+  // Sprint 2: pesan saat batas kirim ulang OTP (maks 3x/30 menit) tercapai —
+  // backend menolak dengan 429, tombol kirim ulang diblokir sampai layar OTP
+  // ini dibuka ulang dari awal.
+  String? _resendBlockedMessage;
+
+  // Sprint 2: lockout verifikasi OTP salah 3x (429, 15 menit) — beda dari
+  // 400 "kode salah, masih ada sisa percobaan" biasa.
+  String? _otpLockoutMessage;
+  int _otpLockoutSeconds = 0;
+  Timer? _otpLockoutTimer;
+
+  bool get _otpLocked => _otpLockoutSeconds > 0;
+
+  // Custom OTP Notification animation state (dulu bertema WhatsApp — Sprint
+  // 2 OTP/auth overhaul pindah pengiriman OTP ke email).
   bool _showWaNotif = false;
   String _waNotifMessage = "";
   late AnimationController _waNotifCtrl;
@@ -87,13 +112,14 @@ class _LoginScreenState extends State<LoginScreen>
     _confirmPasscodeCtrl.dispose();
     _enterPasscodeCtrl.dispose();
     _resendTimer?.cancel();
+    _otpLockoutTimer?.cancel();
     super.dispose();
   }
 
-  void _showMockWaNotification(String otp) {
+  void _showMockWaNotification(String otp, {int expiresInMinutes = 10}) {
     setState(() {
       _waNotifMessage =
-          "[Hadir-In] Kode OTP WhatsApp Anda: $otp. Kode ini berlaku selama 5 menit.";
+          "[Hadir-In] Kode OTP Email Anda: $otp. Kode ini berlaku selama $expiresInMinutes menit.";
       _showWaNotif = true;
     });
     _waNotifCtrl.forward();
@@ -125,6 +151,48 @@ class _LoginScreenState extends State<LoginScreen>
         });
       }
     });
+  }
+
+  void _clearOtpLockout() {
+    _otpLockoutTimer?.cancel();
+    _otpLockoutMessage = null;
+    _otpLockoutSeconds = 0;
+  }
+
+  /// Verifikasi OTP salah 3x → server mengunci 15 menit (429, beda dari 400
+  /// "kode salah, masih ada sisa percobaan"). Sama juga saat lockout itu
+  /// masih aktif dan staff mencoba minta/verifikasi OTP lagi. Backend tidak
+  /// mengirim field terstruktur untuk sisa waktu — [AuthService.
+  /// parseLockoutMinutes] coba mengekstraknya dari teks pesan; bila gagal,
+  /// tetap pakai default 15 menit (durasi lockout yang didokumentasikan).
+  void _startOtpLockout(String message) {
+    final minutes = AuthService.parseLockoutMinutes(message) ?? 15;
+    _otpLockoutTimer?.cancel();
+    setState(() {
+      _otpLockoutMessage = message;
+      _otpLockoutSeconds = minutes * 60;
+    });
+    _otpLockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_otpLockoutSeconds <= 1) {
+        timer.cancel();
+        setState(() {
+          _otpLockoutSeconds = 0;
+          _otpLockoutMessage = null;
+        });
+      } else {
+        setState(() => _otpLockoutSeconds--);
+      }
+    });
+  }
+
+  String _formatLockoutCountdown(int totalSeconds) {
+    final m = totalSeconds ~/ 60;
+    final s = totalSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   /// Tangani submit no. HP — tanpa password.
@@ -168,15 +236,20 @@ class _LoginScreenState extends State<LoginScreen>
       }
 
       // Staff yang benar-benar baru → buktikan kepemilikan nomor lewat OTP.
+      _isForgotPasscodeFlow = false;
       final result = await AuthService.requestOtp(phone);
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _otpEmail = result.email;
+        _resendBlockedMessage = null;
         _currentStep = LoginStep.otp;
       });
+      _clearOtpLockout();
       _startTimer();
       if (result.devCode != null && result.devCode!.isNotEmpty) {
-        _showMockWaNotification(result.devCode!);
+        _showMockWaNotification(result.devCode!,
+            expiresInMinutes: result.expiresInMinutes);
       }
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -231,6 +304,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _verifyOtp() async {
+    if (_otpLocked) return;
     if (_otpCtrl.text.length < 6) {
       _showError("Masukkan 6 digit OTP lengkap");
       return;
@@ -250,8 +324,13 @@ class _LoginScreenState extends State<LoginScreen>
       _authStaffName = result.staff.nama;
 
       // Staff yang sudah punya passcode (mis. login OTP karena lupa passcode)
-      // tidak perlu membuat passcode baru — langsung masuk.
-      if (result.hasPasscode) {
+      // biasanya tidak perlu membuat passcode baru — langsung masuk.
+      // KECUALI ini jalur "Lupa Passcode? Kirim OTP" — staff itu memang
+      // sudah punya passcode (makanya `hasPasscode: true`), tapi lupa,
+      // sehingga harus tetap diarahkan buat passcode baru (Piece 3 backend:
+      // token dari verify-otp yang masih segar boleh set-passcode tanpa
+      // passcode lama).
+      if (result.hasPasscode && !_isForgotPasscodeFlow) {
         await _finishLogin(result.staff.id);
         if (mounted) setState(() => _isLoading = false);
         return;
@@ -265,21 +344,37 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
       setState(() => _isLoading = false);
       _otpCtrl.clear();
-      _showError(e.message);
+      if (e.statusCode == 429) {
+        _startOtpLockout(e.message);
+      } else {
+        _showError(e.message);
+      }
     }
   }
 
   Future<void> _resendOtp() async {
+    if (_resendBlockedMessage != null || _otpLocked) return;
     try {
       final result = await AuthService.requestOtp(_phoneCtrl.text.trim());
       if (!mounted) return;
+      setState(() => _otpEmail = result.email);
       _startTimer();
       if (result.devCode != null && result.devCode!.isNotEmpty) {
-        _showMockWaNotification(result.devCode!);
+        _showMockWaNotification(result.devCode!,
+            expiresInMinutes: result.expiresInMinutes);
       }
     } on ApiException catch (e) {
       if (!mounted) return;
-      _showError(e.message);
+      if (e.statusCode == 429) {
+        // Bisa berarti batas 3x kirim ulang / 30 menit TERCAPAI, atau akun
+        // sedang lockout salah-kode (blok kedua endpoint). Tampilkan pesan
+        // asli backend secara permanen di layar ini (bukan cuma snackbar
+        // sekilas) supaya staff tahu kenapa tombol kirim ulang tidak bisa
+        // dipakai lagi, alih-alih diam saja / gagal tanpa penjelasan.
+        setState(() => _resendBlockedMessage = e.message);
+      } else {
+        _showError(e.message);
+      }
     }
   }
 
@@ -318,22 +413,34 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   /// Jalur "Lupa passcode" — kembali ke OTP untuk membuat passcode baru.
+  ///
+  /// Piece 3 (Sprint 2 OTP/auth overhaul): staff ini SUDAH punya passcode
+  /// (makanya sedang di langkah `enterPasscode`), jadi `_verifyOtp()` perlu
+  /// tahu untuk tidak langsung `_finishLogin` begitu OTP-nya benar — lewat
+  /// [_isForgotPasscodeFlow] — supaya staff benar-benar sampai ke layar buat
+  /// passcode baru alih-alih diam-diam login pakai passcode lama yang lupa.
   Future<void> _forgotPasscode() async {
     setState(() => _isLoading = true);
     try {
+      _isForgotPasscodeFlow = true;
       final result = await AuthService.requestOtp(_phoneCtrl.text.trim());
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _enterPasscodeCtrl.clear();
+        _otpEmail = result.email;
+        _resendBlockedMessage = null;
         _currentStep = LoginStep.otp;
       });
+      _clearOtpLockout();
       _startTimer();
       if (result.devCode != null && result.devCode!.isNotEmpty) {
-        _showMockWaNotification(result.devCode!);
+        _showMockWaNotification(result.devCode!,
+            expiresInMinutes: result.expiresInMinutes);
       }
     } on ApiException catch (e) {
       if (!mounted) return;
+      _isForgotPasscodeFlow = false;
       setState(() => _isLoading = false);
       _showError(e.message);
     }
@@ -587,7 +694,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
 
-          // Custom WhatsApp Notification banner at the top
+          // Custom OTP notification banner at the top (email, sejak Sprint 2)
           if (_showWaNotif)
             Positioned(
               top: 12,
@@ -605,7 +712,7 @@ class _LoginScreenState extends State<LoginScreen>
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color: const Color(0xFF25D366).withOpacity(0.4),
+                          color: AppColors.brandNavy.withOpacity(0.4),
                           width: 1.5),
                     ),
                     child: Row(
@@ -615,11 +722,11 @@ class _LoginScreenState extends State<LoginScreen>
                           width: 38,
                           height: 38,
                           decoration: const BoxDecoration(
-                            color: Color(0xFF25D366),
+                            color: AppColors.brandNavy,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.phone_enabled_rounded,
-                              color: Colors.white, size: 24),
+                          child: const Icon(Icons.mail_outline_rounded,
+                              color: Colors.white, size: 22),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -632,7 +739,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    "WhatsApp • Hadir-In OTP",
+                                    "Email • Hadir-In OTP",
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w800,
                                       fontSize: 13,
@@ -676,7 +783,7 @@ class _LoginScreenState extends State<LoginScreen>
       case LoginStep.phone:
         return "Login";
       case LoginStep.otp:
-        return "Verifikasi OTP WA";
+        return "Verifikasi OTP Email";
       case LoginStep.enterPasscode:
         return "Masukkan Passcode";
       case LoginStep.createPasscode:
@@ -691,7 +798,9 @@ class _LoginScreenState extends State<LoginScreen>
       case LoginStep.phone:
         return "Masuk dengan nomor WhatsApp yang terdaftar";
       case LoginStep.otp:
-        return "Masukkan 6 digit kode OTP yang kami kirimkan ke WhatsApp Anda";
+        return _otpEmail.isEmpty
+            ? "Masukkan 6 digit kode OTP yang kami kirimkan ke email Anda"
+            : "Masukkan 6 digit kode OTP yang kami kirimkan ke email Anda: $_otpEmail";
       case LoginStep.enterPasscode:
         return "Masukkan passcode 6 digit Anda untuk masuk";
       case LoginStep.createPasscode:
@@ -789,6 +898,7 @@ class _LoginScreenState extends State<LoginScreen>
                 keyboardType: TextInputType.number,
                 maxLength: 6,
                 autofocus: true,
+                enabled: !_otpLocked,
                 onChanged: (val) {
                   setState(() {});
                   if (val.length == 6) {
@@ -803,47 +913,111 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ],
         ),
-        const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              "Belum menerima kode? ",
-              style: AppText.body2.copyWith(color: AppColors.slate600),
+
+        // Sprint 2: lockout verifikasi OTP salah 3x (429, 15 menit) —
+        // ditampilkan menonjol (bukan snackbar sekilas) selama masih aktif.
+        if (_otpLockoutMessage != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.danger.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.danger.withOpacity(0.3)),
             ),
-            if (_timerSeconds > 0)
-              Text(
-                "Kirim ulang ($_timerSeconds s)",
-                style: AppText.body2.copyWith(
-                    fontWeight: FontWeight.bold, color: AppColors.slate600),
-              )
-            else
-              TextButton(
-                onPressed: _resendOtp,
-                child: Text(
-                  "Kirim Ulang",
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.lock_clock_rounded,
+                        color: AppColors.danger, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _otpLockoutMessage!,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.danger,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Sisa waktu: ${_formatLockoutCountdown(_otpLockoutSeconds)}",
                   style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.brandCyanDark,
-                    fontSize: 13,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.danger,
                   ),
                 ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 32),
+        if (_otpLocked)
+          const SizedBox.shrink()
+        else if (_resendBlockedMessage != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text(
+              _resendBlockedMessage!,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.danger,
               ),
-          ],
-        ),
+            ),
+          )
+        else
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                "Belum menerima kode? ",
+                style: AppText.body2.copyWith(color: AppColors.slate600),
+              ),
+              if (_timerSeconds > 0)
+                Text(
+                  "Kirim ulang ($_timerSeconds s)",
+                  style: AppText.body2.copyWith(
+                      fontWeight: FontWeight.bold, color: AppColors.slate600),
+                )
+              else
+                TextButton(
+                  onPressed: _resendOtp,
+                  child: Text(
+                    "Kirim Ulang",
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.brandCyanDark,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         const SizedBox(height: 16),
         GradientButton(
           label: "Verifikasi OTP",
           isLoading: _isLoading,
-          onTap: _verifyOtp,
+          onTap: _otpLocked ? null : _verifyOtp,
         ),
         const SizedBox(height: 12),
         TextButton(
           onPressed: () {
             setState(() {
               _currentStep = LoginStep.phone;
+              _isForgotPasscodeFlow = false;
               _otpCtrl.clear();
             });
+            _clearOtpLockout();
           },
           child: Text(
             "Ganti Nomor HP",
