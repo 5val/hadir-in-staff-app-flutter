@@ -9,21 +9,40 @@ konfigurasi.
 
 ---
 
-## 1. Sakelar utama — satu baris
+## 1. Sakelar utama — compile-time flag, BUKAN literal di source
 
 File: [lib/config/testing_config.dart](../lib/config/testing_config.dart)
 
-```dart
-// MODE TESTING (lokasi & jam hardcode)
-static const bool enabled = true;
+Sejak Sprint 3 EPIC 1, `enabled` **tidak lagi** boleh diubah langsung di
+source (`static const bool enabled = true;` yang ke-commit pernah bikin app
+diam-diam kirim GPS & jam palsu ke backend produksi). Sekarang nilainya
+dibaca dari `--dart-define` saat build/run, default-nya **selalu `false`**:
 
-// DATA REAL / PRODUKSI (GPS asli + jam asli HP)
-static const bool enabled = false;
+```dart
+static const bool enabled = bool.fromEnvironment(
+  'TESTING_MODE',
+  defaultValue: false,
+);
 ```
 
-**Itu saja.** Tidak ada baris lain di file mana pun yang perlu di-comment atau
-di-uncomment. Saat `enabled = false`, seluruh app otomatis kembali memakai GPS
-asli dan jam asli perangkat.
+**Cara aktifkan mode testing (lokal, dev):**
+
+```bash
+flutter run --dart-define=TESTING_MODE=true
+```
+
+**Data real / produksi** — jalankan seperti biasa, TANPA flag apa pun:
+
+```bash
+flutter run
+flutter build apk
+```
+
+Tidak ada baris kode yang perlu di-comment/di-uncomment. Saat dijalankan
+tanpa `--dart-define=TESTING_MODE=true`, `enabled` selalu `false` dan seluruh
+app otomatis memakai GPS asli dan jam asli perangkat — termasuk build
+release, yang secara struktural tidak mungkin membawa mode testing walau
+developer lupa mengubah apa pun di source.
 
 ### Sakelar per-bagian (opsional)
 
@@ -101,7 +120,8 @@ di-comment:
 
 ## 5. Checklist sebelum rilis / demo data real
 
-1. `lib/config/testing_config.dart` → `enabled = false`.
+1. Jalankan/build TANPA `--dart-define=TESTING_MODE=true` (default sudah
+   `false` — tidak ada lagi literal di source yang perlu diubah).
 2. Jalankan app, pastikan banner kuning "MODE TESTING" di halaman Home **tidak
    muncul**.
 3. Pastikan `lib/config/api_config.dart` → `host` menunjuk server yang benar.

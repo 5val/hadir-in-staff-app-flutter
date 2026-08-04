@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -7,28 +8,34 @@ class SessionService {
   static const _keyPhone         = 'hadir_in_phone';
   static const _keySessionActive = 'hadir_in_session_active';
   // Kredensial backend (diisi setelah login API berhasil di Tahap 1).
-  static const _keyToken         = 'hadir_in_token';
-  static const _keyStaffId       = 'hadir_in_staff_id';
+  //
+  // Sprint 3 EPIC 5a: token JWT & staffId dipindah ke `flutter_secure_storage`
+  // (keystore/keychain OS terenkripsi) — sebelumnya SharedPreferences
+  // plaintext, extractable di HP root/kompromais atau lewat ADB backup tanpa
+  // perlu passcode/OTP. Key-key lain (login flag, phone, dst) TETAP di
+  // SharedPreferences — bukan kredensial, cuma preferensi UX lokal.
+  static const _keyToken   = 'hadir_in_token';
+  static const _keyStaffId = 'hadir_in_staff_id';
+
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
 
   // ── Kredensial backend (JWT staff + id staff asli dari database) ──────
   static Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyToken, token);
+    await _secureStorage.write(key: _keyToken, value: token);
   }
 
   static Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyToken);
+    return _secureStorage.read(key: _keyToken);
   }
 
   static Future<void> saveStaffId(String staffId) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyStaffId, staffId);
+    await _secureStorage.write(key: _keyStaffId, value: staffId);
   }
 
   static Future<String?> getStaffId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyStaffId);
+    return _secureStorage.read(key: _keyStaffId);
   }
 
   static Future<bool> isLoggedIn() async {
@@ -87,8 +94,8 @@ class SessionService {
     await prefs.remove(_keyLoggedIn);
     await prefs.remove(_keyEmployeeId);
     await prefs.remove(_keySessionActive);
-    await prefs.remove(_keyToken);
-    await prefs.remove(_keyStaffId);
+    await _secureStorage.delete(key: _keyToken);
+    await _secureStorage.delete(key: _keyStaffId);
     AppSession.clearUser();
   }
 

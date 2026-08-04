@@ -11,16 +11,26 @@ import '../models/models.dart';
 ///
 /// ── CARA PAKAI ─────────────────────────────────────────────────────────────
 ///
+/// [enabled] BUKAN literal di source lagi — dibaca dari compile-time flag
+/// `--dart-define=TESTING_MODE=true`, defaultnya SELALU `false`. Ini sengaja:
+/// literal `true` yang ke-commit di source pernah bikin app kirim GPS & jam
+/// palsu ke backend PRODUKSI tanpa disadari (Sprint 3 EPIC 1). Dengan
+/// `bool.fromEnvironment`, `true` cuma bisa datang dari flag CLI eksplisit
+/// saat build/run, gak pernah bisa "nyangkut" ke-commit sebagai `true`.
+///
 ///   SEDANG TESTING (data hardcode):
-///     [enabled] = true
+///     flutter run --dart-define=TESTING_MODE=true
 ///
-///   DATA REAL / PRODUKSI:
-///     [enabled] = false      ← CUKUP SATU BARIS INI SAJA
+///   DATA REAL / PRODUKSI (default, tanpa flag apa pun):
+///     flutter run
+///     flutter build apk
 ///
-/// Saat [enabled] = false, seluruh app otomatis kembali memakai GPS asli HP
-/// dan jam asli perangkat; tidak ada baris lain yang perlu di-comment.
-/// [fakeLocation] & [fakeTime] hanya untuk mengaktifkan sebagian saja
-/// (mis. lokasi dipalsukan tapi jam tetap asli).
+/// Saat [enabled] = false (default), seluruh app otomatis kembali memakai
+/// GPS asli HP dan jam asli perangkat; tidak ada baris kode yang perlu
+/// di-comment. [fakeLocation] & [fakeTime] hanya untuk mengaktifkan
+/// sebagian saja (mis. lokasi dipalsukan tapi jam tetap asli) — literal ini
+/// aman diubah karena cuma berlaku ketika [enabled] sudah diaktifkan lewat
+/// flag di atas.
 ///
 /// ── APA YANG DIPALSUKAN ────────────────────────────────────────────────────
 ///
@@ -46,11 +56,15 @@ class TestingConfig {
   const TestingConfig._();
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SAKELAR UTAMA — ubah HANYA baris ini untuk pindah mode.
-  //   true  = MODE TESTING (lokasi & jam hardcode)
-  //   false = DATA REAL (GPS asli + jam asli HP)
+  // SAKELAR UTAMA — JANGAN ubah literal di sini. Aktifkan lewat CLI:
+  //   flutter run --dart-define=TESTING_MODE=true
+  // Default (tanpa flag) SELALU false — ini yang menjamin build release tidak
+  // pernah membawa mode testing walau lupa dimatikan di source.
   // ══════════════════════════════════════════════════════════════════════════
-  static const bool enabled = true;
+  static const bool enabled = bool.fromEnvironment(
+    'TESTING_MODE',
+    defaultValue: false,
+  );
 
   /// Sakelar per-bagian (hanya berlaku bila [enabled] = true).
   static const bool fakeLocation = true;
