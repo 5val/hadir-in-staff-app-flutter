@@ -796,7 +796,7 @@ class _LoginScreenState extends State<LoginScreen>
   String _getStepSubtitle() {
     switch (_currentStep) {
       case LoginStep.phone:
-        return "Masuk dengan nomor WhatsApp yang terdaftar";
+        return "Masuk dengan nomor telepon yang terdaftar";
       case LoginStep.otp:
         return _otpEmail.isEmpty
             ? "Masukkan 6 digit kode OTP yang kami kirimkan ke email Anda"
@@ -832,7 +832,7 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Nomor Telepon / WhatsApp', style: AppText.label),
+          Text('Nomor Telepon', style: AppText.label),
           const SizedBox(height: 6),
           TextFormField(
             controller: _phoneCtrl,
