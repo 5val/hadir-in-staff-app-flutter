@@ -145,9 +145,22 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
     );
     if (picked == null) return;
 
+    // ClickUp 86eyh8avk: kumpulkan `catatanStaff` opsional di sini —
+    // staff bisa memberi tahu HRD kalau ada data yang diisi admin ternyata
+    // salah (mis. nama), sebelum dokumen ini masuk antrean review admin.
+    // Backend & tampilan admin (staff/page.tsx "Catatan staff: ...") sudah
+    // siap menampung field ini, layar ini dulu tidak pernah mengumpulkannya.
+    if (!mounted) return;
+    final catatanStaff = await _promptCatatanStaff(doc);
+    if (!mounted) return;
+
     setState(() => _uploading = doc.jenis);
     try {
-      await DocumentService.upload(jenis: doc.jenis, file: File(picked.path));
+      await DocumentService.upload(
+        jenis: doc.jenis,
+        file: File(picked.path),
+        catatanStaff: catatanStaff,
+      );
       if (!mounted) return;
       setState(() => _uploading = null);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -164,6 +177,84 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
         SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
       );
     }
+  }
+
+  /// Bottom sheet opsional: minta `catatanStaff` sebelum dokumen dikirim.
+  /// "Lewati" maupun menutup sheet sama-sama lanjut mengunggah tanpa
+  /// catatan — langkah ini murni buat menambahkan keterangan, bukan buat
+  /// membatalkan unggahan (file sudah dipilih di langkah sebelumnya).
+  Future<String?> _promptCatatanStaff(OnboardingDocument doc) async {
+    final ctrl = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 20,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.slate200,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Catatan untuk ${doc.label} (opsional)',
+                style:
+                    AppText.body1.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(
+              'Ada yang perlu dijelaskan ke HRD? Misalnya kalau ada data '
+              'diri yang diisi admin ternyata salah.',
+              style: AppText.caption,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              maxLines: 3,
+              style: const TextStyle(color: AppColors.slate900),
+              decoration: const InputDecoration(
+                hintText: 'Contoh: Nama saya salah, seharusnya Budi Santoso',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Lewati'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                    child: const Text('Unggah'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    return result;
   }
 
   Future<void> _logout() async {
