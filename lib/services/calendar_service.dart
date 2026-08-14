@@ -35,12 +35,20 @@ class WorkCalendar {
   final String jamMasuk;
   final String jamPulang;
 
+  /// Sprint 3: jam istirahat TETAP shift ("HH:mm"), null bila Shift tidak
+  /// punya jam istirahat terkonfigurasi. `jamIstirahatSelesai` adalah target
+  /// countdown istirahat (lihat `break_screen.dart`).
+  final String? jamIstirahatMulai;
+  final String? jamIstirahatSelesai;
+
   const WorkCalendar({
     required this.holidayByDate,
     required this.hariKerja,
     required this.shiftNama,
     required this.jamMasuk,
     required this.jamPulang,
+    this.jamIstirahatMulai,
+    this.jamIstirahatSelesai,
   });
 
   /// Kalender kosong — dipakai sebagai fallback aman bila data belum termuat:
@@ -130,6 +138,8 @@ class CalendarService {
       shiftNama: (shift['nama'] ?? '').toString(),
       jamMasuk: (shift['jamMasuk'] ?? '').toString(),
       jamPulang: (shift['jamPulang'] ?? '').toString(),
+      jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
+      jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
     );
   }
 }

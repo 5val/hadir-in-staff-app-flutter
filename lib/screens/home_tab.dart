@@ -138,6 +138,16 @@ class _HomeTabState extends State<HomeTab> {
       '${(d.inMinutes % 60).toString().padLeft(2, '0')}:'
       '${(d.inSeconds % 60).toString().padLeft(2, '0')}';
 
+  /// Format countdown "MM:SS" (positif) atau "+MM:SS" (overtime, `s` negatif)
+  /// — sama persis dengan konvensi `BreakScreen._fmtTime`/`_remainingLabel`,
+  /// supaya tampilan tetap konsisten di seluruh app.
+  String _fmtBreakCountdown(int s) {
+    final abs = s.abs();
+    final mm = (abs ~/ 60).toString().padLeft(2, '0');
+    final ss = (abs % 60).toString().padLeft(2, '0');
+    return s < 0 ? '+$mm:$ss' : '$mm:$ss';
+  }
+
   String _fmtHM(DateTime dt) {
     final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
     return '$h:${dt.minute.toString().padLeft(2, '0')}';
@@ -1301,12 +1311,24 @@ class _HomeTabState extends State<HomeTab> {
 
       // ── Sedang istirahat ──────────────────────────────────────
       case AttendanceProviderStatus.onBreak:
+        // Countdown ke jam istirahat selesai TETAP shift (bukan durasi
+        // hitung-mundur dari saat break dimulai) — null bila Shift tidak
+        // punya jam istirahat terkonfigurasi, di kasus itu kartu tetap
+        // hitung-naik seperti sebelumnya, tanpa countdown.
+        final breakSecondsLeft = AttendanceRules.secondsUntilBreakEnd;
+        final hasBreakTarget = breakSecondsLeft != null;
+        final isBreakOvertime = hasBreakTarget && breakSecondsLeft < 0;
         return SectionCard(
-          color: AppColors.warning.withOpacity(0.06),
-          borderColor: AppColors.warning.withOpacity(0.3),
+          color: isBreakOvertime
+              ? AppColors.danger.withOpacity(0.06)
+              : AppColors.warning.withOpacity(0.06),
+          borderColor: isBreakOvertime
+              ? AppColors.danger.withOpacity(0.3)
+              : AppColors.warning.withOpacity(0.3),
           child: Row(
             children: [
-              const Text('☕', style: TextStyle(fontSize: 28)),
+              Text(isBreakOvertime ? '⏰' : '☕',
+                  style: const TextStyle(fontSize: 28)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -1317,8 +1339,32 @@ class _HomeTabState extends State<HomeTab> {
                             AppText.label.copyWith(color: AppColors.slate900)),
                     // Fase 8: yang ditampilkan DURASI, bukan jam istirahat —
                     // di database memang hanya durasi yang disimpan.
-                    Text('Durasi: ${_fmtDur(_breakDur)}',
+                    Text('Sudah istirahat: ${_fmtDur(_breakDur)}',
                         style: AppText.body2),
+                    if (hasBreakTarget) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          if (isBreakOvertime) ...[
+                            const Icon(Icons.warning_rounded,
+                                color: AppColors.danger, size: 14),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            isBreakOvertime
+                                ? '${_fmtBreakCountdown(breakSecondsLeft)} lewat jam istirahat selesai'
+                                : 'Sisa: ${_fmtBreakCountdown(breakSecondsLeft)} (sampai ${AttendanceRules.jamIstirahatSelesaiLabel})',
+                            style: GoogleFonts.jetBrainsMono(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isBreakOvertime
+                                  ? AppColors.danger
+                                  : AppColors.brandNavy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1326,7 +1372,9 @@ class _HomeTabState extends State<HomeTab> {
                 height: 38,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.warning),
+                      backgroundColor: isBreakOvertime
+                          ? AppColors.danger
+                          : AppColors.warning),
                   onPressed: _returnFromBreak,
                   icon: const Icon(Icons.play_arrow_rounded, size: 18),
                   label: Text('Break Out',

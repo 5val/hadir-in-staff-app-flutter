@@ -171,12 +171,23 @@ class ShiftModel {
   final TimeOfDay endTime;
   final int breakDurationMinutes;
 
+  // Sprint 3: jam istirahat TETAP dari Shift (`Shift.jamIstirahatMulai`/
+  // `jamIstirahatSelesai`, "HH:mm"), dipakai sebagai target countdown
+  // istirahat yang selalu mengarah ke jam SELESAI tetap, bukan durasi
+  // sejak staff menekan tombol. Null bila Shift tidak punya jam istirahat
+  // terkonfigurasi (mengikuti nullability kolom di backend) — di kasus itu
+  // UI fallback ke [breakDurationMinutes].
+  final String? jamIstirahatMulai;
+  final String? jamIstirahatSelesai;
+
   const ShiftModel({
     required this.id,
     required this.name,
     required this.startTime,
     required this.endTime,
     this.breakDurationMinutes = 60,
+    this.jamIstirahatMulai,
+    this.jamIstirahatSelesai,
   });
 
   String get startTimeStr =>

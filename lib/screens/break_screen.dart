@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
+import '../services/attendance_provider.dart';
 
 class BreakScreen extends StatefulWidget {
   final VoidCallback onBreakEnd;
@@ -14,45 +15,78 @@ class BreakScreen extends StatefulWidget {
 }
 
 class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin {
-  static const int _totalSec = 60 * 60;
+  // Fallback dipakai HANYA bila Shift staff tidak punya jam istirahat
+  // terkonfigurasi (`AttendanceRules.secondsUntilBreakEnd` == null) — di
+  // kasus itu tidak ada jam TETAP yang bisa dituju, jadi kembali ke durasi
+  // lama (60 menit sejak layar ini dibuka).
+  static const int _fallbackTotalSec = 60 * 60;
   static const int _alertSec = 5  * 60;
 
-  int    _secondsRemaining = _totalSec;
+  /// Target countdown: jam SELESAI TETAP shift (`jamIstirahatSelesai`),
+  /// terlepas dari jam berapa staff menekan "Mulai Istirahat". Null bila
+  /// Shift tidak punya jam istirahat terkonfigurasi.
+  final DateTime? _target = AttendanceRules.breakEndTargetToday;
+
+  /// Denominator progress ring saja (persentase) — bukan batas keras.
+  /// Countdown TETAP boleh lanjut ke negatif (overtime) setelah ini habis.
+  late int _totalSec;
+
+  /// Detik tersisa. BOLEH negatif — itu artinya staff sudah melewati jam
+  /// selesai istirahat (overtime), bukan kondisi error.
+  late int _secondsRemaining;
+
   Timer? _timer;
   bool   _alertShown = false;
-  bool   _breakDone  = false;
+  bool   _overtimeNoticeShown = false;
   bool   _showMascot = false;
   int    _msgIndex   = 0;
 
-  late AnimationController _pulseCtrl, _doneCtrl;
-  late Animation<double>   _pulse, _doneFade, _doneScale;
+  late AnimationController _pulseCtrl;
+  late Animation<double>   _pulse;
 
   @override
   void initState() {
     super.initState();
     _msgIndex  = DateTime.now().second % SampleData.breakMessages.length;
 
+    final initialRemaining = AttendanceRules.secondsUntilBreakEnd;
+    if (initialRemaining != null) {
+      _secondsRemaining = initialRemaining;
+      // Kalau staff baru menekan "Mulai Istirahat" SETELAH jam selesai
+      // shift sudah lewat, ring tidak boleh dibagi angka <= 0 — pakai 1
+      // detik sebagai denominator supaya ring langsung tampil penuh/merah,
+      // bukan crash atau NaN.
+      _totalSec = initialRemaining > 0 ? initialRemaining : 1;
+    } else {
+      _secondsRemaining = _fallbackTotalSec;
+      _totalSec = _fallbackTotalSec;
+    }
+
     _pulseCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))
       ..repeat(reverse: true);
-    _doneCtrl  = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
-
     _pulse     = Tween<double>(begin: 0.96, end: 1.04)
         .animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _doneFade  = CurvedAnimation(parent: _doneCtrl, curve: Curves.easeIn);
-    _doneScale = Tween<double>(begin: 0.5, end: 1.0)
-        .animate(CurvedAnimation(parent: _doneCtrl, curve: Curves.elasticOut));
 
     _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (_secondsRemaining <= 0) { t.cancel(); _onFinished(); return; }
-      setState(() => _secondsRemaining--);
-      if (_secondsRemaining == _alertSec && !_alertShown) {
+      setState(() {
+        // Target TETAP: hitung ulang dari jam sekarang tiap detik (bukan
+        // sekadar `--`) supaya selalu akurat ke jam istirahat selesai yang
+        // sebenarnya, termasuk saat app di-resume dari background.
+        final live = AttendanceRules.secondsUntilBreakEnd;
+        _secondsRemaining = live ?? (_secondsRemaining - 1);
+      });
+      if (_secondsRemaining <= _alertSec && _secondsRemaining > 0 && !_alertShown) {
         _alertShown = true; _triggerAlert();
+      }
+      if (_secondsRemaining <= 0 && !_overtimeNoticeShown) {
+        _overtimeNoticeShown = true;
+        _onReachedZero();
       }
     });
   }
 
   @override
-  void dispose() { _timer?.cancel(); _pulseCtrl.dispose(); _doneCtrl.dispose(); super.dispose(); }
+  void dispose() { _timer?.cancel(); _pulseCtrl.dispose(); super.dispose(); }
 
   void _triggerAlert() {
     HapticFeedback.heavyImpact();
@@ -80,12 +114,25 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
     );
   }
 
-  void _onFinished() {
-    setState(() => _breakDone = true);
-    _doneCtrl.forward();
+  /// Dipanggil SEKALI saat countdown pertama kali menyentuh 0 — hanya
+  /// menampilkan notifikasi ramah (haptic + mascot), TIDAK mengunci layar
+  /// dan TIDAK menghentikan timer. Setelah ini countdown lanjut ke negatif
+  /// (overtime); tombol "Akhiri Istirahat" tetap bisa ditekan kapan pun,
+  /// sebelum maupun sesudah titik ini.
+  void _onReachedZero() {
     HapticFeedback.mediumImpact();
-    // Show mascot when break ends naturally
     setState(() => _showMascot = true);
+  }
+
+  /// Tombol akhiri istirahat. Selama masih ada sisa waktu, konfirmasi dulu
+  /// (staff mungkin belum sadar masih ada sisa). Begitu sudah 0/overtime,
+  /// tidak perlu dialog "yakin kembali lebih awal?" — langsung selesaikan.
+  void _handleEndBreakTap() {
+    if (_secondsRemaining > 0) {
+      _endEarly();
+    } else {
+      _finish();
+    }
   }
 
   void _endEarly() {
@@ -115,10 +162,27 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
     Navigator.pop(context);
   }
 
-  String _fmtTime(int s) =>
-      '${(s ~/ 60).toString().padLeft(2,'0')}:${(s % 60).toString().padLeft(2,'0')}';
+  /// `s` boleh negatif (overtime) — pemanggil yang menambahkan tanda "+".
+  String _fmtTime(int s) {
+    final abs = s.abs();
+    return '${(abs ~/ 60).toString().padLeft(2,'0')}:${(abs % 60).toString().padLeft(2,'0')}';
+  }
 
-  double get _pct   => _secondsRemaining / _totalSec;
+  String _fmtClock(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  /// Label countdown yang tampil di tengah ring: "MM:SS" kalau masih ada
+  /// sisa, "+MM:SS" kalau sudah overtime (lewat jam selesai istirahat).
+  String get _remainingLabel =>
+      _secondsRemaining >= 0 ? _fmtTime(_secondsRemaining) : '+${_fmtTime(_secondsRemaining)}';
+
+  bool get _isOvertime => _secondsRemaining < 0;
+
+  String get _totalLabel => _target != null
+      ? 'Istirahat sampai ${_fmtClock(_target!)}'
+      : 'Istirahat total: 60 menit';
+
+  double get _pct   => (_secondsRemaining / _totalSec).clamp(0.0, 1.0);
   Color  get _color {
     if (_secondsRemaining <= _alertSec)     return AppColors.danger;
     if (_secondsRemaining <= _alertSec * 2) return AppColors.warning;
@@ -164,7 +228,7 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
                     style: AppText.headline3.copyWith(color: AppColors.brandNavy),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 4),
-                Text('Istirahat total: 60 menit', style: AppText.body2),
+                Text(_totalLabel, style: AppText.body2),
 
                 const SizedBox(height: 36),
 
@@ -172,7 +236,7 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
                 AnimatedBuilder(
                   animation: _pulse,
                   builder: (_, child) => Transform.scale(
-                    scale: _breakDone ? 1.0 : _pulse.value, child: child,
+                    scale: _pulse.value, child: child,
                   ),
                   child: SizedBox(
                     width: 200, height: 200,
@@ -205,18 +269,18 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(_breakDone ? '✅' : '☕',
+                            Text(_isOvertime ? '⏰' : '☕',
                                 style: const TextStyle(fontSize: 30)),
                             const SizedBox(height: 4),
                             Text(
-                              _breakDone ? 'SELESAI!' : _fmtTime(_secondsRemaining),
+                              _remainingLabel,
                               style: GoogleFonts.jetBrainsMono(
-                                fontSize: _breakDone ? 18 : 28,
+                                fontSize: 28,
                                 fontWeight: FontWeight.w800, color: _color,
                               ),
                             ),
-                            if (!_breakDone)
-                              Text('tersisa', style: AppText.caption),
+                            Text(_isOvertime ? 'lewat waktu' : 'tersisa',
+                                style: AppText.caption),
                           ],
                         ),
                       ],
@@ -226,8 +290,9 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
 
                 const SizedBox(height: 28),
 
-                // Alert banner
-                if (!_breakDone && _secondsRemaining <= _alertSec)
+                // Alert banner — sebelum 0: peringatan "hampir habis"; setelah
+                // 0: penanda overtime (tanpa memblokir apa pun, cuma info).
+                if (_secondsRemaining <= _alertSec)
                   SectionCard(
                     color: AppColors.danger.withOpacity(0.05),
                     borderColor: AppColors.danger.withOpacity(0.3),
@@ -236,28 +301,32 @@ class _BreakScreenState extends State<BreakScreen> with TickerProviderStateMixin
                       children: [
                         const Icon(Icons.warning_rounded, color: AppColors.danger, size: 16),
                         const SizedBox(width: 6),
-                        Text('Waktu istirahat hampir habis!',
+                        Expanded(
+                          child: Text(
+                            _isOvertime
+                                ? 'Waktu istirahat sudah lewat ${_fmtTime(_secondsRemaining)} — jangan lupa kembali bekerja.'
+                                : 'Waktu istirahat hampir habis!',
+                            textAlign: TextAlign.center,
                             style: GoogleFonts.inter(
                                 color: AppColors.danger, fontWeight: FontWeight.w600,
                                 fontSize: 13)),
+                        ),
                       ],
                     ),
                   ),
 
                 const Spacer(),
 
-                if (_breakDone)
-                  GradientButton(
-                    label: '✅  Kembali Bekerja (IN)',
-                    color: AppColors.brandLimeDark,
-                    height: 54, onTap: _finish,
-                  )
-                else
-                  GradientButton(
-                    label: 'Akhiri Istirahat Sekarang',
-                    color: AppColors.brandNavy,
-                    height: 50, onTap: _endEarly,
-                  ),
+                // Tombol akhiri istirahat SELALU aktif — tidak pernah
+                // dikunci oleh countdown, baik sebelum maupun sesudah 0.
+                GradientButton(
+                  label: _isOvertime
+                      ? '✅  Kembali Bekerja Sekarang'
+                      : 'Akhiri Istirahat Sekarang',
+                  color: _isOvertime ? AppColors.brandLimeDark : AppColors.brandNavy,
+                  height: _isOvertime ? 54 : 50,
+                  onTap: _handleEndBreakTap,
+                ),
 
                 const SizedBox(height: 14),
 

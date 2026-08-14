@@ -117,6 +117,8 @@ class _MainScreenState extends State<MainScreen> {
         AttendanceRules.hydrateFromShift(
           jamMasuk: calendar.jamMasuk,
           jamPulang: calendar.jamPulang,
+          jamIstirahatMulai: calendar.jamIstirahatMulai,
+          jamIstirahatSelesai: calendar.jamIstirahatSelesai,
         );
       } catch (_) {}
 

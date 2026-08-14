@@ -36,10 +36,29 @@ class AttendanceRules {
   static TimeOfDay? _jamMasuk;
   static TimeOfDay? _jamPulang;
 
+  // Sprint 3: jam istirahat TETAP shift (`Shift.jamIstirahatMulai`/
+  // `jamIstirahatSelesai`). Null bila Shift tidak punya jam istirahat
+  // terkonfigurasi — pemanggil (mis. `BreakScreen`) harus fallback ke durasi
+  // hardcode, BUKAN memakai angka karangan.
+  static TimeOfDay? _jamIstirahatMulai;
+  static TimeOfDay? _jamIstirahatSelesai;
+
   /// Diisi dari [WorkCalendar] setelah kalender kerja termuat.
-  static void hydrateFromShift({required String jamMasuk, required String jamPulang}) {
+  static void hydrateFromShift({
+    required String jamMasuk,
+    required String jamPulang,
+    String? jamIstirahatMulai,
+    String? jamIstirahatSelesai,
+  }) {
     _jamMasuk = _parse(jamMasuk) ?? _jamMasuk;
     _jamPulang = _parse(jamPulang) ?? _jamPulang;
+    // Beda dari jamMasuk/jamPulang: null di sini artinya Shift MEMANG tidak
+    // punya jam istirahat (bukan "kalender belum termuat"), jadi tidak
+    // dijaga oleh `?? _jamIstirahatMulai` — nilai terbaru dari server selalu
+    // menang, termasuk saat itu null.
+    _jamIstirahatMulai = jamIstirahatMulai == null ? null : _parse(jamIstirahatMulai);
+    _jamIstirahatSelesai =
+        jamIstirahatSelesai == null ? null : _parse(jamIstirahatSelesai);
   }
 
   static TimeOfDay? _parse(String hhmm) {
@@ -56,8 +75,36 @@ class AttendanceRules {
   static TimeOfDay? get jamPulang => _jamPulang;
   static TimeOfDay? get jamMasuk => _jamMasuk;
 
+  /// Jam istirahat TETAP shift. Null bila Shift tidak punya jam istirahat
+  /// terkonfigurasi.
+  static TimeOfDay? get jamIstirahatMulai => _jamIstirahatMulai;
+  static TimeOfDay? get jamIstirahatSelesai => _jamIstirahatSelesai;
+
   static String get jamPulangLabel => _fmt(_jamPulang);
   static String get jamMasukLabel => _fmt(_jamMasuk);
+  static String get jamIstirahatSelesaiLabel => _fmt(_jamIstirahatSelesai);
+
+  /// Target countdown istirahat hari ini (tanggal SEKARANG + jam
+  /// `jamIstirahatSelesai` shift) — SELALU mengarah ke jam selesai TETAP,
+  /// berapa pun jam staff menekan "Mulai Istirahat". Null bila Shift tidak
+  /// punya jam istirahat terkonfigurasi, pemanggil harus fallback ke durasi
+  /// hardcode di kasus itu.
+  static DateTime? get breakEndTargetToday {
+    final t = _jamIstirahatSelesai;
+    if (t == null) return null;
+    final now = TestingConfig.now();
+    return DateTime(now.year, now.month, now.day, t.hour, t.minute);
+  }
+
+  /// Detik tersisa sampai [breakEndTargetToday] — NEGATIF berarti sudah lewat
+  /// jam selesai istirahat (overtime), bukan berhenti di 0. Null bila Shift
+  /// tidak punya jam istirahat terkonfigurasi; pemanggil harus fallback ke
+  /// durasi hardcode di kasus itu (mis. `BreakScreen`).
+  static int? get secondsUntilBreakEnd {
+    final target = breakEndTargetToday;
+    if (target == null) return null;
+    return target.difference(TestingConfig.now()).inSeconds;
+  }
 
   static String _fmt(TimeOfDay? t) => t == null
       ? '--:--'
