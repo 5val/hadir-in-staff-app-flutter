@@ -6,6 +6,7 @@ import '../services/session_service.dart';
 import '../services/auth_service.dart';
 import '../services/api_client.dart';
 import 'main_screen.dart';
+import 'login_screen.dart';
 
 enum UnlockStep {
   enterPasscode,
@@ -388,6 +389,47 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
     );
   }
 
+  /// Keluar dari akun dari layar passcode.
+  ///
+  /// Jalan keluar untuk staff yang terjebak di layar ini — misalnya HP dipakai
+  /// staff lain, atau nomor tersimpan bukan miliknya — supaya bisa login ulang
+  /// dengan nomor berbeda tanpa harus menebak passcode/lewat alur OTP.
+  /// Sama seperti logout di tab Akun: sesi lokal dibersihkan lalu kembali ke
+  /// layar login (passcode tetap tersimpan terhash di server, jadi staff lama
+  /// cukup pakai passcode lamanya saat login lagi).
+  Future<void> _logout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Keluar dari Akun?'),
+        content:
+            Text('Kamu perlu login ulang lain kali.', style: AppText.body2),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Keluar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    _resendTimer?.cancel();
+    await SessionService.clearSession();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+          builder: (_) =>
+              const LoginScreen(destination: LoginDestination.landing)),
+      (r) => false,
+    );
+  }
+
   /// Konfirmasi sebelum mengirim OTP pemulihan.
   ///
   /// Sprint 2 OTP/auth overhaul: backend sekarang cuma punya satu channel
@@ -588,35 +630,60 @@ class _PasscodeUnlockScreenState extends State<PasscodeUnlockScreen>
               children: [
                 const SizedBox(height: 24),
 
-                // Back Button for Recovery Sub-steps
-                if (_currentStep != UnlockStep.enterPasscode)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 16),
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                            size: 18, color: AppColors.slate600),
-                        onPressed: () {
-                          setState(() {
-                            _errorMessage = "";
-                            if (_currentStep == UnlockStep.verifyOtp) {
-                              _currentStep = UnlockStep.enterPasscode;
-                              _resendTimer?.cancel();
-                              _resendSeconds = 0;
-                              _resendBlockedMessage = null;
-                            } else if (_currentStep ==
-                                UnlockStep.resetPasscode) {
-                              _currentStep = UnlockStep.verifyOtp;
-                            } else if (_currentStep ==
-                                UnlockStep.confirmResetPasscode) {
-                              _currentStep = UnlockStep.resetPasscode;
-                            }
-                          });
-                        },
+                // Baris atas: tombol kembali untuk sub-langkah pemulihan
+                // (kiri) + tombol keluar akun (kanan). Tombol keluar sengaja
+                // selalu tampil supaya staff yang lupa passcode DAN tidak bisa
+                // akses email pemulihan tetap punya jalan keluar: logout lalu
+                // login lagi dengan nomor lain.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      if (_currentStep != UnlockStep.enterPasscode)
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                              size: 18, color: AppColors.slate600),
+                          onPressed: () {
+                            setState(() {
+                              _errorMessage = "";
+                              if (_currentStep == UnlockStep.verifyOtp) {
+                                _currentStep = UnlockStep.enterPasscode;
+                                _resendTimer?.cancel();
+                                _resendSeconds = 0;
+                                _resendBlockedMessage = null;
+                              } else if (_currentStep ==
+                                  UnlockStep.resetPasscode) {
+                                _currentStep = UnlockStep.verifyOtp;
+                              } else if (_currentStep ==
+                                  UnlockStep.confirmResetPasscode) {
+                                _currentStep = UnlockStep.resetPasscode;
+                              }
+                            });
+                          },
+                        ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _isLoading ? null : _logout,
+                        icon: const Icon(Icons.logout_rounded,
+                            size: 16, color: AppColors.danger),
+                        label: Text(
+                          "Keluar",
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: AppColors.danger,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
+                ),
 
                 // Mascot & Logo
                 Expanded(

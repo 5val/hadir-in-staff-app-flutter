@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'package:hadirin_staff_app/screens/account_tab.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/testing_config.dart';
+import '../widgets/attendance_photo.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
@@ -23,7 +23,6 @@ import 'history_screen.dart';
 import 'login_screen.dart';
 import 'main_screen.dart';
 import 'all_attendance_history_screen.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onNavigateToAccount;
@@ -255,10 +254,34 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Camera navigation ─────────────────────────────────────────
-  // ── Check-in detail state ──────────────────────────────────────
+  // ── Detail kehadiran state ─────────────────────────────────────
+  // Diisi begitu absen berhasil, dibaca oleh `_buildKehadiranDetailCard()`.
+  // Path foto di sini adalah file LOKAL hasil kamera, dipakai semata untuk
+  // pratinjau selama sesi ini; salinan permanennya ada di server (Google
+  // Drive) lewat AttendanceService.
   String? _checkInPhotoPath;
   String? _checkInLocation;
   DateTime? _checkInDisplayTime;
+  String? _checkOutPhotoPath;
+  String? _checkOutLocation;
+  DateTime? _checkOutDisplayTime;
+
+  // ── Nilai efektif kartu detail kehadiran ─────────────────────────────
+  //
+  // State di atas hanya terisi pada sesi tempat absennya dilakukan. Begitu HP
+  // terkunci dan staff masuk lagi lewat passcode, layar ini dibangun dari nol
+  // sehingga semuanya null — dan kartu detail kehadiran ikut hilang padahal
+  // absensinya jelas ada. Karena itu setiap nilai jatuh ke record hari ini
+  // dari server (`AttendanceProvider.today`, sumber kebenaran yang sama yang
+  // dipakai menentukan status check-in/check-out).
+  DateTime? get _effCheckInTime => _checkInDisplayTime ?? _att.checkInTime;
+  DateTime? get _effCheckOutTime => _checkOutDisplayTime ?? _att.checkOutTime;
+  String? get _effCheckInLocation =>
+      _checkInLocation ?? _att.today?.locationLabel;
+  String? get _effCheckOutLocation =>
+      _checkOutLocation ?? _att.today?.locationLabel;
+  String get _effCheckInPhotoUrl => _att.today?.fotoMasuk ?? '';
+  String get _effCheckOutPhotoUrl => _att.today?.fotoKeluar ?? '';
 
   Future<void> _openCameraForCheckIn() async {
     final result = await Navigator.push<CameraResult>(
@@ -342,6 +365,9 @@ class _HomeTabState extends State<HomeTab> {
     }
     if (!mounted) return;
     setState(() {
+      _checkOutPhotoPath = result.imagePath;
+      _checkOutLocation = _att.today?.locationLabel ?? _officeAddress;
+      _checkOutDisplayTime = _att.checkOutTime ?? DateTime.now();
       _showMascot = true;
       _mascotMsg = 'Kerja hari ini selesai!\nGood job! 🎉';
     });
@@ -587,11 +613,13 @@ class _HomeTabState extends State<HomeTab> {
                           const SizedBox(height: 8),
                         ],
                         _buildAttendanceSection(),
-                        if (_checkInDisplayTime != null &&
-                            _status !=
-                                AttendanceProviderStatus.notCheckedIn) ...[
+                        // Tidak lagi bergantung pada state sesi ini — kartu
+                        // tampil selama server bilang hari ini sudah ada
+                        // absensinya, termasuk setelah login ulang passcode.
+                        if (_status !=
+                            AttendanceProviderStatus.notCheckedIn) ...[
                           const SizedBox(height: 14),
-                          _buildCheckInDetailCard(),
+                          _buildKehadiranDetailCard(),
                         ],
                         // Timeline hanya tampil jika belum checkout
                         if (_isWorkDay && !isCheckedOut) ...[
@@ -620,161 +648,186 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
-  // ── Check-In Detail Card ───────────────────────────────────────
-  Widget _buildCheckInDetailCard() {
-  final time = _checkInDisplayTime;
-  if (time == null) return const SizedBox.shrink();
-  final timeStr =
-      '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-  final dateStr = DateFormat('EEEE, d MMMM yyyy', 'id_ID').format(time);
-  return Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: AppColors.brandLime.withOpacity(0.5)),
-      boxShadow: [
-        BoxShadow(
-          color: AppColors.brandLime.withOpacity(0.15),
-          blurRadius: 8,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Column(
+  // ── Kartu Detail Kehadiran ────────────────────────────
+  //
+  // Sebelum check-out: berjudul "DETAIL CHECK-IN", satu entri.
+  // Setelah check-out: berubah jadi "DETAIL KEHADIRAN" dan entri check-out
+  // ikut tampil di bawahnya — jam, lokasi, dan foto absen pulang sebelumnya
+  // tidak pernah muncul di kartu ini sama sekali.
+  Widget _buildKehadiranDetailCard() {
+    final inTime = _effCheckInTime;
+    if (inTime == null) return const SizedBox.shrink();
+
+    final outTime = _effCheckOutTime;
+    final sudahCheckOut = outTime != null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.brandLime.withOpacity(0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brandLime.withOpacity(0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.brandLime.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded,
+                    color: AppColors.brandLimeDark, size: 16),
+              ),
+              const SizedBox(width: 8),
+              Text(sudahCheckOut ? 'DETAIL KEHADIRAN' : 'DETAIL CHECK-IN',
+                  style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.brandLimeDark,
+                      letterSpacing: 1.0)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildKehadiranEntry(
+            label: 'CHECK-IN',
+            accent: AppColors.brandLimeDark,
+            accentBg: AppColors.brandLime.withOpacity(0.18),
+            photoPath: _checkInPhotoPath,
+            photoUrl: _effCheckInPhotoUrl,
+            time: inTime,
+            location: _effCheckInLocation,
+          ),
+          if (sudahCheckOut) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: AppColors.slate200.withOpacity(0.8)),
+            const SizedBox(height: 12),
+            _buildKehadiranEntry(
+              label: 'CHECK-OUT',
+              accent: AppColors.warning,
+              accentBg: AppColors.warning.withOpacity(0.15),
+              photoPath: _checkOutPhotoPath,
+              photoUrl: _effCheckOutPhotoUrl,
+              time: outTime,
+              location: _effCheckOutLocation,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Satu entri absen (foto + jam + lokasi) di dalam kartu detail kehadiran.
+  Widget _buildKehadiranEntry({
+    required String label,
+    required Color accent,
+    required Color accentBg,
+    required String? photoPath,
+    required String photoUrl,
+    required DateTime time,
+    required String? location,
+  }) {
+    final timeStr =
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    final dateStr = DateFormat('EEEE, d MMMM yyyy', 'id_ID').format(time);
+
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: AppColors.brandLime.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check_circle_rounded,
-                  color: AppColors.brandLimeDark, size: 16),
-            ),
-            const SizedBox(width: 8),
-            Text('DETAIL CHECK-IN',
-                style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.brandLimeDark,
-                    letterSpacing: 1.0)),
-          ],
+        // ── FOTO PREVIEW (rasio dikunci 3/4 = potret kamera HP) ──
+        Container(
+          width: 72,
+          decoration: BoxDecoration(
+            color: AppColors.slate100,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.slate200),
+          ),
+          child: AspectRatio(
+            aspectRatio: 3 / 4,
+            child: AttendancePhoto(localPath: photoPath, remoteUrl: photoUrl),
+          ),
         ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── FOTO PREVIEW (Rasio Dikunci ke 3/4) ──
-            Container(
-              width: 72, // Lebar tetap 72
-              // height dihapus agar tingginya ditentukan secara alami oleh AspectRatio (72 * 4/3 = 96)
-              decoration: BoxDecoration(
-                color: AppColors.slate100,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.slate200),
-              ),
-              child: AspectRatio(
-                aspectRatio: 3 / 4, // <── KUNCINYA: Mengunci rasio portrait foto HP
-                child: _checkInPhotoPath != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: kIsWeb
-                            ? Image.network(
-                                _checkInPhotoPath!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(
-                                    Icons.person_rounded,
-                                    color: AppColors.slate400,
-                                    size: 32),
-                              )
-                            : Image.file(
-                                File(_checkInPhotoPath!),
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => const Icon(
-                                    Icons.person_rounded,
-                                    color: AppColors.slate400,
-                                    size: 32),
-                              ),
-                      )
-                    : const Icon(Icons.person_rounded,
-                        color: AppColors.slate400, size: 32),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Waktu
+              Row(
                 children: [
-                  // Waktu
-                  Row(
-                    children: [
-                      const Icon(Icons.access_time_rounded,
-                          size: 13, color: AppColors.slate400),
-                      const SizedBox(width: 5),
-                      Text('$timeStr · $dateStr',
-                          style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.slate700)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  // Lokasi
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.location_on_rounded,
-                          size: 13, color: AppColors.slate400),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(_officeName,
-                                style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.slate800)),
-                            Text(_checkInLocation ?? _officeAddress,
-                                style: GoogleFonts.inter(
-                                    fontSize: 10, color: AppColors.slate700),
-                                overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  // Status badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.brandLime.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text('✓  TERVERIFIKASI',
+                  const Icon(Icons.access_time_rounded,
+                      size: 13, color: AppColors.slate400),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text('$timeStr · $dateStr',
                         style: GoogleFonts.inter(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.brandLimeDark,
-                            letterSpacing: 0.5)),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.slate700)),
                   ),
                 ],
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              // Lokasi
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.location_on_rounded,
+                      size: 13, color: AppColors.slate400),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_officeName,
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.slate800)),
+                        Text(location ?? _officeAddress,
+                            style: GoogleFonts.inter(
+                                fontSize: 10, color: AppColors.slate700),
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // Badge menyebut jenis absennya, karena setelah check-out kartu
+              // ini memuat dua entri sekaligus.
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: accentBg,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text('✓  $label TERVERIFIKASI',
+                    style: GoogleFonts.inter(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                        letterSpacing: 0.5)),
+              ),
+            ],
+          ),
         ),
       ],
-    ),
-  );
-}
+    );
+  }
 
   // ── AppBar ─────────────────────────────────────────────────────
   Widget _buildAppBar() {
@@ -2108,6 +2161,7 @@ class _AttendanceHistoryFullScreenState
       result.add(_HistoryDay(
         date: cursor,
         isWeekend: bukanHariKerja && rec == null,
+        bukanHariKerja: bukanHariKerja,
         record: rec,
       ));
       cursor = cursor.subtract(const Duration(days: 1));
@@ -2209,10 +2263,20 @@ class _AttendanceHistoryFullScreenState
 
   Widget _buildDayTile(_HistoryDay day) {
     final rec = day.record;
-    final isWeekend = day.isWeekend;
-    final isHoliday = rec?.status == AttendanceStatus.holiday;
+
+    // Absensi yang benar-benar ada SELALU menang atas label "LIBUR": kalau
+    // staff tercatat masuk di hari Sabtu/tanggal merah, yang ingin dilihat
+    // adalah jam masuk & pulangnya, bukan baris kosong "Tidak ada aktivitas".
+    final hasAttendance =
+        rec != null && (rec.checkIn != null || rec.checkOut != null);
+    final isWeekend = day.isWeekend && !hasAttendance;
+    final isHoliday =
+        rec?.status == AttendanceStatus.holiday && !hasAttendance;
     final isLibur = isWeekend || isHoliday;
     final absent = !isLibur && rec == null;
+    // Absensi di hari yang memang bukan hari kerja — ditandai agar tidak
+    // terbaca seolah hari kerja biasa.
+    final liburTapiMasuk = day.bukanHariKerja && hasAttendance;
     final isLate = !isLibur &&
         !absent &&
         rec!.checkIn != null &&
@@ -2353,6 +2417,24 @@ class _AttendanceHistoryFullScreenState
                             highlight: true),
                       ],
                     ),
+                    if (liburTapiMasuk) ...[
+                      const SizedBox(height: 5),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Absen di hari libur',
+                          style: GoogleFonts.inter(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.warning),
+                        ),
+                      ),
+                    ],
                   ],
                   const SizedBox(height: 5),
                   Row(
@@ -2401,8 +2483,21 @@ class _AttendanceHistoryFullScreenState
 
 class _HistoryDay {
   final DateTime date;
+
+  /// Tampilkan baris ini sebagai hari libur kosong. False begitu hari itu
+  /// ternyata punya absensi — lihat [bukanHariKerja] untuk fakta kalendernya.
   final bool isWeekend;
+
+  /// Hari ini memang di luar hari kerja shift / tanggal merah, TERLEPAS dari
+  /// ada tidaknya absensi. Dipisah dari [isWeekend] supaya absensi yang
+  /// terjadi di hari libur (mis. lembur akhir pekan) tetap bisa ditandai
+  /// "hari libur" sambil tetap menampilkan jam-jamnya.
+  final bool bukanHariKerja;
+
   final AttendanceRecord? record;
   const _HistoryDay(
-      {required this.date, required this.isWeekend, required this.record});
+      {required this.date,
+      required this.isWeekend,
+      required this.bukanHariKerja,
+      required this.record});
 }
