@@ -5,7 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/testing_config.dart';
-import '../widgets/attendance_photo.dart';
+import '../widgets/uploaded_file_image.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
@@ -756,7 +756,7 @@ class _HomeTabState extends State<HomeTab> {
           ),
           child: AspectRatio(
             aspectRatio: 3 / 4,
-            child: AttendancePhoto(localPath: photoPath, remoteUrl: photoUrl),
+            child: UploadedFileImage(localPath: photoPath, remoteUrl: photoUrl),
           ),
         ),
         const SizedBox(width: 14),

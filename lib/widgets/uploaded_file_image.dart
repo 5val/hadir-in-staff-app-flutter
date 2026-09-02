@@ -7,14 +7,18 @@ import '../config/api_config.dart';
 import '../services/session_service.dart';
 import '../theme/app_theme.dart';
 
-/// Foto absensi (selfie check-in/check-out) dari salah satu dari dua sumber.
+/// Gambar milik server (selfie absensi, dokumen onboarding) dari salah satu
+/// dari dua sumber.
 ///
-/// Kenapa perlu dua sumber: tepat setelah absen, foto yang paling cepat dan
-/// paling tajam adalah file hasil kamera yang masih ada di HP ([localPath]).
-/// Tapi file itu hanya hidup selama sesi — begitu HP terkunci lalu staff
-/// membuka app lagi lewat passcode, layar dibangun dari nol dan satu-satunya
-/// yang tersisa adalah nilai kolom dari server ([remoteUrl]). Sebelum widget
-/// ini ada, kartu detail kehadiran ikut hilang di titik itu.
+/// Kenapa perlu dua sumber: tepat setelah mengunggah, gambar yang paling cepat
+/// dan paling tajam adalah file yang masih ada di HP ([localPath]). Tapi file
+/// itu hanya hidup selama sesi — begitu HP terkunci lalu staff membuka app
+/// lagi lewat passcode, layar dibangun dari nol dan satu-satunya yang tersisa
+/// adalah nilai kolom dari server ([remoteUrl]). Sebelum widget ini ada, kartu
+/// detail kehadiran ikut hilang di titik itu.
+///
+/// Dipakai dua tempat: kartu detail kehadiran (home_tab) dan pratinjau dokumen
+/// onboarding (pas foto/KTP/BPJS/NPWP).
 ///
 /// [remoteUrl] bisa berbentuk tiga hal yang semuanya harus tetap jalan:
 ///   1. URL Google Drive — file PRIVAT, tidak bisa dipakai `Image.network`
@@ -23,25 +27,36 @@ import '../theme/app_theme.dart';
 ///   2. `/uploads/...` — fallback disk lokal server, disajikan
 ///      `express.static` tanpa auth, cukup diberi prefix origin backend.
 ///   3. URL absolut lain (mis. data contoh) — dipakai apa adanya.
-class AttendancePhoto extends StatefulWidget {
-  /// Path file kamera di HP untuk absen yang baru saja dilakukan. Null bila
-  /// kartu ini dibangun ulang dari data server.
+class UploadedFileImage extends StatefulWidget {
+  /// Path file di HP untuk unggahan yang baru saja dilakukan. Null bila widget
+  /// ini dibangun ulang dari data server.
   final String? localPath;
 
-  /// Nilai kolom `fotoMasuk`/`fotoKeluar` dari server (boleh kosong).
+  /// Nilai kolom URL dari server — `fotoMasuk`/`fotoKeluar` untuk absensi,
+  /// `fileUrl` untuk dokumen onboarding (boleh kosong).
   final String remoteUrl;
 
-  const AttendancePhoto({
+  /// `cover` untuk thumbnail/kartu (mengisi bingkai), `contain` untuk penampil
+  /// layar penuh — memotong dokumen identitas saat diperbesar justru
+  /// menghilangkan bagian yang ingin diperiksa.
+  final BoxFit fit;
+
+  /// Radius sudut. 0 untuk penampil layar penuh.
+  final double borderRadius;
+
+  const UploadedFileImage({
     super.key,
     required this.localPath,
     required this.remoteUrl,
+    this.fit = BoxFit.cover,
+    this.borderRadius = 10,
   });
 
   @override
-  State<AttendancePhoto> createState() => _AttendancePhotoState();
+  State<UploadedFileImage> createState() => _UploadedFileImageState();
 }
 
-class _AttendancePhotoState extends State<AttendancePhoto> {
+class _UploadedFileImageState extends State<UploadedFileImage> {
   /// Header Authorization untuk foto yang harus lewat proxy. Null selama
   /// token belum terbaca dari secure storage.
   Map<String, String>? _authHeaders;
@@ -53,7 +68,7 @@ class _AttendancePhotoState extends State<AttendancePhoto> {
   }
 
   @override
-  void didUpdateWidget(covariant AttendancePhoto old) {
+  void didUpdateWidget(covariant UploadedFileImage old) {
     super.didUpdateWidget(old);
     if (old.remoteUrl != widget.remoteUrl &&
         _driveFileId(widget.remoteUrl) != null &&
@@ -98,13 +113,13 @@ class _AttendancePhotoState extends State<AttendancePhoto> {
     // sekali, jadi tampil seketika setelah absen.
     if (local != null && local.isNotEmpty) {
       return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(widget.borderRadius),
         child: kIsWeb
             ? Image.network(local,
-                fit: BoxFit.cover,
+                fit: widget.fit,
                 errorBuilder: (_, __, ___) => _placeholder)
             : Image.file(File(local),
-                fit: BoxFit.cover,
+                fit: widget.fit,
                 errorBuilder: (_, __, ___) => _placeholder),
       );
     }
@@ -126,10 +141,10 @@ class _AttendancePhotoState extends State<AttendancePhoto> {
     }
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(widget.borderRadius),
       child: Image.network(
         src,
-        fit: BoxFit.cover,
+        fit: widget.fit,
         headers: driveId != null ? _authHeaders : null,
         errorBuilder: (_, __, ___) => _placeholder,
         loadingBuilder: (context, child, progress) {
