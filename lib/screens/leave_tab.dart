@@ -580,10 +580,15 @@ class _LeaveTabState extends State<LeaveTab> {
   //
   // Sekarang seluruh isinya datang dari backend
   // (`GET .../lembur/eligible-days`), yang menerapkan tiga aturan produk:
-  //   1. hanya 3 HARI KERJA terakhir (H-3) — akhir pekan & hari libur
-  //      dilewati, jadi kalau hari ini Senin yang muncul Jumat/Kamis/Rabu;
-  //   2. hanya hari yang checkout-nya memang melewati jam pulang shift —
-  //      kalau tidak ada, daftarnya kosong (bukan "3 lembur terakhir");
+  //   1. 3 HARI LEMBUR terakhir — hari yang checkout-nya benar-benar
+  //      melewati jam pulang shift, termasuk HARI INI bila sudah check-out.
+  //      Hari tanpa lembur dilompati, jadi daftarnya bisa memuat tanggal
+  //      yang jaraknya berminggu-minggu (aturan diubah 2026-09-04; dulu
+  //      jendelanya "3 hari kerja terakhir" yang lalu disaring, sehingga
+  //      lembur minggu lalu yang belum diajukan tidak pernah muncul);
+  //   2. akhir pekan & tanggal merah tetap dilewati — bukan karena kalender
+  //      yang menentukan daftarnya, tapi karena endpoint POST menolak
+  //      tanggal di luar hari kerja shift;
   //   3. tidak bisa diajukan bila gaji periode tersebut sudah ditutup.
   //
   // Sub-tab "Riwayat Pengajuan Lembur" juga dihapus dari sini — riwayatnya
@@ -704,8 +709,9 @@ class _LeaveTabState extends State<LeaveTab> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Menampilkan maksimal 3 hari kerja terakhir yang jam pulangnya '
-            'melebihi jam pulang shift. Hari libur tidak dihitung.',
+            'Menampilkan 3 hari lembur terakhir Anda — hari yang jam '
+            'pulangnya melebihi jam pulang shift, termasuk hari ini bila '
+            'sudah check-out. Akhir pekan & hari libur tidak dihitung.',
             style: AppText.caption,
           ),
           const SizedBox(height: 12),

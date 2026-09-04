@@ -67,18 +67,50 @@ Semua di `lib/config/testing_config.dart`:
 | `useOfficeCoordinates` | `true` | Pakai koordinat kantor staff yang login → jarak 0 m, selalu lolos geofence kantor mana pun |
 | `fallbackLatitude` / `fallbackLongitude` | `-6.2088` / `106.8456` | Dipakai bila `useOfficeCoordinates = false`, atau staff belum ditempatkan pada Lokasi |
 | `fakeAccuracyMeters` | `5` | Akurasi GPS palsu |
-| `checkInTime` | `'08:00'` | Jam yang **dikirim ke backend** saat check-in |
-| `checkOutTime` | `'17:00'` | Jam yang **dikirim ke backend** saat check-out |
-| `clockTime` | `'17:30'` | "Jam sekarang" versi testing untuk tampilan/gerbang UI |
+| `checkInTime` | `'08:00'` | Jam yang **dikirim ke backend** saat check-in — ditentukan skenario |
+| `checkOutTime` | `'17:00'` | Jam yang **dikirim ke backend** saat check-out — ditentukan skenario |
+| `clockTime` | `'17:30'` | "Jam sekarang" versi testing untuk tampilan/gerbang UI — ditentukan skenario |
 
-### Skenario uji yang berguna
+### Skenario absensi (`TESTING_SCENARIO`)
+
+Jam check-in/check-out tidak lagi diubah dengan mengedit literal satu per satu.
+Pilih **skenario** lewat flag CLI kedua:
+
+```bash
+flutter run --dart-define=TESTING_MODE=true --dart-define=TESTING_SCENARIO=lembur
+```
+
+Tanpa `TESTING_SCENARIO`, skenario yang dipakai adalah `normal` — persis sama
+dengan perilaku sebelum skenario ada.
+
+| Skenario | Check-in → Check-out | Hasil yang diharapkan |
+|---|---|---|
+| `normal` (default) | 08:00 → 17:00 | Status hadir, lembur 0 |
+| `terlambat` | 09:30 → 17:00 | Terlambat 90 menit + denda, lembur 0 |
+| `lembur` | 08:00 → 20:00 | **Lembur 180 menit (3 jam)**, hari itu layak diajukan lembur |
+| `lemburTepatBatas` | 08:00 → 18:00 | Lembur 60 menit **tapi TIDAK layak diajukan** |
+| `terlambatLembur` | 09:30 → 20:00 | Terlambat 90 menit **dan** lembur 180 menit sekaligus |
+
+Angka lembur di atas mengasumsikan `Shift.jamPulang` staff = **17:00**; backend
+menghitungnya relatif terhadap jam pulang shift staff yang bersangkutan
+(`lembur = checkOut − jamPulang`), jadi kalau shift-nya berbeda, selisihnya
+ikut bergeser.
+
+**Kenapa ada `lemburTepatBatas`.** Gerbang kelayakan lembur di backend adalah
+`checkOut − jamPulang > 60` menit — bukan `>=` (lihat
+`isLemburEligible` di `lib/attendance-payroll.ts` pada repo backend). Skenario
+ini duduk PAS di 60 menit, jadi ia harus menghasilkan lembur yang tercatat
+tapi belum bisa diajukan. Kalau suatu hari gerbang itu berubah jadi `>=`,
+skenario inilah yang menangkapnya.
+
+Banner mode testing di HomeTab menampilkan nama skenario **beserta hasil yang
+diharapkan**, supaya penguji tidak perlu menghitung sendiri dan langsung sadar
+kalau data yang tersimpan ternyata berbeda.
+
+### Hal lain yang berguna diuji
 
 | Yang mau diuji | Setel |
 |---|---|
-| Hadir tepat waktu | `checkInTime = '08:00'` (≤ `Shift.jamMasuk` + toleransi) |
-| Status **terlambat** + denda | `checkInTime = '09:30'` |
-| Pulang normal | `checkOutTime = '17:00'` |
-| **Lembur** 2 jam | `checkOutTime = '19:00'` |
 | **Di luar radius** (ditolak server) | `useOfficeCoordinates = false` + koordinat jauh dari kantor |
 
 ---

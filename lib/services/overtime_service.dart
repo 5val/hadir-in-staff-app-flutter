@@ -96,7 +96,8 @@ class OvertimeService {
     return id;
   }
 
-  /// Hari-hari (maks. 3 hari kerja terakhir) yang checkout-nya melewati jam
+  /// Hari-hari (3 hari LEMBUR terakhir, termasuk hari ini bila sudah
+  /// check-out) yang checkout-nya melewati jam
   /// pulang shift. Kosong = memang tidak ada lembur untuk diajukan.
   static Future<List<OvertimeEligibleDay>> eligibleDays() async {
     final id = await _staffId();

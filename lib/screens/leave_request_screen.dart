@@ -636,13 +636,19 @@ class _LeaveRequestScreenState extends State<LeaveRequestScreen>
                   const AppDivider(),
                   const SizedBox(height: 6),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Icon(Icons.info_outline_rounded,
                           color: AppColors.brandNavy, size: 12),
                       const SizedBox(width: 4),
-                      Text('Izin sakit bisa diajukan untuk hari sebelumnya',
-                          style: AppText.caption
-                              .copyWith(color: AppColors.brandNavy)),
+                      // Kalimatnya lebih panjang dari lebar kartu di layar
+                      // sempit — tanpa Expanded, Row-nya meluber.
+                      Expanded(
+                        child: Text(
+                            'Izin sakit bisa diajukan untuk hari sebelumnya',
+                            style: AppText.caption
+                                .copyWith(color: AppColors.brandNavy)),
+                      ),
                     ],
                   ),
                 ],

@@ -979,6 +979,17 @@ class _HomeTabState extends State<HomeTab> {
                   style: GoogleFonts.inter(
                       fontSize: 10, color: AppColors.slate700),
                 ),
+                const SizedBox(height: 2),
+                // Hasil yang seharusnya tercatat setelah skenario dijalankan
+                // penuh — supaya penguji tidak perlu menghitung sendiri, dan
+                // langsung sadar kalau data yang tersimpan ternyata berbeda.
+                Text(
+                  TestingConfig.scenarioExpectation,
+                  style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontStyle: FontStyle.italic,
+                      color: AppColors.slate600),
+                ),
               ],
             ),
           ),
@@ -1163,19 +1174,22 @@ class _HomeTabState extends State<HomeTab> {
               Text(isBreak ? '☕' : (isBreakEnded ? '💪' : '⏱️'),
                   style: const TextStyle(fontSize: 18)),
               const SizedBox(width: 8),
-              Text(
-                isBreak
-                    ? 'ISTIRAHAT AKTIF'
-                    : (isBreakEnded
-                        ? 'SELESAI ISTIRAHAT'
-                        : 'AKTIVITAS SAAT INI'),
-                style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: isBreak ? AppColors.warning : AppColors.brandNavy,
-                    letterSpacing: 1.0),
+              Flexible(
+                child: Text(
+                  isBreak
+                      ? 'ISTIRAHAT AKTIF'
+                      : (isBreakEnded
+                          ? 'SELESAI ISTIRAHAT'
+                          : 'AKTIVITAS SAAT INI'),
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: isBreak ? AppColors.warning : AppColors.brandNavy,
+                      letterSpacing: 1.0),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               if (!isBreakEnded)
                 Container(
                   padding:
@@ -1197,32 +1211,50 @@ class _HomeTabState extends State<HomeTab> {
             ],
           ),
           const SizedBox(height: 12),
+          // Dua kolom ini dibungkus Flexible: angka durasi 28px monospace di
+          // kiri plus label "Sedang Istirahat" di kanan sudah mepet pada layar
+          // sempit, dan tinggal meluber begitu skala teks sistem dinaikkan.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Waktu Kerja', style: AppText.caption),
-                  Text(_fmtDur(_workDur),
-                      style: GoogleFonts.jetBrainsMono(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.slate900)),
-                ],
-              ),
-              if (isBreak || isBreakEnded)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Status Istirahat', style: AppText.caption),
-                    Text(isBreak ? 'Sedang Istirahat' : 'Selesai',
-                        style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.warning)),
+                    Text('Waktu Kerja', style: AppText.caption),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(_fmtDur(_workDur),
+                          style: GoogleFonts.jetBrainsMono(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.slate900)),
+                    ),
                   ],
                 ),
+              ),
+              if (isBreak || isBreakEnded) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Status Istirahat',
+                          style: AppText.caption,
+                          overflow: TextOverflow.ellipsis),
+                      Text(isBreak ? 'Sedang Istirahat' : 'Selesai',
+                          textAlign: TextAlign.end,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.warning)),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ],
@@ -1389,30 +1421,41 @@ class _HomeTabState extends State<HomeTab> {
                   children: [
                     Text('Sedang Istirahat',
                         style:
-                            AppText.label.copyWith(color: AppColors.slate900)),
+                            AppText.label.copyWith(color: AppColors.slate900),
+                        overflow: TextOverflow.ellipsis),
                     // Fase 8: yang ditampilkan DURASI, bukan jam istirahat —
                     // di database memang hanya durasi yang disimpan.
                     Text('Sudah istirahat: ${_fmtDur(_breakDur)}',
-                        style: AppText.body2),
+                        style: AppText.body2,
+                        overflow: TextOverflow.ellipsis),
                     if (hasBreakTarget) ...[
                       const SizedBox(height: 4),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (isBreakOvertime) ...[
                             const Icon(Icons.warning_rounded,
                                 color: AppColors.danger, size: 14),
                             const SizedBox(width: 4),
                           ],
-                          Text(
-                            isBreakOvertime
-                                ? '${_fmtBreakCountdown(breakSecondsLeft)} lewat jam istirahat selesai'
-                                : 'Sisa: ${_fmtBreakCountdown(breakSecondsLeft)} (sampai ${AttendanceRules.jamIstirahatSelesaiLabel})',
-                            style: GoogleFonts.jetBrainsMono(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: isBreakOvertime
-                                  ? AppColors.danger
-                                  : AppColors.brandNavy,
+                          // WAJIB Expanded: kalimatnya panjang ("Sisa: 12:34
+                          // (sampai 13:00)" / "01:20 lewat jam istirahat
+                          // selesai") sementara ruang yang tersisa sudah
+                          // dipotong emoji di kiri dan tombol Break Out di
+                          // kanan. Tanpa pembatas lebar, Row ini meluber dan
+                          // kartunya tampil bergaris kuning-hitam.
+                          Expanded(
+                            child: Text(
+                              isBreakOvertime
+                                  ? '${_fmtBreakCountdown(breakSecondsLeft)} lewat jam istirahat selesai'
+                                  : 'Sisa: ${_fmtBreakCountdown(breakSecondsLeft)} (sampai ${AttendanceRules.jamIstirahatSelesaiLabel})',
+                              style: GoogleFonts.jetBrainsMono(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: isBreakOvertime
+                                    ? AppColors.danger
+                                    : AppColors.brandNavy,
+                              ),
                             ),
                           ),
                         ],
