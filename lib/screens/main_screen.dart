@@ -392,7 +392,9 @@ class _MainScreenState extends State<MainScreen> {
               onNavigateToAccount: () => _onTabTap(4),
               attendance: _attendance,
             ),
-            isManager ? const AdminDashboardTab() : const LeaveTab(),
+            isManager
+                ? const AdminDashboardTab()
+                : LeaveTab(attendance: _attendance),
             // slot 2 kosong — FAB menangani kamera secara push, bukan IndexedStack
             const SizedBox.shrink(),
             const SalaryScreen(isFromAccount: false),

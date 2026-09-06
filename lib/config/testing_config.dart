@@ -89,11 +89,17 @@ enum TestingScenario {
 
   /// 08:00 → 18:00. Sengaja PAS 60 menit lewat jam pulang.
   ///
-  /// Gerbang kelayakan lembur di backend adalah `checkOut - jamPulang > 60`
-  /// (lib/attendance-payroll.ts#isLemburEligible) — bukan `>=`. Jadi
-  /// skenario ini menghasilkan selisih 60 menit yang justru TIDAK layak
-  /// diajukan. Ada di sini persis untuk menguji sisi tajam itu: kalau suatu
-  /// hari gerbangnya berubah jadi `>=`, skenario inilah yang menangkapnya.
+  /// Sejak 2026-09-05 ada DUA gerbang berbeda di backend, dan skenario ini
+  /// jatuh tepat di antara keduanya — itulah gunanya:
+  ///   • PENGAJUAN (`isLemburRequestable`): cukup `Attendance.lembur > 0`,
+  ///     jadi 60 menit ini LAYAK diajukan dan harinya muncul di menu Lembur;
+  ///   • PENGGAJIAN (`isLemburEligible` + bulat ke bawah per jam): masih
+  ///     `> 60` menit, jadi 60 menit ini dibayar 0 jam.
+  ///
+  /// Sebelumnya kedua gerbang itu satu dan sama, dan skenario ini dipakai
+  /// untuk mengunci `>` vs `>=`. Sekarang ia mengunci hal yang lebih
+  /// penting: bahwa melonggarkan sisi pengajuan TIDAK ikut menggeser sisi
+  /// uang.
   lemburTepatBatas,
 
   /// 09:30 → 20:00. Terlambat DAN lembur sekaligus, untuk memastikan
@@ -246,8 +252,8 @@ class TestingConfig {
       case TestingScenario.lembur:
         return 'Harapan: lembur 180 menit (3 jam), hari ini layak diajukan lembur.';
       case TestingScenario.lemburTepatBatas:
-        return 'Harapan: lembur 60 menit TAPI belum layak diajukan '
-            '(gerbangnya > 60 menit, bukan >=).';
+        return 'Harapan: lembur 60 menit, BISA diajukan (menu Lembur), '
+            'tapi dibayar 0 jam (payroll masih > 60 menit).';
       case TestingScenario.terlambatLembur:
         return 'Harapan: terlambat 90 menit DAN lembur 180 menit sekaligus.';
     }

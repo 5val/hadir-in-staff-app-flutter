@@ -12,6 +12,7 @@ import '../services/api_client.dart';
 import '../services/overtime_service.dart';
 import '../services/subordinate_service.dart';
 import '../services/calendar_service.dart';
+import '../services/attendance_provider.dart';
 import 'all_leave_history_screen.dart';
 import 'all_subordinate_leave_history_screen.dart';
 import 'subordinate_requests_screen.dart';
@@ -20,7 +21,13 @@ import 'subordinate_requests_screen.dart';
 /// Tanpa re-verifikasi. Tab selector untuk: Pengajuan Karyawan (supervisor),
 /// Ajukan Cuti, Ajukan Izin, dan Riwayat Pengajuan.
 class LeaveTab extends StatefulWidget {
-  const LeaveTab({super.key});
+  /// Status absensi hari ini — sumbernya sama dengan yang dipakai HomeTab &
+  /// FAB di MainScreen. Dipakai di sini hanya untuk SATU hal: memuat ulang
+  /// daftar hari lembur begitu check-out hari ini masuk (lihat
+  /// `_onAttendanceChanged`).
+  final AttendanceProvider attendance;
+
+  const LeaveTab({super.key, required this.attendance});
 
   @override
   State<LeaveTab> createState() => _LeaveTabState();
@@ -65,12 +72,43 @@ class _LeaveTabState extends State<LeaveTab> {
   SubordinateRequests _subordinates = SubordinateRequests.empty;
   bool _loadingSubordinates = true;
 
+  /// Jam check-out hari ini yang terakhir kali terlihat, untuk mengenali
+  /// PERPINDAHAN "belum check-out" -> "sudah check-out" (bukan sekadar
+  /// notifikasi apa pun dari provider, yang juga terkirim saat istirahat).
+  DateTime? _lastSeenCheckOut;
+
   @override
   void initState() {
     super.initState();
+    _lastSeenCheckOut = widget.attendance.checkOutTime;
+    widget.attendance.addListener(_onAttendanceChanged);
     _loadLeaves();
     _loadOvertimeDays();
     _loadSubordinates();
+  }
+
+  @override
+  void dispose() {
+    widget.attendance.removeListener(_onAttendanceChanged);
+    super.dispose();
+  }
+
+  /// Tab ini hidup di dalam `IndexedStack` MainScreen, jadi `initState`-nya
+  /// hanya jalan SEKALI saat app dibuka dan tidak pernah dibangun ulang saat
+  /// tab-nya dipilih. Akibatnya daftar "hari yang bisa diajukan" masih berisi
+  /// hasil pengambilan saat app start — sementara HARI INI baru memenuhi
+  /// syarat lembur SESUDAH check-out (backend hanya mengembalikan hari yang
+  /// checkOut-nya sudah terisi, lihat `GET .../lembur/eligible-days`). Jadi
+  /// staff yang check-out lewat jam pulang lalu membuka menu Lembur tidak
+  /// melihat hari ini sama sekali sampai ia menarik-untuk-refresh atau
+  /// menutup app.
+  ///
+  /// Di sini daftarnya diambil ulang tepat pada momen check-out tercatat.
+  void _onAttendanceChanged() {
+    final checkOut = widget.attendance.checkOutTime;
+    final justCheckedOut = checkOut != null && _lastSeenCheckOut == null;
+    _lastSeenCheckOut = checkOut;
+    if (justCheckedOut && mounted) _loadOvertimeDays();
   }
 
   Future<void> _loadSubordinates() async {
@@ -636,7 +674,9 @@ class _LeaveTabState extends State<LeaveTab> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
-          // Info batas lembur — angkanya dari Jabatan.maxExtraHour di DB.
+          // Info batas lembur — angkanya dari Jabatan.maxExtraHour di DB,
+          // lewat [_batasLemburMenit] supaya sama persis dengan batas yang
+          // dipakai memotong durasi saat pengajuan.
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -672,7 +712,7 @@ class _LeaveTabState extends State<LeaveTab> {
                               color: Colors.white.withOpacity(0.8))),
                       const SizedBox(height: 2),
                       Text(
-                        '${AppSession.staff?.maxExtraHour ?? 4} Jam / Pengajuan',
+                        '${_formatDurasi(_batasLemburMenit())} / Pengajuan',
                         style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
@@ -833,32 +873,28 @@ class _LeaveTabState extends State<LeaveTab> {
   }
 
   /// Dialog pengajuan lembur -> kirim ke backend (bukan lagi menandai objek
-  /// dummy di memori). Jam mulai default = jam pulang shift.
+  /// dummy di memori).
+  ///
+  /// 2026-09-05: staff TIDAK lagi mengetik durasi. Dulu dialognya punya
+  /// kolom "Durasi Lembur (Jam)" yang bisa diisi angka berapa pun sampai
+  /// batas jabatan — angka karangan yang tidak ada hubungannya dengan berapa
+  /// lama orangnya benar-benar tinggal di kantor, dan atasan yang menyetujui
+  /// tidak punya cara membedakannya. Sekarang durasinya diturunkan dari
+  /// absensi hari itu ([_resolveOvertimeWindow]); yang tersisa untuk diisi
+  /// hanyalah alasan.
   void _showOvertimeDialog(OvertimeEligibleDay day, String dateStr) async {
-    final maxHours = (AppSession.staff?.maxExtraHour ?? 4).toDouble();
-    final result = await showDialog<Map<String, dynamic>>(
+    final window = _resolveOvertimeWindow(day);
+    final reason = await showDialog<String>(
       context: context,
-      builder: (_) =>
-          _OvertimeRequestDialog(maxOvertimeHours: maxHours, dateStr: dateStr),
+      builder: (_) => _OvertimeRequestDialog(dateStr: dateStr, window: window),
     );
-    if (result == null) return;
-
-    final hours = result['hours'] as double;
-    final reason = result['reason'] as String;
-
-    // jamMulai = jam pulang shift; jamSelesai = jamMulai + durasi diajukan.
-    final parts = day.jamPulangShift.split(':');
-    final startMin = (int.tryParse(parts.first) ?? 17) * 60 +
-        (int.tryParse(parts.last) ?? 0);
-    final endMin = startMin + (hours * 60).round();
-    String fmt(int m) =>
-        '${((m ~/ 60) % 24).toString().padLeft(2, '0')}:${(m % 60).toString().padLeft(2, '0')}';
+    if (reason == null) return;
 
     try {
       await OvertimeService.submit(
         tanggal: day.tanggal,
-        jamMulai: fmt(startMin),
-        jamSelesai: fmt(endMin),
+        jamMulai: window.jamMulai,
+        jamSelesai: window.jamSelesai,
         alasan: reason,
       );
       if (!mounted) return;
@@ -2943,13 +2979,128 @@ class _SummaryChip extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════
 // OVERTIME REQUEST DIALOG
 // ═══════════════════════════════════════════════════════════
+/// Batas lembur legal PP 35/2021 Pasal 26(1), dalam menit — kembaran
+/// `LEMBUR_MAX_JAM_PER_HARI` di routes/mobile/lembur.ts. Ada di sini supaya
+/// app tidak pernah menawarkan durasi yang pasti ditolak server, BUKAN supaya
+/// app yang menegakkan aturannya (server tetap memeriksanya sendiri).
+const int _lemburMaksMenitLegal = 4 * 60;
+
+/// Rentang lembur yang akan diajukan untuk satu hari — seluruhnya diturunkan,
+/// tidak ada satu pun angkanya yang diketik staff.
+class _OvertimeWindow {
+  /// Menit lembur yang tercatat di absensi hari itu (`Attendance.lembur`).
+  final int lemburMenit;
+
+  /// Batas yang berlaku untuk staff ini (jabatan, atau batas legal).
+  final int batasMenit;
+
+  /// Yang benar-benar diajukan = [lemburMenit] dipotong [batasMenit].
+  final int durasiMenit;
+
+  final String jamMulai;
+  final String jamSelesai;
+
+  const _OvertimeWindow({
+    required this.lemburMenit,
+    required this.batasMenit,
+    required this.durasiMenit,
+    required this.jamMulai,
+    required this.jamSelesai,
+  });
+
+  /// true = lemburnya lebih panjang dari batas, jadi yang diajukan dipotong.
+  bool get dipotong => lemburMenit > durasiMenit;
+}
+
+int? _menitDariJam(String? hhmm) {
+  if (hhmm == null) return null;
+  final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(hhmm.trim());
+  if (m == null) return null;
+  final jam = int.parse(m.group(1)!);
+  final menit = int.parse(m.group(2)!);
+  if (jam > 23 || menit > 59) return null;
+  return jam * 60 + menit;
+}
+
+String _jamDariMenit(int menit) {
+  final m = ((menit % 1440) + 1440) % 1440;
+  return '${(m ~/ 60).toString().padLeft(2, '0')}:'
+      '${(m % 60).toString().padLeft(2, '0')}';
+}
+
+/// "10 menit", "1 jam", "2 jam 15 menit".
+String _formatDurasi(int menit) {
+  final jam = menit ~/ 60;
+  final sisa = menit % 60;
+  if (jam > 0 && sisa > 0) return '$jam jam $sisa menit';
+  if (jam > 0) return '$jam jam';
+  return '$sisa menit';
+}
+
+/// Batas lembur yang berlaku untuk staff yang sedang login, dalam menit.
+///
+/// Satu definisi untuk dua tempat yang harus setuju: banner "Batas Maksimal
+/// Lembur Anda" di atas daftar, dan pemotongan durasi di
+/// [_resolveOvertimeWindow]. Sebelumnya banner-nya membaca `maxExtraHour`
+/// mentah, jadi staff tanpa jabatan (nilainya 0) melihat "0 Jam" padahal
+/// yang berlaku baginya adalah batas legal.
+int _batasLemburMenit() {
+  final jabatanJam = AppSession.staff?.maxExtraHour ?? 0;
+  final jabatanMenit = jabatanJam > 0 ? jabatanJam * 60 : _lemburMaksMenitLegal;
+  return jabatanMenit < _lemburMaksMenitLegal
+      ? jabatanMenit
+      : _lemburMaksMenitLegal;
+}
+
+/// Durasi lembur yang diajukan untuk [day], beserta rentang jamnya.
+///
+/// Aturannya (2026-09-05, permintaan pemilik produk): durasi MENGIKUTI lembur
+/// yang tercatat di absensi hari itu, dan kalau lebih panjang dari batas
+/// lembur staff, dipotong tepat di batas itu. Batas 1 jam + lembur tercatat
+/// 10 menit -> 10 menit; batas 1 jam + lembur tercatat 2 jam -> 1 jam.
+///
+/// Rentang jamnya dihitung MUNDUR dari check-out (`checkOut - lemburMenit`),
+/// bukan maju dari `jamPulangShift`. Keduanya sering sama, tapi tidak selalu:
+/// `Attendance.lembur` adalah snapshot saat check-out, jadi kalau
+/// `Shift.jamPulang` diedit sesudahnya, hanya hitungan mundur dari check-out
+/// yang masih menghasilkan rentang sepanjang lembur yang benar-benar
+/// tercatat. `jamPulangShift` hanya dipakai sebagai cadangan bila check-out
+/// tidak bisa dibaca.
+///
+/// `maxExtraHour` 0 (staff tanpa jabatan / jabatan tanpa batas) diperlakukan
+/// sebagai "tidak ada batas jabatan" dan jatuh ke batas legal — bukan sebagai
+/// batas 0 jam, yang akan membuat setiap pengajuan mustahil.
+_OvertimeWindow _resolveOvertimeWindow(OvertimeEligibleDay day) {
+  final lemburMenit = day.menitLewatJamPulang;
+
+  final batasMenit = _batasLemburMenit();
+
+  final durasiMenit = lemburMenit < batasMenit ? lemburMenit : batasMenit;
+
+  final checkOutMenit = _menitDariJam(day.checkOut);
+  final mulaiMenit = checkOutMenit != null
+      ? checkOutMenit - lemburMenit
+      : (_menitDariJam(day.jamPulangShift) ?? 17 * 60);
+
+  return _OvertimeWindow(
+    lemburMenit: lemburMenit,
+    batasMenit: batasMenit,
+    durasiMenit: durasiMenit,
+    jamMulai: _jamDariMenit(mulaiMenit),
+    jamSelesai: _jamDariMenit(mulaiMenit + durasiMenit),
+  );
+}
+
+/// Dialog pengajuan lembur. Mengembalikan ALASAN (String) lewat
+/// `Navigator.pop`, bukan lagi map berisi durasi — durasinya sudah
+/// ditentukan [window] sebelum dialog ini dibuka.
 class _OvertimeRequestDialog extends StatefulWidget {
-  final double maxOvertimeHours;
   final String dateStr;
+  final _OvertimeWindow window;
 
   const _OvertimeRequestDialog({
-    required this.maxOvertimeHours,
     required this.dateStr,
+    required this.window,
   });
 
   @override
@@ -2957,13 +3108,11 @@ class _OvertimeRequestDialog extends StatefulWidget {
 }
 
 class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
-  final _hoursCtrl = TextEditingController();
   final _reasonCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   @override
   void dispose() {
-    _hoursCtrl.dispose();
     _reasonCtrl.dispose();
     super.dispose();
   }
@@ -3000,61 +3149,81 @@ class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Durasi bukan kolom isian lagi — ditampilkan sebagai hasil
+              // yang sudah dihitung dari absensi hari itu, supaya staff tahu
+              // persis angka apa yang akan dikirim ke atasannya.
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.brandOrange.withOpacity(0.08),
+                  color: AppColors.brandNavy.withOpacity(0.06),
                   borderRadius: BorderRadius.circular(8),
                   border:
-                      Border.all(color: AppColors.brandOrange.withOpacity(0.2)),
+                      Border.all(color: AppColors.brandNavy.withOpacity(0.15)),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.info_outline_rounded,
-                        color: AppColors.brandOrange, size: 16),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Batas lembur Anda: ${widget.maxOvertimeHours} jam',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.brandOrange,
-                        ),
+                    Text(
+                      'Durasi Lembur',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.slate600,
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatDurasi(widget.window.durasiMenit),
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.brandNavy,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${widget.window.jamMulai} - ${widget.window.jamSelesai}'
+                      ' · mengikuti absensi hari itu',
+                      style: AppText.caption,
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
-              Text('Durasi Lembur (Jam)', style: AppText.label),
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _hoursCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  hintText: 'Contoh: 1.5 atau 2',
-                  suffixText: 'jam',
+              if (widget.window.dipotong) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.brandOrange.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: AppColors.brandOrange.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline_rounded,
+                          color: AppColors.brandOrange, size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Absensi Anda mencatat lembur '
+                          '${_formatDurasi(widget.window.lemburMenit)}, '
+                          'tapi yang bisa diajukan maksimal '
+                          '${_formatDurasi(widget.window.batasMenit)}.',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.brandOrange,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                validator: (val) {
-                  if (val == null || val.trim().isEmpty) {
-                    return 'Masukkan durasi lembur';
-                  }
-                  final hours = double.tryParse(val);
-                  if (hours == null) {
-                    return 'Masukkan angka desimal yang valid';
-                  }
-                  if (hours <= 0) {
-                    return 'Durasi harus lebih dari 0';
-                  }
-                  if (hours > widget.maxOvertimeHours) {
-                    return 'Tidak boleh melebihi ${widget.maxOvertimeHours} jam';
-                  }
-                  return null;
-                },
-              ),
+              ],
               const SizedBox(height: 14),
               Text('Alasan Lembur', style: AppText.label),
               const SizedBox(height: 6),
@@ -3095,10 +3264,7 @@ class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
           ),
           onPressed: () {
             if (_formKey.currentState!.validate()) {
-              Navigator.pop(context, {
-                'hours': double.parse(_hoursCtrl.text),
-                'reason': _reasonCtrl.text.trim(),
-              });
+              Navigator.pop(context, _reasonCtrl.text.trim());
             }
           },
           child: Text(
