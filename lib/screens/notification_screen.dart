@@ -8,7 +8,14 @@ import '../services/api_client.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  /// Sprint 3 Fase 6 (2026-09-07) -- called (after popping this screen)
+  /// when the user taps "Lihat Detail" on a notification that has a
+  /// resolvable [NotificationTarget]. Optional: callers that don't push
+  /// this from inside the tabbed staff layout (none currently do, but
+  /// this stays backward compatible) simply won't get deep-linking.
+  final void Function(NotificationTarget target)? onNavigate;
+
+  const NotificationScreen({super.key, this.onNavigate});
 
   @override
   State<NotificationScreen> createState() => _NotificationScreenState();
@@ -131,6 +138,8 @@ class _NotificationScreenState extends State<NotificationScreen>
                 createdAt: n.createdAt,
                 isRead: true,
                 isTeam: n.isTeam,
+                rawType: n.rawType,
+                metadata: n.metadata,
               ))
           .toList();
     });
@@ -154,6 +163,8 @@ class _NotificationScreenState extends State<NotificationScreen>
                   createdAt: n.createdAt,
                   isRead: true,
                   isTeam: n.isTeam,
+                  rawType: n.rawType,
+                  metadata: n.metadata,
                 )
               : n)
           .toList();
@@ -629,13 +640,47 @@ class _NotificationScreenState extends State<NotificationScreen>
               ],
             ),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: GradientButton(
-                label: 'Tutup',
-                onTap: () => Navigator.pop(context),
+            // Sprint 3 Fase 6 (2026-09-07): deep-link -- only shown when
+            // this notification's raw type resolves to somewhere sensible
+            // to jump to. Closes the sheet, pops back to MainScreen, THEN
+            // switches tab (in that order, via `onNavigate`) -- switching
+            // tab first would happen underneath this still-open sheet.
+            if (n.target != NotificationTarget.none && widget.onNavigate != null) ...[
+              SizedBox(
+                width: double.infinity,
+                child: GradientButton(
+                  label: 'Lihat Detail',
+                  onTap: () {
+                    Navigator.pop(context); // tutup bottom sheet
+                    Navigator.pop(context); // kembali ke MainScreen
+                    widget.onNavigate!(n.target);
+                  },
+                ),
               ),
-            ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Tutup',
+                      style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.slate700)),
+                ),
+              ),
+            ] else
+              SizedBox(
+                width: double.infinity,
+                child: GradientButton(
+                  label: 'Tutup',
+                  onTap: () => Navigator.pop(context),
+                ),
+              ),
             SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 8),
           ],
         ),

@@ -28,10 +28,19 @@ class HomeTab extends StatefulWidget {
   final VoidCallback onNavigateToAccount;
   final AttendanceProvider attendance;
 
+  /// Sprint 3 Fase 6 (2026-09-07) -- generalizes `onNavigateToAccount`
+  /// (which only ever switches to tab index 4) so notification
+  /// deep-linking (see `NotificationScreen.onNavigate`) can jump to
+  /// whichever tab a notification's [NotificationTarget] resolves to.
+  /// Optional: null in the (currently nonexistent) case HomeTab isn't
+  /// hosted inside MainScreen's tabbed layout.
+  final void Function(int tabIndex)? onNavigateToTab;
+
   const HomeTab({
     super.key,
     required this.onNavigateToAccount,
     required this.attendance,
+    this.onNavigateToTab,
   });
 
   @override
@@ -864,7 +873,15 @@ class _HomeTabState extends State<HomeTab> {
                 onPressed: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const NotificationScreen())),
+                        builder: (_) => NotificationScreen(
+                              // Sprint 3 Fase 6 (2026-09-07): deep-link.
+                              onNavigate: (target) {
+                                final tabIndex = target.staffTabIndex;
+                                if (tabIndex != null) {
+                                  widget.onNavigateToTab?.call(tabIndex);
+                                }
+                              },
+                            ))),
               ),
               Positioned(
                 right: 8,
@@ -1345,6 +1362,21 @@ class _HomeTabState extends State<HomeTab> {
         // final checkoutActive = true;
         final breakActive = _canStartBreak;
 
+        // Sprint 3 Fase 6 (2026-09-07): countdown ke jam pulang shift, lalu
+        // otomatis berganti jadi hitung-naik (lembur berjalan) begitu
+        // lewat -- `_workTimer` (initState) sudah nge-tick tiap detik buat
+        // status ini, tinggal dibaca di sini. Overnight-wrap-aware lewat
+        // `AttendanceRules._pulangTarget`, sama pola `elapsed = target -
+        // now; wrap kalau negatif` yang backend pakai buat shift malam.
+        final remaining = AttendanceRules.timeUntilCheckout;
+        final overtimeElapsed = AttendanceRules.overtimeElapsedSinceCheckout;
+        final isOvertimeRunning = overtimeElapsed != null;
+        final workTimerLabel = remaining != null
+            ? 'Sisa jam kerja: ${_fmtDur(remaining)}'
+            : isOvertimeRunning
+                ? 'Lembur berjalan: +${_fmtDur(overtimeElapsed)}'
+                : null;
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1383,6 +1415,21 @@ class _HomeTabState extends State<HomeTab> {
                             : AppColors.slate400,
                       ),
                     ),
+                    if (workTimerLabel != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        workTimerLabel,
+                        style: GoogleFonts.jetBrainsMono(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: isOvertimeRunning
+                              ? AppColors.warning
+                              : (checkoutActive
+                                  ? Colors.white
+                                  : AppColors.slate600),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

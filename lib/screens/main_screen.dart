@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -10,6 +11,7 @@ import '../services/location_service.dart';
 import '../services/session_service.dart';
 import '../services/calendar_service.dart';
 import '../services/staff_log_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/staff_log_dialog.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
@@ -55,6 +57,95 @@ class _MainScreenState extends State<MainScreen> {
   bool _needsOnboarding = false;
 
   bool get _isAdmin => AppSession.isAdmin;
+
+  // ── Notifikasi: polling + candy-bar banner (2026-09-07, Fase 6 PHASE 1) ──
+  //
+  // PHASE 1 ONLY -- polling + in-app banner selagi app di-foreground. FCM
+  // (push saat app di-background/tertutup) sengaja TIDAK dikerjakan di sini:
+  // itu butuh kredensial Firebase project (google-services.json, APNs
+  // certificate, service account key) yang bukan keputusan/tugas kode,
+  // perlu disiapkan pemilik project dulu di Firebase Console.
+  Timer? _notifPollTimer;
+  final Set<String> _seenNotifIds = {};
+  bool _notifSeeded = false;
+
+  void _startNotificationPolling() {
+    // `_hydrateProfile` bisa dipanggil ulang (tombol "Coba Lagi" di
+    // `_ProfileErrorView`) -- guard biar timer lama gak nyala dobel.
+    if (_notifPollTimer != null) return;
+    _pollNotifications(); // pull pertama: sekadar men-seed _seenNotifIds
+    _notifPollTimer = Timer.periodic(
+        const Duration(seconds: 45), (_) => _pollNotifications());
+  }
+
+  Future<void> _pollNotifications() async {
+    try {
+      final result = await NotificationService.myNotifications();
+      if (!mounted) return;
+      if (!_notifSeeded) {
+        // Backlog yang sudah ada saat app dibuka TIDAK di-banner-kan satu
+        // per satu -- hanya notifikasi yang BENAR-BENAR baru muncul sejak
+        // polling ini mulai jalan.
+        _seenNotifIds.addAll(result.items.map((n) => n.id));
+        _notifSeeded = true;
+        return;
+      }
+      final fresh =
+          result.items.where((n) => !_seenNotifIds.contains(n.id)).toList();
+      _seenNotifIds.addAll(result.items.map((n) => n.id));
+      for (final n in fresh) {
+        _showNotificationBanner(n);
+      }
+    } catch (_) {
+      // Best-effort -- gagal polling (mis. jaringan) tidak boleh mengganggu
+      // staff dengan error, cukup dicoba lagi di siklus berikutnya.
+    }
+  }
+
+  void _showNotificationBanner(AppNotification n) {
+    if (!mounted) return;
+    final tabIndex = n.target.staffTabIndex;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.notifications_active_rounded,
+              color: Colors.white, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(n.title,
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
+                Text(n.message,
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: Colors.white70),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ],
+      ),
+      backgroundColor: AppColors.brandNavy,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(seconds: 4),
+      action: (!_isAdmin && tabIndex != null)
+          ? SnackBarAction(
+              label: 'Lihat',
+              textColor: AppColors.brandLime,
+              onPressed: () => _onTabTap(tabIndex),
+            )
+          : null,
+    ));
+  }
 
   @override
   void initState() {
@@ -133,6 +224,11 @@ class _MainScreenState extends State<MainScreen> {
 
       // Popup log (naik jabatan / surat peringatan) yang belum dibaca.
       _showPendingLogs();
+
+      // Fase 6: mulai polling notifikasi (candy-bar banner) begitu profil
+      // berhasil dimuat -- baik staff maupun admin, tapi tombol "Lihat"
+      // hanya aktif untuk staff (Admin tidak punya tab).
+      _startNotificationPolling();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -173,6 +269,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _notifPollTimer?.cancel();
     _attendance.dispose();
     super.dispose();
   }
@@ -391,6 +488,7 @@ class _MainScreenState extends State<MainScreen> {
             HomeTab(
               onNavigateToAccount: () => _onTabTap(4),
               attendance: _attendance,
+              onNavigateToTab: _onTabTap,
             ),
             isManager
                 ? const AdminDashboardTab()

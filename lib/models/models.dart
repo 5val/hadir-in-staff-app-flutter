@@ -920,6 +920,23 @@ class AppNotification {
   final bool isRead;
   final bool isTeam;
 
+  /// Sprint 3 Fase 6 (2026-09-07) -- the RAW backend `type` string (e.g.
+  /// `leave_approved`, `lembur_rejected`, `location_transfer_approved`),
+  /// kept alongside the coarse [type] enum above (which stays exactly as
+  /// it was -- every existing screen that reads `.type` for its
+  /// approval/rejection/reminder/info color+icon+filter logic keeps
+  /// working unchanged). This is what deep-linking (`target` below) is
+  /// resolved from -- the coarse enum alone can't tell a leave decision
+  /// apart from a lembur decision, both map to the same `approval`/
+  /// `rejection` bucket.
+  final String rawType;
+
+  /// The backend's `metadata` JSON object (e.g. `{leaveId: "..."}`,
+  /// `{lemburId: "..."}`, `{transferId: "...", staffId: "..."}`) -- was
+  /// previously discarded entirely on parse. Empty map when the backend
+  /// sent none.
+  final Map<String, dynamic> metadata;
+
   const AppNotification({
     required this.id,
     required this.title,
@@ -928,11 +945,13 @@ class AppNotification {
     required this.createdAt,
     this.isRead = false,
     this.isTeam = false,
+    this.rawType = '',
+    this.metadata = const {},
   });
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/notifications).
   /// Backend: `type` (leave_approved|leave_rejected|...), `title`, `body`,
-  /// `readAt`, `createdAt`.
+  /// `readAt`, `createdAt`, `metadata`.
   factory AppNotification.fromApi(Map<String, dynamic> j) {
     final type = (j['type'] ?? '').toString();
     NotificationType mapType(String t) {
@@ -941,6 +960,8 @@ class AppNotification {
       if (t.contains('reminder')) return NotificationType.reminder;
       return NotificationType.info;
     }
+
+    final rawMetadata = j['metadata'];
 
     return AppNotification(
       id: (j['id'] ?? '').toString(),
@@ -951,11 +972,52 @@ class AppNotification {
           DateTime.now(),
       isRead: j['readAt'] != null,
       isTeam: false,
+      rawType: type,
+      metadata: rawMetadata is Map
+          ? Map<String, dynamic>.from(rawMetadata)
+          : const {},
     );
   }
 }
 
 enum NotificationType { approval, rejection, reminder, info }
+
+/// Sprint 3 Fase 6 (2026-09-07) -- deep-link target resolved from a
+/// notification's raw backend `type`. `none` when there's nothing
+/// sensible to navigate to (info/reminder types, or a type this app
+/// doesn't recognize yet).
+enum NotificationTarget { leave, lembur, locationTransfer, none }
+
+extension AppNotificationRouting on AppNotification {
+  NotificationTarget get target {
+    if (rawType.startsWith('leave_')) return NotificationTarget.leave;
+    if (rawType.startsWith('lembur_')) return NotificationTarget.lembur;
+    if (rawType.startsWith('location_transfer_')) {
+      return NotificationTarget.locationTransfer;
+    }
+    return NotificationTarget.none;
+  }
+}
+
+extension NotificationTargetTab on NotificationTarget {
+  /// Which staff bottom-nav tab (see `MainScreen`) this target should open.
+  /// Null = nothing to navigate to, or the current layout has no tabs
+  /// (Admin). Lembur has no dedicated screen of its own -- its
+  /// history/status lives inside the Home tab -- and Pindah Lokasi has NO
+  /// staff-facing screen at all yet, so both fall back to Home (index 0)
+  /// rather than inventing a new screen just for this.
+  int? get staffTabIndex {
+    switch (this) {
+      case NotificationTarget.leave:
+        return 1;
+      case NotificationTarget.lembur:
+      case NotificationTarget.locationTransfer:
+        return 0;
+      case NotificationTarget.none:
+        return null;
+    }
+  }
+}
 
 // ── App State ─────────────────────────────────────────────────
 enum AttendanceState {
