@@ -205,26 +205,62 @@ class AttendanceRules {
     return now.isBefore(target) ? target.difference(now) : null;
   }
 
-<<<<<<< HEAD
+  /// Sudah berapa lama LEWAT jam pulang (lembur berjalan) -- null bila
+  /// belum lewat jam pulang atau kalender belum termuat. Pasangan
+  /// [timeUntilCheckout]: tepat satu dari keduanya non-null pada satu
+  /// waktu (persis titik jam pulang, keduanya null sesaat).
+  static Duration? get overtimeElapsedSinceCheckout {
+    final target = _pulangTarget;
+    if (target == null) return null;
+    final now = TestingConfig.now();
+    return now.isBefore(target) ? null : now.difference(target);
+  }
+
   // ── Countdown jam kerja & batas lembur ──────────────────────────────
+  //
+  // Semuanya berpatokan pada [_pulangTarget], BUKAN "jam pulang hari ini"
+  // yang dirakit sendiri. Itu penting untuk shift overnight (21:00–06:00):
+  // jam pulang shift yang sedang berjalan bisa jatuh BESOK, dan versi awal
+  // getter-getter ini (yang selalu memakai tanggal hari ini) akan mengira
+  // jam pulangnya sudah lewat berjam-jam padahal shift-nya baru mulai.
+  // Lihat [computePulangTarget] di atas.
 
-  /// Jam masuk shift HARI INI sebagai timestamp. Null bila kalender belum
-  /// termuat.
-  static DateTime? get jamMasukToday {
-    final t = _jamMasuk;
-    if (t == null) return null;
-    final now = TestingConfig.now();
-    return DateTime(now.year, now.month, now.day, t.hour, t.minute);
+  /// Jam MASUK dari shift yang jam pulangnya [pulangTarget] — yaitu
+  /// [pulangTarget] dikurangi panjang shift.
+  ///
+  /// Dihitung MUNDUR dari jam pulang, bukan dirakit dari tanggal hari ini,
+  /// supaya pasangan masuk–pulang selalu berasal dari SATU shift yang sama;
+  /// pada shift overnight yang sedang berjalan, jam masuknya ada di hari
+  /// kemarin sementara jam pulangnya besok, dan merakit keduanya dari
+  /// tanggal hari ini akan menghasilkan rentang kerja 22 jam atau negatif.
+  ///
+  /// Pure (tanpa static state / [TestingConfig]) dengan alasan yang sama
+  /// seperti [computePulangTarget] — lihat komentarnya: `flutter test` tidak
+  /// pernah menerima `--dart-define`, jadi cabang overnight-nya mustahil
+  /// diuji lewat getter yang membaca jam sistem.
+  static DateTime? computeMasukTarget({
+    required DateTime? pulangTarget,
+    required TimeOfDay? jamMasuk,
+    required TimeOfDay? jamPulang,
+  }) {
+    if (pulangTarget == null || jamMasuk == null || jamPulang == null) {
+      return null;
+    }
+    final pulangMin = jamPulang.hour * 60 + jamPulang.minute;
+    final masukMin = jamMasuk.hour * 60 + jamMasuk.minute;
+    // Panjang shift dalam menit; overnight (pulang <= masuk) melewati
+    // tengah malam sehingga perlu ditambah 24 jam.
+    final span = pulangMin > masukMin
+        ? pulangMin - masukMin
+        : pulangMin - masukMin + 24 * 60;
+    return pulangTarget.subtract(Duration(minutes: span));
   }
 
-  /// Jam pulang shift HARI INI sebagai timestamp. Null bila kalender belum
-  /// termuat.
-  static DateTime? get jamPulangToday {
-    final t = _jamPulang;
-    if (t == null) return null;
-    final now = TestingConfig.now();
-    return DateTime(now.year, now.month, now.day, t.hour, t.minute);
-  }
+  static DateTime? get jamMasukTarget => computeMasukTarget(
+        pulangTarget: _pulangTarget,
+        jamMasuk: _jamMasuk,
+        jamPulang: _jamPulang,
+      );
 
   /// SISA waktu kerja sampai jam pulang — inti dari perubahan "timer ke atas
   /// jadi countdown ke bawah" di kartu Aktivitas Hari Ini.
@@ -236,35 +272,45 @@ class AttendanceRules {
   /// berkurang. Datang lebih awal tidak menambah sisa jam kerja, karena jam
   /// kerjanya memang belum dimulai.
   ///
-  /// Null bila jam shift belum diketahui. Nol berarti jam pulang sudah lewat
-  /// — sejak titik itu yang berjalan adalah [overtimeElapsed], hitung NAIK
-  /// dari 00:00:00.
-  static Duration? get remainingWorkTime {
-    final masuk = jamMasukToday;
-    final pulang = jamPulangToday;
-    if (masuk == null || pulang == null) return null;
-    final now = TestingConfig.now();
-    final start = now.isBefore(masuk) ? masuk : now;
-    final left = pulang.difference(start);
+  /// Bedanya dengan [timeUntilCheckout]: yang itu jarak MENTAH ke jam pulang
+  /// (dan null begitu lewat), yang ini sudah dijepit ke jam masuk dan
+  /// mengembalikan [Duration.zero] setelah jam pulang — sejak titik itu yang
+  /// berjalan adalah [overtimeElapsed], hitung NAIK dari 00:00:00. Null bila
+  /// jam shift belum diketahui.
+  static Duration? computeRemainingWorkTime({
+    required DateTime now,
+    required DateTime? pulangTarget,
+    required DateTime? masukTarget,
+  }) {
+    if (pulangTarget == null) return null;
+    final start = (masukTarget != null && now.isBefore(masukTarget))
+        ? masukTarget
+        : now;
+    final left = pulangTarget.difference(start);
     return left.isNegative ? Duration.zero : left;
   }
+
+  static Duration? get remainingWorkTime => computeRemainingWorkTime(
+        now: TestingConfig.now(),
+        pulangTarget: _pulangTarget,
+        masukTarget: jamMasukTarget,
+      );
 
   /// Lama LEMBUR yang sedang berjalan: waktu sejak jam pulang terlewati,
   /// dimulai dari 00:00:00 tepat di jam pulang. Null bila jam shift belum
   /// diketahui, [Duration.zero] bila belum lewat jam pulang.
+  ///
+  /// Sama sumbernya dengan [overtimeElapsedSinceCheckout]; yang membedakan
+  /// hanya perlakuan "belum lembur" — null di sana (dipakai untuk memilih
+  /// label mana yang tampil), nol di sini (dipakai untuk aritmetika batas
+  /// lembur).
   static Duration? get overtimeElapsed {
-    final pulang = jamPulangToday;
-    if (pulang == null) return null;
-    final now = TestingConfig.now();
-    final over = now.difference(pulang);
-    return over.isNegative ? Duration.zero : over;
+    if (_pulangTarget == null) return null;
+    return overtimeElapsedSinceCheckout ?? Duration.zero;
   }
 
   /// Sudah masuk fase lembur (jam pulang terlewati)?
-  static bool get isOvertimeRunning {
-    final over = overtimeElapsed;
-    return over != null && over > Duration.zero;
-  }
+  static bool get isOvertimeRunning => overtimeElapsedSinceCheckout != null;
 
   // ── Batas maksimal lembur ───────────────────────────────────────────
   //
@@ -287,30 +333,19 @@ class AttendanceRules {
   static Duration get maxLembur => Duration(hours: _maxLemburJam);
   static int get maxLemburJam => _maxLemburJam;
 
-  /// Batas akhir yang wajar untuk check-out hari ini: jam pulang + batas
+  /// Batas akhir yang wajar untuk check-out shift ini: jam pulang + batas
   /// maksimal lembur. Lewat titik ini, staff yang masih "bekerja" hampir
   /// pasti lupa check-out, bukan sedang lembur.
   static DateTime? get overtimeDeadline {
-    final pulang = jamPulangToday;
+    final pulang = _pulangTarget;
     if (pulang == null) return null;
     return pulang.add(maxLembur);
   }
 
   /// Sudah melewati batas maksimal lembur?
   static bool get isPastOvertimeLimit {
-    final over = overtimeElapsed;
+    final over = overtimeElapsedSinceCheckout;
     return over != null && over > maxLembur;
-=======
-  /// Sudah berapa lama LEWAT jam pulang (lembur berjalan) -- null bila
-  /// belum lewat jam pulang atau kalender belum termuat. Pasangan
-  /// [timeUntilCheckout]: tepat satu dari keduanya non-null pada satu
-  /// waktu (persis titik jam pulang, keduanya null sesaat).
-  static Duration? get overtimeElapsedSinceCheckout {
-    final target = _pulangTarget;
-    if (target == null) return null;
-    final now = TestingConfig.now();
-    return now.isBefore(target) ? null : now.difference(target);
->>>>>>> e59bbc4242a7ab2a720ef7eacfe33f8b75d74234
   }
 }
 

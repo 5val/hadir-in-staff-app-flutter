@@ -35,11 +35,16 @@ class NotificationMenuHints {
     'promotion': 'Akun > Informasi Akun',
     'surat_peringatan': 'Akun > Informasi Akun',
 
-    // Pindah lokasi & verifikasi nomor.
-    'location_transfer_approved': 'Akun > Informasi Akun',
-    'location_transfer_rejected': 'Akun > Informasi Akun',
+    // Verifikasi & pergantian nomor HP — keduanya ditindaklanjuti di
+    // halaman info akun (sheet "Ubah Nomor HP").
     'staff_phone_changed': 'Akun > Informasi Akun',
     'phone_verification': 'Akun > Informasi Akun',
+
+    // CATATAN: `location_transfer_*` sengaja TIDAK ada di peta ini. Pindah
+    // lokasi belum punya layar staff sama sekali (dikonfirmasi: tidak ada
+    // satu pun layar di `lib/screens/` yang menampilkannya), jadi menyebut
+    // menu mana pun akan mengirim staff ke halaman yang tidak memuat kabar
+    // itu. Lebih baik notifikasinya tampil apa adanya sampai layarnya ada.
 
     // Absensi (dibangkitkan app maupun server).
     'attendance_reminder': 'Home > Aktivitas Hari Ini',

@@ -917,20 +917,6 @@ class AppNotification {
   final String message;
   final NotificationType type;
 
-  /// `type` MENTAH dari backend ("document_rejected", "leave_approved", ...).
-  ///
-  /// [type] di atas sudah dipadatkan jadi 4 kategori tampilan (ikon & warna),
-  /// sehingga "dokumen ditolak" dan "cuti ditolak" tidak lagi bisa dibedakan.
-  /// Padahal keduanya menuntun ke MENU YANG BERBEDA — lihat
-  /// `services/notification_menu_hints.dart` yang memetakannya jadi kalimat
-  /// "Buka menu Akun > Dokumen Saya ...". Karena itu nilai aslinya disimpan,
-  /// bukan dibuang saat parsing.
-  final String rawType;
-
-  final DateTime createdAt;
-  final bool isRead;
-  final bool isTeam;
-
   /// Sprint 3 Fase 6 (2026-09-07) -- the RAW backend `type` string (e.g.
   /// `leave_approved`, `lembur_rejected`, `location_transfer_approved`),
   /// kept alongside the coarse [type] enum above (which stays exactly as
@@ -940,7 +926,16 @@ class AppNotification {
   /// resolved from -- the coarse enum alone can't tell a leave decision
   /// apart from a lembur decision, both map to the same `approval`/
   /// `rejection` bucket.
+  ///
+  /// Dipakai juga oleh `services/notification_menu_hints.dart` untuk
+  /// menempelkan kalimat "Buka menu Akun > Dokumen Saya ..." — alasan yang
+  /// sama: enum kasar di atas tidak bisa membedakan dokumen ditolak dari
+  /// cuti ditolak, padahal keduanya menuntun ke menu yang berbeda.
   final String rawType;
+
+  final DateTime createdAt;
+  final bool isRead;
+  final bool isTeam;
 
   /// The backend's `metadata` JSON object (e.g. `{leaveId: "..."}`,
   /// `{lemburId: "..."}`, `{transferId: "...", staffId: "..."}`) -- was
@@ -954,7 +949,6 @@ class AppNotification {
     required this.message,
     required this.type,
     required this.createdAt,
-    this.rawType = '',
     this.isRead = false,
     this.isTeam = false,
     this.rawType = '',
@@ -980,7 +974,6 @@ class AppNotification {
       title: (j['title'] ?? '').toString(),
       message: (j['body'] ?? '').toString(),
       type: mapType(type),
-      rawType: type,
       createdAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal() ??
           DateTime.now(),
       isRead: j['readAt'] != null,
@@ -1001,29 +994,53 @@ enum NotificationType { approval, rejection, reminder, info }
 /// doesn't recognize yet).
 enum NotificationTarget { leave, lembur, locationTransfer, none }
 
-extension AppNotificationRouting on AppNotification {
-  NotificationTarget get target {
-    if (rawType.startsWith('leave_')) return NotificationTarget.leave;
-    if (rawType.startsWith('lembur_')) return NotificationTarget.lembur;
-    if (rawType.startsWith('location_transfer_')) {
-      return NotificationTarget.locationTransfer;
-    }
-    return NotificationTarget.none;
+/// Aturan pemetaan `type` backend → [NotificationTarget], sebagai fungsi
+/// murni atas String.
+///
+/// Dipisah dari extension di bawah karena notifikasi HP hanya membawa
+/// `rawType` di dalam payload-nya — objek [AppNotification]-nya sudah tidak
+/// ada lagi saat notifikasi itu diketuk (bisa berjam-jam kemudian, setelah
+/// app ditutup). Kedua jalur deep-link memanggil fungsi yang sama ini supaya
+/// tujuan yang dipilih tidak mungkin berbeda antara tombol "Lihat Detail" di
+/// dalam app dan ketukan pada notifikasi di status bar.
+NotificationTarget notificationTargetFromRawType(String rawType) {
+  if (rawType.startsWith('leave_')) return NotificationTarget.leave;
+  if (rawType.startsWith('lembur_')) return NotificationTarget.lembur;
+  if (rawType.startsWith('location_transfer_')) {
+    return NotificationTarget.locationTransfer;
   }
+  return NotificationTarget.none;
+}
+
+extension AppNotificationRouting on AppNotification {
+  NotificationTarget get target => notificationTargetFromRawType(rawType);
 }
 
 extension NotificationTargetTab on NotificationTarget {
   /// Which staff bottom-nav tab (see `MainScreen`) this target should open.
   /// Null = nothing to navigate to, or the current layout has no tabs
-  /// (Admin). Lembur has no dedicated screen of its own -- its
-  /// history/status lives inside the Home tab -- and Pindah Lokasi has NO
-  /// staff-facing screen at all yet, so both fall back to Home (index 0)
-  /// rather than inventing a new screen just for this.
+  /// (Admin).
+  ///
+  /// Lembur juga tab 1, BUKAN Home. Catatan asli di sini ("its
+  /// history/status lives inside the Home tab") mengikuti CLAUDE.md yang
+  /// sudah kedaluwarsa; di kode yang berlaku sekarang lembur ada seluruhnya
+  /// di `LeaveTab` — sub-tab "Lembur" (daftar hari yang bisa diajukan,
+  /// `_buildLemburTab`) dan blok "Riwayat Pengajuan Lembur" di sub-tab
+  /// "Riwayat" (lihat komentar Fase 8 di `leave_tab.dart`, yang memang
+  /// memindahkannya ke sana dan menghapus `overtime_history_screen.dart`).
+  /// Home tidak menampilkan pengajuan lembur sama sekali, jadi deep-link ke
+  /// sana membuat staff mendarat di layar yang tidak menyebut notifikasinya.
+  /// Ini juga menyamakan tujuan deep-link dengan kalimat petunjuk menu di
+  /// `services/notification_menu_hints.dart` ("Cuti & Izin > Lembur") —
+  /// keduanya sebelumnya menunjuk tempat yang berbeda.
+  ///
+  /// Pindah Lokasi memang BELUM punya layar staff sama sekali, jadi ia tetap
+  /// jatuh ke Home (index 0) daripada mengarang layar baru.
   int? get staffTabIndex {
     switch (this) {
       case NotificationTarget.leave:
-        return 1;
       case NotificationTarget.lembur:
+        return 1;
       case NotificationTarget.locationTransfer:
         return 0;
       case NotificationTarget.none:

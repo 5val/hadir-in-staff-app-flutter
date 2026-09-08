@@ -121,4 +121,111 @@ void main() {
       expect(target, DateTime(2026, 9, 7, 17, 0));
     });
   });
+
+  // ── Countdown jam kerja (kartu "Aktivitas Saat Ini") ──────────────────
+  //
+  // Aturan yang diminta: countdown SELALU sepanjang jam masuk → jam pulang,
+  // berapa pun jam staff check-in. Check-in 07:55 pada shift 08:00-17:00
+  // tetap menampilkan 09:00:00 dan DIAM di situ sampai 08:00 -- datang lebih
+  // awal tidak menambah sisa jam kerja, karena jam kerjanya belum mulai.
+  //
+  // `computeMasukTarget`/`computeRemainingWorkTime` adalah ekstraksi pure-nya,
+  // dengan alasan yang sama seperti `computePulangTarget` di atas.
+  group('jam masuk shift diturunkan MUNDUR dari jam pulang', () {
+    test('shift sehari (08:00-17:00) -> masuk = pulang - 9 jam, hari yang sama',
+        () {
+      final masukTarget = AttendanceRules.computeMasukTarget(
+        pulangTarget: DateTime(2026, 9, 7, 17, 0),
+        jamMasuk: const TimeOfDay(hour: 8, minute: 0),
+        jamPulang: const TimeOfDay(hour: 17, minute: 0),
+      );
+      expect(masukTarget, DateTime(2026, 9, 7, 8, 0));
+    });
+
+    test(
+        'shift overnight (21:00-06:00) yang pulangnya BESOK -> masuk ada di hari ini, bukan besok',
+        () {
+      // Ini yang bikin perlu hitung mundur: merakit jam masuk dari tanggal
+      // `pulangTarget` (8 Sep) akan memberi 8 Sep 21:00 -- SESUDAH jam
+      // pulangnya sendiri, jadi rentang kerjanya negatif.
+      final masukTarget = AttendanceRules.computeMasukTarget(
+        pulangTarget: DateTime(2026, 9, 8, 6, 0),
+        jamMasuk: const TimeOfDay(hour: 21, minute: 0),
+        jamPulang: const TimeOfDay(hour: 6, minute: 0),
+      );
+      expect(masukTarget, DateTime(2026, 9, 7, 21, 0));
+      expect(masukTarget!.isBefore(DateTime(2026, 9, 8, 6, 0)), isTrue);
+    });
+
+    test('jamMasuk/jamPulang belum termuat -> null (tidak mengarang rentang)',
+        () {
+      expect(
+          AttendanceRules.computeMasukTarget(
+              pulangTarget: DateTime(2026, 9, 7, 17, 0),
+              jamMasuk: null,
+              jamPulang: const TimeOfDay(hour: 17, minute: 0)),
+          isNull);
+      expect(
+          AttendanceRules.computeMasukTarget(
+              pulangTarget: null,
+              jamMasuk: const TimeOfDay(hour: 8, minute: 0),
+              jamPulang: const TimeOfDay(hour: 17, minute: 0)),
+          isNull);
+    });
+  });
+
+  group('sisa jam kerja dijepit ke jam masuk shift', () {
+    final pulangTarget = DateTime(2026, 9, 7, 17, 0);
+    final masukTarget = DateTime(2026, 9, 7, 8, 0);
+
+    test('check-in 07:55 (lebih awal) -> tetap 09:00:00, bukan 09:05:00', () {
+      expect(
+        AttendanceRules.computeRemainingWorkTime(
+            now: at(7, 55),
+            pulangTarget: pulangTarget,
+            masukTarget: masukTarget),
+        const Duration(hours: 9),
+      );
+    });
+
+    test('tepat jam masuk 08:00 -> 09:00:00 (countdown baru mulai berkurang)',
+        () {
+      expect(
+        AttendanceRules.computeRemainingWorkTime(
+            now: at(8, 0),
+            pulangTarget: pulangTarget,
+            masukTarget: masukTarget),
+        const Duration(hours: 9),
+      );
+    });
+
+    test('tengah shift 12:30 -> 04:30:00', () {
+      expect(
+        AttendanceRules.computeRemainingWorkTime(
+            now: at(12, 30),
+            pulangTarget: pulangTarget,
+            masukTarget: masukTarget),
+        const Duration(hours: 4, minutes: 30),
+      );
+    });
+
+    test('lewat jam pulang -> Duration.zero, bukan negatif (sejak titik ini '
+        'yang tampil adalah timer lembur yang menaik)', () {
+      expect(
+        AttendanceRules.computeRemainingWorkTime(
+            now: at(19, 0),
+            pulangTarget: pulangTarget,
+            masukTarget: masukTarget),
+        Duration.zero,
+      );
+    });
+
+    test('jam shift belum termuat -> null, bukan 00:00:00 palsu', () {
+      expect(
+        AttendanceRules.computeRemainingWorkTime(
+            now: at(12, 0), pulangTarget: null, masukTarget: null),
+        isNull,
+      );
+    });
+  });
 }

@@ -1,8 +1,5 @@
 import 'dart:async';
-<<<<<<< HEAD
 
-=======
->>>>>>> e59bbc4242a7ab2a720ef7eacfe33f8b75d74234
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -15,12 +12,10 @@ import '../services/location_service.dart';
 import '../services/session_service.dart';
 import '../services/calendar_service.dart';
 import '../services/staff_log_service.dart';
-<<<<<<< HEAD
+import '../services/notification_service.dart';
+import '../services/notification_menu_hints.dart';
 import '../services/push_notification_service.dart';
 import '../services/document_draft_service.dart';
-=======
-import '../services/notification_service.dart';
->>>>>>> e59bbc4242a7ab2a720ef7eacfe33f8b75d74234
 import '../widgets/staff_log_dialog.dart';
 import '../widgets/open_session_dialog.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
@@ -54,12 +49,6 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late int _tab;
-
-  /// Penarik notifikasi backend → notifikasi HP. Backend belum punya FCM
-  /// (lihat catatan transport di `push_notification_service.dart`), jadi
-  /// app-lah yang menariknya secara berkala selagi berjalan; saat app dibuka
-  /// kembali penarikan langsung dilakukan lewat `didChangeAppLifecycleState`.
-  Timer? _notifTimer;
 
   /// Pemeriksa absensi: batas maksimal lembur terlewat, dan sesi yang
   /// belum di-checkout (lupa break-out/check-out).
@@ -102,10 +91,29 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         const Duration(seconds: 45), (_) => _pollNotifications());
   }
 
+  /// SATU penarikan notifikasi yang menyuapi DUA kanal:
+  ///
+  ///   • banner candy-bar in-app (kode di bawah) — terlihat saat staff
+  ///     sedang memandangi app, hilang sendiri setelah 4 detik, dan
+  ///   • notifikasi HP di status bar ([NotificationCenter]) — yang tetap
+  ///     ada untuk dibuka nanti, termasuk saat app cuma di background.
+  ///
+  /// Keduanya sengaja tetap ada (transient vs persisten), tapi penarikan
+  /// HTTP-nya cukup sekali: sebelum penggabungan ini ada dua timer terpisah
+  /// (45 detik & 2 menit) yang memukul endpoint yang sama dengan jadwal
+  /// berbeda. Penanda "sudah pernah dilihat"-nya memang beda dan itu
+  /// disengaja — `_seenNotifIds` di memori berarti "baru sejak app dibuka"
+  /// (untuk banner), sedangkan milik [NotificationCenter] tersimpan di disk
+  /// dan berarti "belum pernah dimunculkan di HP ini sama sekali".
   Future<void> _pollNotifications() async {
     try {
       final result = await NotificationService.myNotifications();
       if (!mounted) return;
+
+      // Notifikasi HP — memakai hasil penarikan yang sama.
+      await NotificationCenter.syncFromServer(prefetched: result);
+      if (!mounted) return;
+
       if (!_notifSeeded) {
         // Backlog yang sudah ada saat app dibuka TIDAK di-banner-kan satu
         // per satu -- hanya notifikasi yang BENAR-BENAR baru muncul sejak
@@ -146,7 +154,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
-                Text(n.message,
+                Text(
+                    // Petunjuk menu ditempel di sini juga supaya banner,
+                    // notifikasi HP, dan layar Notifikasi menyebut tujuan
+                    // yang sama persis.
+                    NotificationMenuHints.withHint(n.message, n.rawType,
+                        title: n.title),
                     style: GoogleFonts.inter(
                         fontSize: 12, color: Colors.white70),
                     maxLines: 2,
@@ -187,14 +200,48 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     _hydrateProfile();
   }
 
-  /// Ketukan pada notifikasi HP membuka layar Notifikasi, bukan sekadar
-  /// mengembalikan app ke tab terakhir.
+  /// Ketukan pada notifikasi HP.
+  ///
+  /// Payload-nya berbentuk `notification:<rawType>:<id>` (lihat
+  /// [NotificationCenter.syncFromServer]) — `rawType`-nya dipakai untuk
+  /// menempuh deep-link yang SAMA dengan tombol "Lihat Detail" di dalam
+  /// app, lewat [notificationTargetFromRawType]. Yang tidak punya tujuan
+  /// (peringatan absensi lokal, tipe yang belum dikenal) jatuh ke layar
+  /// Notifikasi — tetap lebih berguna daripada sekadar membuka app di tab
+  /// terakhir.
   void _handleNotificationTap(String? payload) {
     if (!mounted) return;
+
+    final rawType = _rawTypeFromPayload(payload);
+    if (rawType != null && !_isAdmin) {
+      final tabIndex = notificationTargetFromRawType(rawType).staffTabIndex;
+      if (tabIndex != null) {
+        _onTabTap(tabIndex);
+        return;
+      }
+    }
+
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const NotificationScreen()),
+      MaterialPageRoute(
+        builder: (_) => NotificationScreen(
+          onNavigate: (target) {
+            final tabIndex = target.staffTabIndex;
+            if (tabIndex != null && !_isAdmin) _onTabTap(tabIndex);
+          },
+        ),
+      ),
     );
+  }
+
+  /// `notification:<rawType>:<id>` → `<rawType>`. Null untuk payload lain
+  /// (mis. `local:<key>` milik peringatan absensi) atau yang tidak berbentuk.
+  static String? _rawTypeFromPayload(String? payload) {
+    if (payload == null || !payload.startsWith('notification:')) return null;
+    final parts = payload.split(':');
+    if (parts.length < 3) return null;
+    final rawType = parts[1];
+    return rawType.isEmpty ? null : rawType;
   }
 
   @override
@@ -203,7 +250,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     // App baru dibuka lagi: tarik notifikasi baru dan periksa apakah ada
     // absensi yang menggantung selagi app tertutup — dua hal yang paling
     // mungkin berubah tanpa sepengetahuan app.
-    _syncNotifications();
+    _pollNotifications();
     _runAttendanceGuards();
   }
 
@@ -277,17 +324,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() => _loadingProfile = false);
 
-      // Notifikasi HP + pemeriksa absensi mulai berjalan setelah profil ada
-      // (keduanya butuh staffId & jam shift).
+      // Notifikasi (banner + notifikasi HP) & pemeriksa absensi mulai
+      // berjalan setelah profil ada — keduanya butuh staffId & jam shift.
+      // Polling notifikasi jalan untuk staff MAUPUN admin, tapi tombol
+      // "Lihat" pada banner hanya aktif untuk staff (Admin tidak punya tab).
       _startBackgroundWatchers();
 
       // Popup log (naik jabatan / surat peringatan) yang belum dibaca.
       _showPendingLogs();
-
-      // Fase 6: mulai polling notifikasi (candy-bar banner) begitu profil
-      // berhasil dimuat -- baik staff maupun admin, tapi tombol "Lihat"
-      // hanya aktif untuk staff (Admin tidak punya tab).
-      _startNotificationPolling();
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -298,16 +342,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _startBackgroundWatchers() {
-    _notifTimer?.cancel();
     _guardTimer?.cancel();
 
-    _syncNotifications();
+    // Notifikasi (banner + notifikasi HP) punya timernya sendiri di
+    // [_startNotificationPolling] — satu penarikan tiap 45 detik untuk
+    // kedua kanal.
+    _startNotificationPolling();
     _runAttendanceGuards();
 
-    // 2 menit: cukup cepat supaya persetujuan cuti/dokumen terasa "langsung
-    // masuk", cukup jarang supaya tidak menguras baterai & kuota.
-    _notifTimer = Timer.periodic(
-        const Duration(minutes: 2), (_) => _syncNotifications());
     // 3 menit: kejadian yang dijaga di sini berskala jam (jam pulang, batas
     // lembur, absensi kemarin), jadi tidak perlu presisi detik — cukup
     // muncul tanpa staff harus membuka tab tertentu. Pemeriksaan langsung
@@ -315,10 +357,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     // pagi berikutnya) tidak menunggu timer sama sekali.
     _guardTimer = Timer.periodic(
         const Duration(minutes: 3), (_) => _runAttendanceGuards());
-  }
-
-  Future<void> _syncNotifications() async {
-    await NotificationCenter.syncFromServer();
   }
 
   /// Pemeriksa absensi — sumber dari dua notifikasi HP yang tidak ada di
@@ -426,14 +464,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-<<<<<<< HEAD
-    _notifTimer?.cancel();
+    _notifPollTimer?.cancel();
     _guardTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     PushNotificationService.onNotificationTap = null;
-=======
-    _notifPollTimer?.cancel();
->>>>>>> e59bbc4242a7ab2a720ef7eacfe33f8b75d74234
     _attendance.dispose();
     super.dispose();
   }

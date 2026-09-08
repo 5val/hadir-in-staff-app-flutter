@@ -213,9 +213,13 @@ class NotificationCenter {
   /// Mengembalikan `unreadCount` terbaru supaya pemanggil bisa sekalian
   /// memperbarui badge, atau null bila gagal (mis. jaringan mati).
   /// Best-effort: tidak pernah melempar.
-  static Future<int?> syncFromServer() async {
+  /// [prefetched] menghindari penarikan HTTP kedua: `MainScreen` sudah
+  /// menarik daftar notifikasi tiap 45 detik untuk banner in-app, dan hasil
+  /// yang sama itu diserahkan ke sini alih-alih memukul endpoint yang sama
+  /// dua kali dengan jadwal berbeda.
+  static Future<int?> syncFromServer({NotificationResult? prefetched}) async {
     try {
-      final result = await NotificationService.myNotifications();
+      final result = prefetched ?? await NotificationService.myNotifications();
 
       final prefs = await SharedPreferences.getInstance();
       final seen = prefs.getStringList(_seenKey) ?? const <String>[];
@@ -258,7 +262,11 @@ class NotificationCenter {
             n.rawType,
             title: n.title,
           ),
-          payload: 'notification:${n.id}',
+          // rawType ikut dibawa: saat notifikasi ini diketuk (bisa
+          // berjam-jam kemudian, setelah app ditutup) objek AppNotification-
+          // nya sudah tidak ada, sementara tujuan deep-link-nya diturunkan
+          // dari rawType — lihat `MainScreen._handleNotificationTap`.
+          payload: 'notification:${n.rawType}:${n.id}',
           attendanceAlert: n.rawType.startsWith('attendance'),
         );
       }

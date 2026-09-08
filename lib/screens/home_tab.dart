@@ -1411,7 +1411,7 @@ class _HomeTabState extends State<HomeTab> {
       return 'Sejak jam pulang ${AttendanceRules.jamPulangLabel}';
     }
     final now = TestingConfig.now();
-    final masuk = AttendanceRules.jamMasukToday;
+    final masuk = AttendanceRules.jamMasukTarget;
     if (masuk != null && now.isBefore(masuk)) {
       return 'Jam kerja mulai ${AttendanceRules.jamMasukLabel}';
     }
@@ -1507,14 +1507,19 @@ class _HomeTabState extends State<HomeTab> {
         // status ini, tinggal dibaca di sini. Overnight-wrap-aware lewat
         // `AttendanceRules._pulangTarget`, sama pola `elapsed = target -
         // now; wrap kalau negatif` yang backend pakai buat shift malam.
-        final remaining = AttendanceRules.timeUntilCheckout;
+        // `remainingWorkTime`, bukan `timeUntilCheckout`: keduanya
+        // menghitung mundur ke jam pulang yang sama, tapi yang dipakai di
+        // sini dijepit ke jam masuk shift — jadi angkanya identik dengan
+        // countdown besar di kartu Aktivitas Saat Ini. Memakai dua getter
+        // berbeda membuat kedua angka di layar yang sama berselisih bagi
+        // staff yang check-in lebih awal (07:55 pada shift 08:00–17:00:
+        // 09:05 di sini vs 09:00 di kartu).
         final overtimeElapsed = AttendanceRules.overtimeElapsedSinceCheckout;
         final isOvertimeRunning = overtimeElapsed != null;
-        final workTimerLabel = remaining != null
-            ? 'Sisa jam kerja: ${_fmtDur(remaining)}'
-            : isOvertimeRunning
-                ? 'Lembur berjalan: +${_fmtDur(overtimeElapsed)}'
-                : null;
+        final remaining = AttendanceRules.remainingWorkTime;
+        final workTimerLabel = isOvertimeRunning
+            ? 'Lembur berjalan: +${_fmtDur(overtimeElapsed)}'
+            : (remaining != null ? 'Sisa jam kerja: ${_fmtDur(remaining)}' : null);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
