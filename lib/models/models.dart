@@ -916,6 +916,17 @@ class AppNotification {
   final String title;
   final String message;
   final NotificationType type;
+
+  /// `type` MENTAH dari backend ("document_rejected", "leave_approved", ...).
+  ///
+  /// [type] di atas sudah dipadatkan jadi 4 kategori tampilan (ikon & warna),
+  /// sehingga "dokumen ditolak" dan "cuti ditolak" tidak lagi bisa dibedakan.
+  /// Padahal keduanya menuntun ke MENU YANG BERBEDA — lihat
+  /// `services/notification_menu_hints.dart` yang memetakannya jadi kalimat
+  /// "Buka menu Akun > Dokumen Saya ...". Karena itu nilai aslinya disimpan,
+  /// bukan dibuang saat parsing.
+  final String rawType;
+
   final DateTime createdAt;
   final bool isRead;
   final bool isTeam;
@@ -926,6 +937,7 @@ class AppNotification {
     required this.message,
     required this.type,
     required this.createdAt,
+    this.rawType = '',
     this.isRead = false,
     this.isTeam = false,
   });
@@ -947,6 +959,7 @@ class AppNotification {
       title: (j['title'] ?? '').toString(),
       message: (j['body'] ?? '').toString(),
       type: mapType(type),
+      rawType: type,
       createdAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal() ??
           DateTime.now(),
       isRead: j['readAt'] != null,

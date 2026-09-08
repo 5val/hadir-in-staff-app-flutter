@@ -131,6 +131,102 @@ class AttendanceRules {
     final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
     return now.isBefore(target) ? target.difference(now) : null;
   }
+
+  // ── Countdown jam kerja & batas lembur ──────────────────────────────
+
+  /// Jam masuk shift HARI INI sebagai timestamp. Null bila kalender belum
+  /// termuat.
+  static DateTime? get jamMasukToday {
+    final t = _jamMasuk;
+    if (t == null) return null;
+    final now = TestingConfig.now();
+    return DateTime(now.year, now.month, now.day, t.hour, t.minute);
+  }
+
+  /// Jam pulang shift HARI INI sebagai timestamp. Null bila kalender belum
+  /// termuat.
+  static DateTime? get jamPulangToday {
+    final t = _jamPulang;
+    if (t == null) return null;
+    final now = TestingConfig.now();
+    return DateTime(now.year, now.month, now.day, t.hour, t.minute);
+  }
+
+  /// SISA waktu kerja sampai jam pulang — inti dari perubahan "timer ke atas
+  /// jadi countdown ke bawah" di kartu Aktivitas Hari Ini.
+  ///
+  /// Titik awalnya BUKAN jam check-in, melainkan `max(sekarang, jam masuk)`.
+  /// Contoh yang menentukan aturan ini: shift 08:00–17:00 dan staff check-in
+  /// pukul 07:55. Countdown-nya tetap 09:00:00 (rentang penuh jam masuk →
+  /// jam pulang) dan diam di situ sampai pukul 08:00, baru kemudian
+  /// berkurang. Datang lebih awal tidak menambah sisa jam kerja, karena jam
+  /// kerjanya memang belum dimulai.
+  ///
+  /// Null bila jam shift belum diketahui. Nol berarti jam pulang sudah lewat
+  /// — sejak titik itu yang berjalan adalah [overtimeElapsed], hitung NAIK
+  /// dari 00:00:00.
+  static Duration? get remainingWorkTime {
+    final masuk = jamMasukToday;
+    final pulang = jamPulangToday;
+    if (masuk == null || pulang == null) return null;
+    final now = TestingConfig.now();
+    final start = now.isBefore(masuk) ? masuk : now;
+    final left = pulang.difference(start);
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// Lama LEMBUR yang sedang berjalan: waktu sejak jam pulang terlewati,
+  /// dimulai dari 00:00:00 tepat di jam pulang. Null bila jam shift belum
+  /// diketahui, [Duration.zero] bila belum lewat jam pulang.
+  static Duration? get overtimeElapsed {
+    final pulang = jamPulangToday;
+    if (pulang == null) return null;
+    final now = TestingConfig.now();
+    final over = now.difference(pulang);
+    return over.isNegative ? Duration.zero : over;
+  }
+
+  /// Sudah masuk fase lembur (jam pulang terlewati)?
+  static bool get isOvertimeRunning {
+    final over = overtimeElapsed;
+    return over != null && over > Duration.zero;
+  }
+
+  // ── Batas maksimal lembur ───────────────────────────────────────────
+  //
+  // Angka default 4 jam mengikuti `LEMBUR_MAX_JAM_PER_HARI` di backend
+  // (routes/mobile/lembur.ts, PP 35/2021) — sengaja SAMA supaya app tidak
+  // memperingatkan di ambang yang berbeda dari yang divalidasi server.
+  // Jabatan yang punya `maxExtraHour` sendiri memakai angkanya.
+  static const int _defaultMaxLemburJam = 4;
+  static int _maxLemburJam = _defaultMaxLemburJam;
+
+  /// Dipanggil setelah profil staff termuat (`maxExtraHour` jabatan).
+  static void hydrateMaxLembur(int? maxExtraHour) {
+    _maxLemburJam = (maxExtraHour != null && maxExtraHour > 0)
+        ? (maxExtraHour < _defaultMaxLemburJam
+            ? maxExtraHour
+            : _defaultMaxLemburJam)
+        : _defaultMaxLemburJam;
+  }
+
+  static Duration get maxLembur => Duration(hours: _maxLemburJam);
+  static int get maxLemburJam => _maxLemburJam;
+
+  /// Batas akhir yang wajar untuk check-out hari ini: jam pulang + batas
+  /// maksimal lembur. Lewat titik ini, staff yang masih "bekerja" hampir
+  /// pasti lupa check-out, bukan sedang lembur.
+  static DateTime? get overtimeDeadline {
+    final pulang = jamPulangToday;
+    if (pulang == null) return null;
+    return pulang.add(maxLembur);
+  }
+
+  /// Sudah melewati batas maksimal lembur?
+  static bool get isPastOvertimeLimit {
+    final over = overtimeElapsed;
+    return over != null && over > maxLembur;
+  }
 }
 
 /// Shared state untuk status absensi — dipakai HomeTab dan FAB di MainScreen.
@@ -309,5 +405,49 @@ class AttendanceProvider extends ChangeNotifier {
   /// Selesai istirahat — server menghitung & menambah `breakDurasi`.
   Future<void> endBreakRemote() async {
     hydrateFromToday(await AttendanceService.breakOut());
+  }
+
+  // ── Sesi yang belum ditutup (lupa break-out / lupa check-out) ────────
+
+  OpenAttendanceSession? _openSession;
+
+  /// Absensi yang menggantung, atau null bila tidak ada. Diisi
+  /// [refreshOpenSession]; dibaca HomeTab & MainScreen untuk memblokir
+  /// check-in dan menampilkan peringatan.
+  OpenAttendanceSession? get openSession => _openSession;
+
+  /// Ada absensi hari SEBELUMNYA yang belum di-checkout — staff tidak boleh
+  /// check-in lagi sebelum itu ditutup.
+  bool get hasBlockingOpenSession => _openSession?.isPreviousDay == true;
+
+  /// Muat ulang status sesi menggantung. Best-effort: kegagalan jaringan
+  /// tidak boleh mengubah state jadi "tidak ada masalah", jadi nilainya
+  /// hanya diperbarui saat panggilannya berhasil.
+  Future<void> refreshOpenSession() async {
+    try {
+      _openSession = await AttendanceService.openSession();
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Tutup sesi yang menggantung (jam pulang shift, tanpa lembur) lalu
+  /// segarkan state hari ini.
+  Future<void> autoCheckoutRemote() async {
+    final rec = await AttendanceService.autoCheckout();
+    _openSession = null;
+    // Baris yang ditutup bisa jadi milik HARI KEMARIN; dalam kasus itu
+    // record hari ini tetap null, jadi state hari ini dibaca ulang dari
+    // server alih-alih diisi dari respons auto-checkout.
+    if (_isToday(rec.date)) {
+      hydrateFromToday(rec);
+    } else {
+      await refreshToday();
+    }
+  }
+
+  static bool _isToday(DateTime? d) {
+    if (d == null) return false;
+    final now = DateTime.now();
+    return d.year == now.year && d.month == now.month && d.day == now.day;
   }
 }

@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
 import '../services/notification_service.dart';
+import '../services/notification_menu_hints.dart';
 import '../services/api_client.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -49,6 +50,15 @@ class _NotificationScreenState extends State<NotificationScreen>
     _listController.dispose();
     super.dispose();
   }
+
+  /// Pesan notifikasi + petunjuk MENU tujuan.
+  ///
+  /// Teks dari backend hanya menyebut apa yang terjadi ("Dokumen KTP Anda
+  /// ditolak: fotonya buram"); ke mana staff harus pergi untuk
+  /// menindaklanjutinya tidak pernah disebut. Nama menu adalah milik app ini,
+  /// jadi kalimat itu ditempel di sini — lihat [NotificationMenuHints].
+  String _messageWithHint(AppNotification n) =>
+      NotificationMenuHints.withHint(n.message, n.rawType, title: n.title);
 
   Future<void> _load() async {
     setState(() {
@@ -128,6 +138,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 title: n.title,
                 message: n.message,
                 type: n.type,
+                rawType: n.rawType,
                 createdAt: n.createdAt,
                 isRead: true,
                 isTeam: n.isTeam,
@@ -151,6 +162,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                   title: n.title,
                   message: n.message,
                   type: n.type,
+                  rawType: n.rawType,
                   createdAt: n.createdAt,
                   isRead: true,
                   isTeam: n.isTeam,
@@ -516,10 +528,10 @@ class _NotificationScreenState extends State<NotificationScreen>
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(n.message,
+                        Text(_messageWithHint(n),
                             style: AppText.caption.copyWith(
                                 color: AppColors.slate600, height: 1.4),
-                            maxLines: 2,
+                            maxLines: 3,
                             overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 8),
                         Row(
@@ -615,6 +627,39 @@ class _NotificationScreenState extends State<NotificationScreen>
             Text(n.message,
                 style: AppText.body1
                     .copyWith(color: AppColors.slate600, height: 1.6)),
+            // Petunjuk menu ditampilkan sebagai kartu tersendiri di detail
+            // (bukan ditempel di ujung paragraf seperti di daftar) supaya
+            // langkah tindak lanjutnya tidak tenggelam dalam kalimat.
+            if (NotificationMenuHints.menuPath(n.rawType, title: n.title) !=
+                null) ...[
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: color.withOpacity(0.3)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.explore_rounded, size: 16, color: color),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        NotificationMenuHints.hintSentence(n.rawType,
+                            title: n.title)!,
+                        style: AppText.caption.copyWith(
+                            color: AppColors.slate800,
+                            fontWeight: FontWeight.w700,
+                            height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Row(
               children: [

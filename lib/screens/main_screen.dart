@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -10,7 +12,10 @@ import '../services/location_service.dart';
 import '../services/session_service.dart';
 import '../services/calendar_service.dart';
 import '../services/staff_log_service.dart';
+import '../services/push_notification_service.dart';
+import '../services/document_draft_service.dart';
 import '../widgets/staff_log_dialog.dart';
+import '../widgets/open_session_dialog.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
 import 'login_screen.dart';
@@ -20,6 +25,7 @@ import 'salary_screen.dart';
 import 'account_tab.dart';
 import 'manager_dashboard_tab.dart';
 import 'onboarding_documents_screen.dart';
+import 'notification_screen.dart';
 
 /// Bottom-nav wrapper — Home | Leave & Time Off | [FAB] | Salary | Account
 ///
@@ -39,8 +45,21 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late int _tab;
+
+  /// Penarik notifikasi backend → notifikasi HP. Backend belum punya FCM
+  /// (lihat catatan transport di `push_notification_service.dart`), jadi
+  /// app-lah yang menariknya secara berkala selagi berjalan; saat app dibuka
+  /// kembali penarikan langsung dilakukan lewat `didChangeAppLifecycleState`.
+  Timer? _notifTimer;
+
+  /// Pemeriksa absensi: batas maksimal lembur terlewat, dan sesi yang
+  /// belum di-checkout (lupa break-out/check-out).
+  Timer? _guardTimer;
+
+  /// Dialog "belum check-out" sedang tampil — mencegah timer menumpuknya.
+  bool _openSessionDialogShown = false;
 
   /// AttendanceProvider diinisialisasi di sini agar bisa dibagikan ke
   /// seluruh widget tree melalui [InheritedAttendance].
@@ -60,9 +79,36 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _tab = widget.initialTab;
+    WidgetsBinding.instance.addObserver(this);
     // Rebuild FAB ketika status berubah
     _attendance.addListener(() => setState(() {}));
+
+    // Notifikasi HP: siapkan saluran + minta izin (Android 13+/iOS) sedini
+    // mungkin, lalu arahkan ketukan notifikasi ke layar Notifikasi.
+    PushNotificationService.onNotificationTap = _handleNotificationTap;
+    PushNotificationService.init();
+
     _hydrateProfile();
+  }
+
+  /// Ketukan pada notifikasi HP membuka layar Notifikasi, bukan sekadar
+  /// mengembalikan app ke tab terakhir.
+  void _handleNotificationTap(String? payload) {
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NotificationScreen()),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // App baru dibuka lagi: tarik notifikasi baru dan periksa apakah ada
+    // absensi yang menggantung selagi app tertutup — dua hal yang paling
+    // mungkin berubah tanpa sepengetahuan app.
+    _syncNotifications();
+    _runAttendanceGuards();
   }
 
   /// Ambil profil staff asli dari backend & sinkronkan ke AppSession sebelum
@@ -122,6 +168,10 @@ class _MainScreenState extends State<MainScreen> {
         );
       } catch (_) {}
 
+      // Batas maksimal lembur staff ini (Jabatan.maxExtraHour), dipakai
+      // kartu Aktivitas Hari Ini & peringatan "saatnya check-out".
+      AttendanceRules.hydrateMaxLembur(AppSession.staff?.maxExtraHour);
+
       // Sinkronkan status absensi hari ini (best-effort, tidak memblokir).
       try {
         final today = await AttendanceService.today();
@@ -130,6 +180,10 @@ class _MainScreenState extends State<MainScreen> {
 
       if (!mounted) return;
       setState(() => _loadingProfile = false);
+
+      // Notifikasi HP + pemeriksa absensi mulai berjalan setelah profil ada
+      // (keduanya butuh staffId & jam shift).
+      _startBackgroundWatchers();
 
       // Popup log (naik jabatan / surat peringatan) yang belum dibaca.
       _showPendingLogs();
@@ -140,6 +194,99 @@ class _MainScreenState extends State<MainScreen> {
         _profileError = e.message;
       });
     }
+  }
+
+  void _startBackgroundWatchers() {
+    _notifTimer?.cancel();
+    _guardTimer?.cancel();
+
+    _syncNotifications();
+    _runAttendanceGuards();
+
+    // 2 menit: cukup cepat supaya persetujuan cuti/dokumen terasa "langsung
+    // masuk", cukup jarang supaya tidak menguras baterai & kuota.
+    _notifTimer = Timer.periodic(
+        const Duration(minutes: 2), (_) => _syncNotifications());
+    // 3 menit: kejadian yang dijaga di sini berskala jam (jam pulang, batas
+    // lembur, absensi kemarin), jadi tidak perlu presisi detik — cukup
+    // muncul tanpa staff harus membuka tab tertentu. Pemeriksaan langsung
+    // juga dilakukan setiap app di-resume, jadi kasus paling umum (HP dibuka
+    // pagi berikutnya) tidak menunggu timer sama sekali.
+    _guardTimer = Timer.periodic(
+        const Duration(minutes: 3), (_) => _runAttendanceGuards());
+  }
+
+  Future<void> _syncNotifications() async {
+    await NotificationCenter.syncFromServer();
+  }
+
+  /// Pemeriksa absensi — sumber dari dua notifikasi HP yang tidak ada di
+  /// backend, karena keduanya soal apa yang TIDAK dilakukan staff:
+  ///
+  ///  1. batas maksimal lembur terlewat tapi belum check-out, dan
+  ///  2. istirahat/absensi yang tidak pernah ditutup (termasuk yang
+  ///     terbawa sampai hari berikutnya).
+  Future<void> _runAttendanceGuards() async {
+    if (!mounted || _loadingProfile || _needsOnboarding || _isAdmin) return;
+
+    // (2) Sesi menggantung — diperiksa lebih dulu karena ia menutupi
+    // pertanyaan lembur: kalau kemarin belum ditutup, batas lembur hari ini
+    // tidak relevan.
+    await _attendance.refreshOpenSession();
+    final open = _attendance.openSession;
+    if (open != null) {
+      await NotificationCenter.alertOnce(
+        key: 'open_session_${open.tanggal}',
+        title: 'Anda Belum Check-Out',
+        body: openSessionExplanation(open),
+        type: 'attendance_missing_checkout',
+      );
+      await _promptCloseOpenSession(open);
+      return;
+    }
+
+    // (1) Batas maksimal lembur.
+    final stillWorking = _attendance.status != AttendanceProviderStatus.notCheckedIn &&
+        _attendance.status != AttendanceProviderStatus.checkedOut;
+    if (stillWorking && AttendanceRules.isPastOvertimeLimit) {
+      await NotificationCenter.alertOnce(
+        key: 'overtime_limit',
+        title: 'Batas Maksimal Lembur Terlewat',
+        body: 'Batas maksimal lembur sudah lewat, ini saatnya check-out dan '
+            'istirahat. Lembur Anda hari ini sudah melewati '
+            '${AttendanceRules.maxLemburJam} jam sejak jam pulang '
+            '${AttendanceRules.jamPulangLabel}.',
+        type: 'attendance_overtime_limit',
+      );
+    }
+
+    // Sedang istirahat padahal jam pulang sudah lewat — pengingat lebih awal
+    // supaya skenario "lupa break-out" tidak sampai jatuh ke auto-checkout.
+    if (_attendance.isOnBreak && AttendanceRules.isAfterNormalCheckout) {
+      await NotificationCenter.alertOnce(
+        key: 'break_open_after_checkout',
+        title: 'Istirahat Belum Ditutup',
+        body: 'Anda masih tercatat istirahat padahal jam pulang '
+            '${AttendanceRules.jamPulangLabel} sudah lewat. Tekan Break Out '
+            'lalu Check-Out sebelum meninggalkan kantor.',
+        type: 'break_reminder',
+      );
+    }
+  }
+
+  /// Tampilkan dialog penutup absensi yang menggantung, lalu tutup absensi
+  /// itu bila staff menyetujuinya. Isi & aturannya ada di
+  /// `widgets/open_session_dialog.dart` — dipakai bersama HomeTab supaya
+  /// kedua pintu menuju check-in memberi penjelasan yang sama persis.
+  Future<void> _promptCloseOpenSession(OpenAttendanceSession open) async {
+    if (_openSessionDialogShown || !mounted) return;
+    _openSessionDialogShown = true;
+    final closed = await showOpenSessionDialog(context, _attendance, open);
+    _openSessionDialogShown = false;
+    if (!mounted || !closed) return;
+    _showSuccessSnackbar(
+        'Absensi ${open.tanggal} ditutup pada ${open.jamPulangShift}. '
+        'Sekarang Anda bisa check-in kembali.');
   }
 
   /// Fase 8 — popup setelah login berhasil.
@@ -160,6 +307,11 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _logout() async {
+    // Berkas dokumen yang belum diajukan dan penanda notifikasi terikat pada
+    // staff yang sedang login — keduanya dibersihkan supaya tidak bocor ke
+    // staff berikutnya yang memakai HP yang sama.
+    await DocumentDraftService.clear();
+    await NotificationCenter.reset();
     await SessionService.clearSession();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -173,6 +325,10 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _notifTimer?.cancel();
+    _guardTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    PushNotificationService.onNotificationTap = null;
     _attendance.dispose();
     super.dispose();
   }
@@ -193,6 +349,17 @@ class _MainScreenState extends State<MainScreen> {
     if (status == AttendanceProviderStatus.onBreak) {
       await _showEndBreakDialog();
       return;
+    }
+
+    // Absensi hari sebelumnya belum ditutup → check-in baru tidak boleh
+    // dilakukan (server pun menolaknya dengan 409). Tutup dulu hari itu.
+    if (status == AttendanceProviderStatus.notCheckedIn) {
+      await _attendance.refreshOpenSession();
+      final open = _attendance.openSession;
+      if (open != null) {
+        await _promptCloseOpenSession(open);
+        return;
+      }
     }
 
     // Tentukan tipe kamera

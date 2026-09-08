@@ -11,6 +11,12 @@
     <!-- Internet (for face-verify API) -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- Notifikasi HP (Android 13+ meminta izin runtime; di bawah itu izin
+         ini otomatis diberikan). Dipakai NotificationCenter untuk
+         memunculkan notifikasi backend & peringatan absensi di status bar. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
     <!-- Media / Gallery write -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>

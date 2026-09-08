@@ -33,6 +33,13 @@ dependencies:
   image_picker: ^1.1.2
   # Sprint 2 OTP/auth overhaul: buka WhatsApp/dialer dari kartu "Hubungi Admin".
   url_launcher: ^6.3.1
+  # Notifikasi NYATA di status bar HP (bukan sekadar daftar di dalam app).
+  # Dipakai NotificationCenter untuk memunculkan setiap notifikasi backend +
+  # peringatan lokal (batas lembur, lupa break-out/check-out).
+  flutter_local_notifications: ^17.2.3
+  # Menyimpan berkas dokumen yang DIPILIH tapi BELUM diajukan ke folder
+  # privat app, supaya draft-nya bertahan walau app ditutup.
+  path_provider: ^2.1.4
 
 dev_dependencies:
   flutter_test:

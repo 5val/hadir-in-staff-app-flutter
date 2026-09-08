@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/testing_config.dart';
 import '../widgets/uploaded_file_image.dart';
+import '../widgets/open_session_dialog.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
@@ -136,6 +137,34 @@ class _HomeTabState extends State<HomeTab> {
   String _fmtDur(Duration d) => '${d.inHours.toString().padLeft(2, '0')}:'
       '${(d.inMinutes % 60).toString().padLeft(2, '0')}:'
       '${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+
+  // ── Countdown jam kerja ────────────────────────────────────────
+  //
+  // Kartu "Aktivitas Saat Ini" dulu memperlihatkan jam kerja yang MENAIK
+  // sejak check-in. Angka itu tidak menjawab pertanyaan yang sebenarnya
+  // dipunyai staff sepanjang hari ("berapa lama lagi sampai pulang?"), dan
+  // untuk yang datang lebih awal ia bahkan menyesatkan: check-in 07:55 pada
+  // shift 08:00 langsung menampilkan waktu kerja yang belum dikerjakan.
+  //
+  // Sekarang: hitung MUNDUR ke jam pulang (patokan awalnya jam masuk, bukan
+  // jam check-in — lihat AttendanceRules.remainingWorkTime), lalu begitu jam
+  // pulang terlewati berganti jadi timer lembur yang menaik dari 00:00:00.
+
+  /// Sisa waktu sampai jam pulang; null bila jam shift belum diketahui.
+  Duration? get _remainingWork => AttendanceRules.remainingWorkTime;
+
+  /// Lama lembur berjalan; null bila jam shift belum diketahui.
+  Duration? get _overtimeElapsed => AttendanceRules.overtimeElapsed;
+
+  bool get _isOvertimeNow => AttendanceRules.isOvertimeRunning;
+
+  /// Sudah lewat batas maksimal lembur (jam pulang + maks lembur) DAN masih
+  /// belum check-out — inilah kondisi yang memicu peringatan
+  /// "saatnya check-out dan istirahat".
+  bool get _isPastOvertimeLimit =>
+      AttendanceRules.isPastOvertimeLimit &&
+      _status != AttendanceProviderStatus.notCheckedIn &&
+      _status != AttendanceProviderStatus.checkedOut;
 
   /// Format countdown "MM:SS" (positif) atau "+MM:SS" (overtime, `s` negatif)
   /// — sama persis dengan konvensi `BreakScreen._fmtTime`/`_remainingLabel`,
@@ -284,6 +313,25 @@ class _HomeTabState extends State<HomeTab> {
   String get _effCheckOutPhotoUrl => _att.today?.fotoKeluar ?? '';
 
   Future<void> _openCameraForCheckIn() async {
+    // Gerbang yang sama seperti di FAB MainScreen: absensi hari sebelumnya
+    // yang belum ditutup harus diselesaikan dulu — server pun menolak
+    // check-in baru dengan HTTP 409 selama baris itu menggantung, jadi
+    // membuka kamera di sini hanya akan berakhir dengan error setelah staff
+    // repot berfoto.
+    await _att.refreshOpenSession();
+    if (!mounted) return;
+    final open = _att.openSession;
+    if (open != null) {
+      final closed = await showOpenSessionDialog(context, _att, open);
+      if (!mounted) return;
+      if (closed) {
+        _showSnackbar(
+            'Absensi ${open.tanggal} ditutup pada ${open.jamPulangShift}. '
+            'Silakan check-in kembali.');
+      }
+      return;
+    }
+
     final result = await Navigator.push<CameraResult>(
       context,
       MaterialPageRoute(
@@ -1222,16 +1270,25 @@ class _HomeTabState extends State<HomeTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Waktu Kerja', style: AppText.caption),
+                    Text(_activityTimerLabel, style: AppText.caption),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Text(_fmtDur(_workDur),
+                      child: Text(_activityTimerValue,
                           style: GoogleFonts.jetBrainsMono(
                               fontSize: 28,
                               fontWeight: FontWeight.w800,
-                              color: AppColors.slate900)),
+                              color: _isPastOvertimeLimit
+                                  ? AppColors.danger
+                                  : (_isOvertimeNow
+                                      ? AppColors.warning
+                                      : AppColors.slate900))),
                     ),
+                    const SizedBox(height: 2),
+                    Text(_activityTimerCaption,
+                        style: AppText.caption
+                            .copyWith(color: AppColors.slate400),
+                        overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ),
@@ -1257,9 +1314,91 @@ class _HomeTabState extends State<HomeTab> {
               ],
             ],
           ),
+          // Batas maksimal lembur terlewat — bukan lagi "sedang lembur",
+          // tapi kondisi yang harus dihentikan. Angka batasnya milik server
+          // (Jabatan.maxExtraHour / 4 jam PP 35-2021), bukan konstanta layar.
+          if (_isPastOvertimeLimit) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.danger.withOpacity(0.35)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.report_rounded,
+                      color: AppColors.danger, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Batas maksimal lembur sudah lewat, ini saatnya '
+                      'check-out dan istirahat.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.danger,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Judul angka besar di kartu aktivitas.
+  String get _activityTimerLabel {
+    if (_status == AttendanceProviderStatus.checkedOut) {
+      return 'Total Waktu Kerja';
+    }
+    if (_remainingWork == null) return 'Waktu Kerja';
+    return _isOvertimeNow ? 'Lembur Berjalan' : 'Sisa Waktu Kerja';
+  }
+
+  /// Angka besar di kartu aktivitas: countdown ke jam pulang, atau timer
+  /// lembur yang menaik setelah jam pulang terlewati.
+  String get _activityTimerValue {
+    if (_status == AttendanceProviderStatus.checkedOut) {
+      return _fmtDur(_workDur);
+    }
+    // Jam shift belum termuat (kalender gagal dimuat) — jangan mengarang
+    // countdown ke jam yang tidak diketahui, tampilkan durasi kerja apa
+    // adanya seperti sebelumnya.
+    final remaining = _remainingWork;
+    if (remaining == null) return _fmtDur(_workDur);
+
+    final over = _overtimeElapsed;
+    if (_isOvertimeNow && over != null) return '+${_fmtDur(over)}';
+    return _fmtDur(remaining);
+  }
+
+  /// Keterangan kecil di bawah angka — menjelaskan angka itu menuju/ sejak
+  /// jam berapa, supaya countdown tidak tampil sebagai angka tanpa acuan.
+  String get _activityTimerCaption {
+    if (_status == AttendanceProviderStatus.checkedOut) {
+      return 'Sudah check-out';
+    }
+    if (_remainingWork == null) return 'Jam shift belum termuat';
+    if (_isPastOvertimeLimit) {
+      return 'Lewat batas maks. lembur ${AttendanceRules.maxLemburJam} jam';
+    }
+    if (_isOvertimeNow) {
+      return 'Sejak jam pulang ${AttendanceRules.jamPulangLabel}';
+    }
+    final now = TestingConfig.now();
+    final masuk = AttendanceRules.jamMasukToday;
+    if (masuk != null && now.isBefore(masuk)) {
+      return 'Jam kerja mulai ${AttendanceRules.jamMasukLabel}';
+    }
+    return 'Menuju jam pulang ${AttendanceRules.jamPulangLabel}';
   }
 
   // ── Attendance Section ────────────────────────────────────────
@@ -1459,6 +1598,26 @@ class _HomeTabState extends State<HomeTab> {
                             ),
                           ),
                         ],
+                      ),
+                    ],
+                    // Skenario "lupa break-out": istirahat masih terbuka
+                    // padahal jam pulang sudah lewat. Aturan penutupannya
+                    // disebutkan di muka supaya jam pulang yang nanti
+                    // tercatat pukul shift tidak terasa seperti kesalahan
+                    // sistem.
+                    if (AttendanceRules.isAfterNormalCheckout) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Jam pulang ${AttendanceRules.jamPulangLabel} sudah '
+                        'lewat. Tekan Break Out lalu Check-Out — kalau lupa, '
+                        'istirahat dan check-out otomatis dicatat pukul '
+                        '${AttendanceRules.jamPulangLabel} tanpa lembur.',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.danger,
+                          height: 1.35,
+                        ),
                       ),
                     ],
                   ],

@@ -128,6 +128,32 @@ class AttendanceService {
     return AttendanceRecord.fromApi(res.asMap);
   }
 
+  /// Sesi absensi yang belum ditutup dan sudah lewat batas wajarnya —
+  /// null bila tidak ada.
+  ///
+  /// Dua skenario yang ditangkap endpoint ini (lihat komentar
+  /// `findOpenSession` di backend): staff lupa break-out/check-out sampai
+  /// melewati jam pulang + batas maksimal lembur, dan staff lupa check-out
+  /// sampai HARI BERIKUTNYA — yang kedua tidak mungkin terlihat lewat
+  /// `today()` karena baris yang menggantung ada di tanggal kemarin.
+  static Future<OpenAttendanceSession?> openSession() async {
+    final id = await _staffId();
+    final res =
+        await ApiClient.instance.get('/mobile/staff/$id/attendance/open-session');
+    if (res.data == null) return null;
+    return OpenAttendanceSession.fromApi(res.asMap);
+  }
+
+  /// Tutup sesi yang menggantung: istirahat & check-out dipatok ke jam
+  /// pulang shift, lembur 0. Server yang menentukan angkanya — app tidak
+  /// boleh mengarang jam check-out.
+  static Future<AttendanceRecord> autoCheckout() async {
+    final id = await _staffId();
+    final res = await ApiClient.instance
+        .post('/mobile/staff/$id/attendance/auto-checkout');
+    return AttendanceRecord.fromApi(res.asMap);
+  }
+
   /// GET riwayat. [month] format "YYYY-MM" (opsional), [limit] default server 60.
   static Future<List<AttendanceRecord>> history({String? month, int? limit}) async {
     final id = await _staffId();
@@ -140,4 +166,43 @@ class AttendanceService {
     );
     return res.asList.map(AttendanceRecord.fromApi).toList();
   }
+}
+
+/// Absensi yang belum di-checkout dan sudah lewat batas wajarnya.
+class OpenAttendanceSession {
+  /// "YYYY-MM-DD" tanggal absensi yang menggantung.
+  final String tanggal;
+
+  /// Jam pulang shift hari itu ("HH:mm") — jam yang akan dipakai sebagai
+  /// waktu selesai istirahat DAN waktu check-out saat ditutup otomatis.
+  final String jamPulangShift;
+
+  final int batasLemburJam;
+
+  /// `hari_sebelumnya` = absensi kemarin (atau lebih lama) belum ditutup;
+  /// `lewat_batas_lembur` = absensi HARI INI sudah lewat jam pulang + batas
+  /// maksimal lembur.
+  final String reason;
+
+  /// Istirahatnya juga belum ditutup (break-in tanpa break-out).
+  final bool lupaBreakOut;
+
+  const OpenAttendanceSession({
+    required this.tanggal,
+    required this.jamPulangShift,
+    required this.batasLemburJam,
+    required this.reason,
+    required this.lupaBreakOut,
+  });
+
+  bool get isPreviousDay => reason == 'hari_sebelumnya';
+
+  factory OpenAttendanceSession.fromApi(Map<String, dynamic> j) =>
+      OpenAttendanceSession(
+        tanggal: (j['tanggal'] ?? '').toString(),
+        jamPulangShift: (j['jamPulangShift'] ?? '').toString(),
+        batasLemburJam: (j['batasLemburJam'] as num?)?.toInt() ?? 4,
+        reason: (j['reason'] ?? '').toString(),
+        lupaBreakOut: j['lupaBreakOut'] == true,
+      );
 }

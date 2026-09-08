@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../theme/app_theme.dart';
 import '../services/api_client.dart';
+import '../services/document_draft_service.dart';
 import '../services/document_service.dart';
 import '../services/session_service.dart';
 import 'main_screen.dart';
@@ -52,8 +53,16 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
   bool _loading = true;
   String? _error;
 
-  /// Jenis dokumen yang sedang diunggah (untuk spinner per kartu).
-  String? _uploading;
+  /// Berkas yang sudah DIPILIH tapi belum diajukan, per jenis dokumen.
+  /// Selama masih di sini, tidak ada apa pun yang terkirim ke server.
+  Map<String, DocumentDraft> _drafts = const {};
+
+  /// Pengajuan seluruh dokumen sedang berjalan (tombol tunggal di bawah).
+  bool _submitting = false;
+
+  /// Jenis yang sedang dikirim saat ini — dipakai untuk spinner per kartu
+  /// selama pengajuan massal berlangsung.
+  String? _submittingJenis;
 
   /// Dokumen lama yang sudah pernah DISETUJUI, dipetakan per jenis. Hanya
   /// terisi saat gerbang ini dibuka ulang (staff baru mengganti nomor HP) --
@@ -84,16 +93,23 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
         } catch (_) {}
       }
 
+      final drafts = await DocumentDraftService.all();
+
       if (!mounted) return;
       setState(() {
         _status = status;
         _reusable = reusable;
+        _drafts = drafts;
         _loading = false;
       });
       // Lompat otomatis HANYA bila benar-benar tidak ada lagi yang bisa
       // diunggah. Dulu syaratnya `status.completed` (dokumen WAJIB saja),
       // sehingga kartu BPJS & NPWP tidak pernah sempat terlihat.
-      if (!widget.manageMode && status.allSubmitted) _goToApp();
+      // ...dan tidak ada draft yang masih menunggu diajukan: kalau ada,
+      // staff harus tetap melihat layar ini untuk menekan tombol "Ajukan".
+      if (!widget.manageMode && status.allSubmitted && drafts.isEmpty) {
+        _goToApp();
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -115,33 +131,33 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
     );
   }
 
-  /// Ajukan ulang berkas lama yang sudah disetujui, tanpa memotret apa pun.
+  /// Pilih berkas lama yang sudah disetujui sebagai DRAFT — belum diajukan.
   ///
-  /// Server membuat pengajuan BARU yang menunjuk berkas yang sama, jadi
-  /// riwayatnya tetap utuh dan HRD tetap melihatnya sebagai kejadian baru.
-  Future<void> _reusePrevious(OnboardingDocument doc) async {
-    setState(() => _uploading = doc.jenis);
-    try {
-      await DocumentService.reusePrevious(doc.jenis);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${doc.label} diajukan ulang memakai berkas sebelumnya'),
-          backgroundColor: AppColors.brandNavy,
-        ),
-      );
-      await _load();
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
-      );
-    } finally {
-      if (mounted) setState(() => _uploading = null);
-    }
+  /// Dulu tombol ini langsung memanggil `POST /documents/reuse`, jadi satu
+  /// ketukan sudah membuat pengajuan di server. Sekarang pilihannya hanya
+  /// dicatat di HP; yang mengirimkannya ke server adalah satu tombol
+  /// "Ajukan Dokumen" di bagian bawah layar, bersama dokumen lainnya.
+  Future<void> _chooseReuse(OnboardingDocument doc) async {
+    final previous = _reusable[doc.jenis];
+    if (previous == null) return;
+    await DocumentDraftService.putReuse(
+      jenis: doc.jenis,
+      fileUrl: previous.fileUrl,
+    );
+    final drafts = await DocumentDraftService.all();
+    if (!mounted) return;
+    setState(() => _drafts = drafts);
+    _toast('${doc.label} akan diajukan memakai berkas sebelumnya',
+        AppColors.brandNavy);
   }
 
-  Future<void> _pickAndUpload(OnboardingDocument doc) async {
+  /// Ambil/pilih berkas lalu SIMPAN DI HP saja.
+  ///
+  /// Tidak ada panggilan jaringan di sini sama sekali: berkas tidak diunggah
+  /// ke Google Drive dan tidak ada baris `staff_document` yang dibuat, karena
+  /// staff baru MEMILIH berkas — belum mengajukannya. Pengiriman terjadi
+  /// hanya di [_submitAll], lewat satu tombol di bawah.
+  Future<void> _pickDocument(OnboardingDocument doc) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -192,41 +208,111 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
     // ClickUp 86eyh8avk: kumpulkan `catatanStaff` opsional di sini —
     // staff bisa memberi tahu HRD kalau ada data yang diisi admin ternyata
     // salah (mis. nama), sebelum dokumen ini masuk antrean review admin.
-    // Backend & tampilan admin (staff/page.tsx "Catatan staff: ...") sudah
-    // siap menampung field ini, layar ini dulu tidak pernah mengumpulkannya.
     if (!mounted) return;
     final catatanStaff = await _promptCatatanStaff(doc);
     if (!mounted) return;
 
-    setState(() => _uploading = doc.jenis);
     try {
-      await DocumentService.upload(
+      await DocumentDraftService.putFile(
         jenis: doc.jenis,
-        file: File(picked.path),
-        catatanStaff: catatanStaff,
+        source: File(picked.path),
+        catatanStaff: catatanStaff ?? '',
       );
+      final drafts = await DocumentDraftService.all();
       if (!mounted) return;
-      setState(() => _uploading = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${doc.label} berhasil diunggah'),
-          backgroundColor: AppColors.brandLimeDark,
-        ),
-      );
-      await _load();
-    } on ApiException catch (e) {
+      setState(() => _drafts = drafts);
+      _toast('${doc.label} siap diajukan — tekan tombol Ajukan di bawah',
+          AppColors.brandLimeDark);
+    } catch (e) {
       if (!mounted) return;
-      setState(() => _uploading = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
-      );
+      _toast('Gagal menyimpan berkas: $e', AppColors.danger);
     }
   }
 
-  /// Bottom sheet opsional: minta `catatanStaff` sebelum dokumen dikirim.
-  /// "Lewati" maupun menutup sheet sama-sama lanjut mengunggah tanpa
-  /// catatan — langkah ini murni buat menambahkan keterangan, bukan buat
-  /// membatalkan unggahan (file sudah dipilih di langkah sebelumnya).
+  /// Batalkan pilihan berkas yang belum diajukan.
+  Future<void> _removeDraft(OnboardingDocument doc) async {
+    await DocumentDraftService.remove(doc.jenis);
+    final drafts = await DocumentDraftService.all();
+    if (!mounted) return;
+    setState(() => _drafts = drafts);
+  }
+
+  /// SATU tombol untuk mengajukan SELURUH dokumen yang sudah dipilih.
+  ///
+  /// Inilah satu-satunya tempat berkas benar-benar dikirim: berkas baru lewat
+  /// `POST /documents` (backend yang menaruhnya di Google Drive), dan pilihan
+  /// "pakai berkas sebelumnya" lewat `POST /documents/reuse`. Kegagalan satu
+  /// dokumen TIDAK membatalkan yang lain — draft yang gagal tetap tersimpan
+  /// di HP supaya bisa dicoba lagi tanpa memotret ulang.
+  Future<void> _submitAll() async {
+    final pending = _drafts.values.toList()
+      ..sort((a, b) => a.pickedAt.compareTo(b.pickedAt));
+    if (pending.isEmpty) return;
+
+    setState(() => _submitting = true);
+
+    final failed = <String, String>{};
+    var sent = 0;
+
+    for (final draft in pending) {
+      if (!mounted) return;
+      setState(() => _submittingJenis = draft.jenis);
+      try {
+        if (draft.reuse) {
+          await DocumentService.reusePrevious(draft.jenis);
+        } else {
+          await DocumentService.upload(
+            jenis: draft.jenis,
+            file: File(draft.filePath),
+            catatanStaff:
+                draft.catatanStaff.isEmpty ? null : draft.catatanStaff,
+          );
+        }
+        await DocumentDraftService.remove(draft.jenis);
+        sent++;
+      } on ApiException catch (e) {
+        failed[draft.jenis] = e.message;
+      } catch (e) {
+        failed[draft.jenis] = e.toString();
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _submitting = false;
+      _submittingJenis = null;
+    });
+
+    if (failed.isEmpty) {
+      _toast(
+        '$sent dokumen berhasil diajukan. Menunggu review HRD.',
+        AppColors.brandLimeDark,
+      );
+    } else {
+      final labels =
+          failed.keys.map((j) => DocumentJenis.labels[j] ?? j).join(', ');
+      _toast(
+        sent > 0
+            ? '$sent dokumen terkirim. Gagal: $labels — coba ajukan lagi.'
+            : 'Pengajuan gagal: ${failed.values.first}',
+        AppColors.danger,
+      );
+    }
+
+    await _load();
+  }
+
+  void _toast(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: color),
+    );
+  }
+
+  /// Bottom sheet opsional: minta `catatanStaff` sebelum berkas disimpan
+  /// sebagai draft. "Lewati" maupun menutup sheet sama-sama lanjut menyimpan
+  /// tanpa catatan — langkah ini murni buat menambahkan keterangan, bukan
+  /// buat membatalkan pilihan berkas.
   Future<String?> _promptCatatanStaff(OnboardingDocument doc) async {
     final ctrl = TextEditingController();
     final result = await showModalBottomSheet<String>(
@@ -258,12 +344,12 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
             ),
             const SizedBox(height: 16),
             Text('Catatan untuk ${doc.label} (opsional)',
-                style:
-                    AppText.body1.copyWith(fontWeight: FontWeight.w700)),
+                style: AppText.body1.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
             Text(
               'Ada yang perlu dijelaskan ke HRD? Misalnya kalau ada data '
-              'diri yang diisi admin ternyata salah.',
+              'diri yang diisi admin ternyata salah. Catatan ini ikut '
+              'terkirim saat Anda menekan tombol Ajukan.',
               style: AppText.caption,
             ),
             const SizedBox(height: 12),
@@ -288,7 +374,7 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-                    child: const Text('Unggah'),
+                    child: const Text('Simpan Catatan'),
                   ),
                 ),
               ],
@@ -326,6 +412,16 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
     final canEnter = requiredDocs.isNotEmpty &&
         requiredDocs.every((d) => d.submitted);
 
+    // Ada berkas yang sudah dipilih tapi belum dikirim ke server.
+    final draftCount = _drafts.length;
+
+    // "Ajukan Ulang" dipakai bila yang menunggu memang pernah diajukan
+    // sebelumnya (ditolak HRD, atau gerbang dibuka ulang karena ganti nomor
+    // HP) — di situ staff sedang MENGGANTI berkas, bukan mengirim pertama
+    // kali.
+    final isResubmit = docs
+        .any((d) => d.submitted && _drafts.containsKey(d.jenis));
+
     return Scaffold(
       backgroundColor: AppColors.slate50,
       appBar: AppBar(
@@ -359,11 +455,25 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                       _buildIntro(done, docs.length),
                       const SizedBox(height: 20),
                       ...docs.map(_buildDocCard),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 8),
+
+                      // ── SATU tombol pengajuan untuk SELURUH dokumen ──
+                      //
+                      // Dulu tiap kartu punya tombolnya sendiri yang langsung
+                      // mengunggah — staff mengajukan dokumen satu per satu
+                      // tanpa sempat memeriksa keseluruhannya, dan tiap
+                      // ketukan sudah membuat baris pengajuan di server.
+                      // Sekarang pengiriman terjadi hanya di sini, sekali,
+                      // untuk semua berkas yang sudah dipilih.
+                      _buildSubmitBar(draftCount, isResubmit),
+
                       // Tombol masuk aktif begitu dokumen WAJIB terkirim —
                       // BPJS/NPWP yang opsional boleh menyusul lewat menu
-                      // Akun → Dokumen Saya.
-                      if (canEnter)
+                      // Akun → Dokumen Saya. Disembunyikan selama masih ada
+                      // draft yang menunggu supaya staff tidak keluar dari
+                      // layar ini dengan berkas yang belum terkirim.
+                      if (canEnter && draftCount == 0) ...[
+                        const SizedBox(height: 12),
                         SizedBox(
                           height: 48,
                           child: ElevatedButton(
@@ -375,9 +485,107 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                                     : 'Lanjut ke Aplikasi (lengkapi nanti)')),
                           ),
                         ),
+                      ],
                     ],
                   ),
                 ),
+    );
+  }
+
+  /// Bilah pengajuan tunggal di bagian paling bawah layar.
+  ///
+  /// Selalu terlihat (bukan hanya saat ada draft) supaya staff tahu di mana
+  /// tombolnya sebelum memilih berkas apa pun — saat kosong ia berbentuk
+  /// petunjuk, bukan tombol mati tanpa penjelasan.
+  Widget _buildSubmitBar(int draftCount, bool isResubmit) {
+    final label = isResubmit ? 'Ajukan Ulang Dokumen' : 'Ajukan Dokumen';
+
+    if (draftCount == 0) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.slate100,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.slate200),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded,
+                size: 18, color: AppColors.slate400),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Pilih berkas pada kartu di atas, lalu tekan "$label" di sini '
+                'untuk mengirim semuanya sekaligus ke HRD.',
+                style: AppText.caption.copyWith(height: 1.4),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.brandLime.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.brandLimeDark.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.playlist_add_check_rounded,
+                  size: 18, color: AppColors.brandLimeDark),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '$draftCount dokumen siap diajukan',
+                  style: AppText.body2.copyWith(
+                      fontWeight: FontWeight.w800, color: AppColors.slate900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Berkas masih tersimpan di HP Anda dan belum terlihat HRD. '
+            'Tekan tombol di bawah untuk mengirimkannya.',
+            style: AppText.caption.copyWith(height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _submitting ? null : _submitAll,
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.send_rounded, size: 18),
+              label: Text(
+                _submitting ? 'Mengirim dokumen...' : '$label ($draftCount)',
+                style: GoogleFonts.inter(
+                    fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.brandLimeDark,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.slate200,
+                elevation: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -473,11 +681,12 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Unggah dokumen berikut untuk mengaktifkan akun Anda. '
-            'Dokumen akan diperiksa HRD, tapi Anda sudah bisa memakai aplikasi '
-            'segera setelah dokumen wajib terkirim. Dokumen bertanda OPSIONAL '
-            'tetap boleh diunggah dan bisa dilengkapi kapan saja lewat menu '
-            'Akun → Dokumen Saya.',
+            'Pilih berkas untuk tiap dokumen di bawah, lalu tekan satu tombol '
+            '"Ajukan Dokumen" di bagian paling bawah untuk mengirim '
+            'semuanya sekaligus. Sebelum tombol itu ditekan, berkas hanya '
+            'tersimpan di HP Anda dan belum terlihat HRD. Dokumen bertanda '
+            'OPSIONAL boleh dilengkapi kapan saja lewat menu '
+            'Akun > Dokumen Saya.',
             style: AppText.body2,
           ),
           const SizedBox(height: 12),
@@ -578,12 +787,21 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
   }
 
   Widget _buildDocCard(OnboardingDocument doc) {
-    final isUploading = _uploading == doc.jenis;
+    // Spinner per kartu hanya muncul saat pengajuan massal sedang menggilir
+    // dokumen ini — memilih berkas sendiri tidak pernah memakan waktu tunggu
+    // karena tidak ada panggilan jaringan.
+    final isSending = _submittingJenis == doc.jenis;
     final submitted = doc.submitted;
+    final draft = _drafts[doc.jenis];
 
     Color statusColor;
     String statusLabel;
-    if (doc.isRejected) {
+    if (draft != null) {
+      // Draft menang atas status server: yang paling perlu diketahui staff
+      // adalah "berkas ini belum terkirim", bukan status pengajuan lama.
+      statusColor = AppColors.brandCyanDark;
+      statusLabel = 'SIAP DIAJUKAN';
+    } else if (doc.isRejected) {
       statusColor = AppColors.danger;
       statusLabel = 'DITOLAK';
     } else if (doc.latestStatus == 'approved') {
@@ -594,7 +812,7 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
       statusLabel = 'MENUNGGU REVIEW';
     } else {
       statusColor = AppColors.slate400;
-      statusLabel = 'BELUM DIUNGGAH';
+      statusLabel = 'BELUM DIPILIH';
     }
 
     return Container(
@@ -604,7 +822,9 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
         color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: doc.isRejected ? AppColors.danger : AppColors.slate200,
+          color: draft != null
+              ? AppColors.brandCyanDark
+              : (doc.isRejected ? AppColors.danger : AppColors.slate200),
         ),
       ),
       child: Column(
@@ -613,9 +833,11 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           Row(
             children: [
               Icon(
-                submitted && !doc.isRejected
-                    ? Icons.check_circle_rounded
-                    : Icons.upload_file_rounded,
+                draft != null
+                    ? Icons.schedule_send_rounded
+                    : (submitted && !doc.isRejected
+                        ? Icons.check_circle_rounded
+                        : Icons.upload_file_rounded),
                 color: statusColor,
                 size: 22,
               ),
@@ -681,7 +903,7 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           // untuk diperbesar: staff perlu MEMASTIKAN berkas lama itu memang
           // yang benar sebelum mengajukannya ulang -- versi pertama fitur ini
           // hanya menampilkan thumbnail 40 piksel yang tidak bisa diapa-apakan.
-          if (!submitted && _reusable.containsKey(doc.jenis)) ...[
+          if (!submitted && draft == null && _reusable.containsKey(doc.jenis)) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(10),
@@ -783,11 +1005,10 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed:
-                          isUploading ? null : () => _reusePrevious(doc),
-                      icon: const Icon(Icons.upload_file_rounded, size: 16),
+                      onPressed: _submitting ? null : () => _chooseReuse(doc),
+                      icon: const Icon(Icons.check_rounded, size: 16),
                       label: Text(
-                        'Ajukan Ulang Berkas Ini',
+                        'Pakai Berkas Ini',
                         style: GoogleFonts.inter(
                             fontSize: 12, fontWeight: FontWeight.w800),
                       ),
@@ -801,7 +1022,9 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Atau unggah berkas baru lewat tombol di bawah.',
+                    'Berkas ini baru terkirim setelah Anda menekan tombol '
+                    'Ajukan di bawah. Atau pilih berkas baru lewat tombol '
+                    'di bawah kartu ini.',
                     style: AppText.caption.copyWith(color: AppColors.slate400),
                   ),
                 ],
@@ -812,7 +1035,9 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           // cuma memberi tahu SUDAH/BELUM diunggah, sehingga staff tidak punya
           // cara memastikan berkas yang benar yang terkirim (mis. KTP tertukar
           // dengan BPJS) selain menunggu HRD menolaknya berhari-hari kemudian.
-          if (doc.hasPreview) ...[
+          // Pratinjau DRAFT — berkas yang dipilih tapi belum diajukan.
+          if (draft != null) _buildDraftPreview(doc, draft),
+          if (doc.hasPreview && draft == null) ...[
             const SizedBox(height: 12),
             GestureDetector(
               onTap: () => _showFullPreview(doc),
@@ -916,7 +1141,7 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
           SizedBox(
             width: double.infinity,
             height: 40,
-            child: isUploading
+            child: isSending
                 ? const Center(
                     child: SizedBox(
                       width: 20,
@@ -925,16 +1150,103 @@ class _OnboardingDocumentsScreenState extends State<OnboardingDocumentsScreen> {
                     ),
                   )
                 : OutlinedButton.icon(
-                    onPressed: () => _pickAndUpload(doc),
-                    icon: const Icon(Icons.file_upload_outlined, size: 18),
+                    // Tombol ini TIDAK LAGI mengunggah apa pun — ia hanya
+                    // memilih berkas dari kamera/galeri. Pengajuannya satu,
+                    // di bagian bawah layar.
+                    onPressed: _submitting ? null : () => _pickDocument(doc),
+                    icon: Icon(
+                        draft != null
+                            ? Icons.swap_horiz_rounded
+                            : Icons.attach_file_rounded,
+                        size: 18),
                     label: Text(
-                      submitted ? 'Unggah Ulang' : 'Unggah ${doc.label}',
+                      draft != null
+                          ? 'Ganti Berkas'
+                          : (submitted
+                              ? 'Pilih Berkas Baru'
+                              : 'Pilih Berkas ${doc.label}'),
                       style: GoogleFonts.inter(
                           fontSize: 12, fontWeight: FontWeight.w700),
                     ),
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Pratinjau berkas yang SUDAH DIPILIH tapi BELUM diajukan.
+  ///
+  /// Sengaja dibedakan tegas dari pratinjau berkas terunggah (label "belum
+  /// terkirim" + tombol batal): tanpa itu staff tidak punya cara membedakan
+  /// berkas yang sudah sampai ke HRD dari yang masih mengendap di HP-nya.
+  Widget _buildDraftPreview(OnboardingDocument doc, DocumentDraft draft) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.brandCyan.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.brandCyanDark.withOpacity(0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.pending_actions_rounded,
+                    size: 15, color: AppColors.brandCyanDark),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    draft.reuse
+                        ? 'Akan diajukan memakai berkas sebelumnya'
+                        : 'Berkas dipilih, belum terkirim ke HRD',
+                    style: AppText.caption.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.slate800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: AspectRatio(
+                aspectRatio: 3 / 2,
+                child: Container(
+                  color: AppColors.slate100,
+                  width: double.infinity,
+                  child: UploadedFileImage(
+                    localPath: draft.reuse ? null : draft.filePath,
+                    remoteUrl: draft.reuse ? draft.reuseFileUrl : '',
+                  ),
+                ),
+              ),
+            ),
+            if (draft.catatanStaff.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Catatan Anda: ${draft.catatanStaff}',
+                  style: AppText.caption.copyWith(color: AppColors.slate600)),
+            ],
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 34,
+              child: TextButton.icon(
+                onPressed: _submitting ? null : () => _removeDraft(doc),
+                icon: const Icon(Icons.close_rounded, size: 15),
+                label: Text('Batalkan Pilihan',
+                    style: GoogleFonts.inter(
+                        fontSize: 11, fontWeight: FontWeight.w700)),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.danger,
+                    padding: EdgeInsets.zero),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
