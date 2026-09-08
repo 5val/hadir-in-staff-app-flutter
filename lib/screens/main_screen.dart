@@ -75,15 +75,17 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   // ── Notifikasi: polling + candy-bar banner (2026-09-07, Fase 6 PHASE 1) ──
   //
   // Polling + banner in-app selagi app di-foreground. Sisi PUSH-nya (app
-  // di-background/ditutup) sudah ada sejak 2026-09-08 di
-  // `services/fcm_service.dart` — kredensial Firebase-nya sudah turun.
+  // di-background/ditutup) sudah jalan sejak 2026-09-08 di
+  // `services/fcm_service.dart`.
   //
-  // Polling ini SENGAJA masih hidup: backend belum mengirim FCM sama sekali
-  // (belum ada kolom device token maupun pengirim server-side), jadi ia tetap
-  // satu-satunya sumber notifikasi backend hari ini. Begitu backend mulai
-  // mengirim push, kecilkan ini jadi sekadar penyelaras saat app dibuka —
-  // lihat dokumen requirement FCM. Notifikasi kembar antara kedua jalur sudah
-  // dicegah lewat id notifikasi yang sama (`PushNotificationService.idFor`).
+  // Polling TETAP dipertahankan walau FCM sudah jalan (2026-09-08) --
+  // bukan cuma soal push, polling juga satu-satunya sumber data untuk
+  // layar Notifikasi & badge unread count, keduanya tidak lahir dari
+  // event push. Notifikasi TRAY kembar antara kedua jalur dicegah lewat id
+  // notifikasi yang sama (`PushNotificationService.idFor`); banner in-app
+  // (SnackBar) di `_pollNotifications` di bawah punya pengecekan dedup-nya
+  // SENDIRI (`NotificationCenter.isShown`, Fase 1.1) -- keduanya sengaja
+  // dicek terpisah karena awalnya memang tidak saling kenal.
   Timer? _notifPollTimer;
   final Set<String> _seenNotifIds = {};
   bool _notifSeeded = false;
@@ -116,22 +118,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       final result = await NotificationService.myNotifications();
       if (!mounted) return;
 
-      // Notifikasi HP — memakai hasil penarikan yang sama.
-      await NotificationCenter.syncFromServer(prefetched: result);
-      if (!mounted) return;
-
       if (!_notifSeeded) {
         // Backlog yang sudah ada saat app dibuka TIDAK di-banner-kan satu
         // per satu -- hanya notifikasi yang BENAR-BENAR baru muncul sejak
         // polling ini mulai jalan.
         _seenNotifIds.addAll(result.items.map((n) => n.id));
         _notifSeeded = true;
+        await NotificationCenter.syncFromServer(prefetched: result);
         return;
       }
+
       final fresh =
           result.items.where((n) => !_seenNotifIds.contains(n.id)).toList();
       _seenNotifIds.addAll(result.items.map((n) => n.id));
+
+      // 2026-09-08 (Fase 1.1) -- dicek SEBELUM syncFromServer, bukan
+      // sesudah: syncFromServer sendiri menandai setiap id fresh "sudah
+      // dilihat" begitu ia selesai (dipakai penarikan berikutnya), jadi
+      // kalau baru dicek SESUDAH, hasilnya SELALU true untuk semua id
+      // fresh -- yang terdeteksi jadinya cuma "abis ditandai sync barusan",
+      // bukan "sudah tampil lewat push SEBELUM poll ini jalan" seperti yang
+      // dimaksud. Urutan ini yang bikin deteksinya benar.
+      final shownByPush = <String, bool>{};
       for (final n in fresh) {
+        shownByPush[n.id] = await NotificationCenter.isShown(n.id);
+      }
+
+      // Notifikasi HP — memakai hasil penarikan yang sama.
+      await NotificationCenter.syncFromServer(prefetched: result);
+      if (!mounted) return;
+
+      for (final n in fresh) {
+        // Sudah tampil sebagai notifikasi tray lewat push FCM (foreground
+        // listener `FcmService.onMessage` sudah memanggil
+        // `NotificationCenter.markShown` untuk kejadian ini) -- jangan
+        // banner-kan lagi, staff sudah lihat sinyalnya sekali.
+        if (shownByPush[n.id] == true) continue;
         _showNotificationBanner(n);
       }
     } catch (_) {

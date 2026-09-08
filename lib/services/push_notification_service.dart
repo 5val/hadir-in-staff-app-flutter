@@ -341,6 +341,29 @@ class NotificationCenter {
     }
   }
 
+  /// Sudah pernah ditampilkan sebagai notifikasi HP? (lewat [syncFromServer]
+  /// ATAU [markShown]).
+  ///
+  /// 2026-09-08 (Fase 1.1) — dipakai `MainScreen`'s banner in-app (SnackBar)
+  /// SEBELUM ia memunculkan banner untuk notifikasi hasil polling: banner
+  /// dan push FCM tadinya punya penanda "sudah dilihat" masing-masing yang
+  /// tidak saling kenal (banner punya `_seenNotifIds` in-memory sendiri di
+  /// `MainScreen`), jadi satu kejadian bisa tampil DUA kali sekaligus saat
+  /// app dibuka — sekali notifikasi tray dari FCM (foreground listener
+  /// `FcmService.onMessage` sudah memanggil [markShown]), sekali lagi
+  /// banner dari polling. Sekarang banner ikut mengecek penanda yang SAMA.
+  static Future<bool> isShown(String id) async {
+    if (id.isEmpty) return false;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = prefs.getStringList(_seenKey) ?? const <String>[];
+      return seen.contains(id);
+    } catch (e) {
+      debugPrint('[notif-center] isShown gagal: $e');
+      return false;
+    }
+  }
+
   /// Lupakan semua penanda — dipakai saat logout supaya staff berikutnya di
   /// HP yang sama tidak kehilangan notifikasinya (id staff lain).
   static Future<void> reset() async {
