@@ -446,6 +446,110 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         type: 'break_reminder',
       );
     }
+
+    await _runShiftReminders();
+  }
+
+  /// Sprint 3 Fase 4 (2026-09-08) — pengingat time-driven sepanjang hari
+  /// kerja: sebelum check-in (T-15/T-5/tepat jam masuk/sudah telat), separuh
+  /// shift belum istirahat, dan mendekati/lewat jam pulang. Dipisah dari
+  /// [_runAttendanceGuards] karena guard di atas menjaga hal yang TIDAK
+  /// dilakukan staff (sesi menggantung/lembur), sementara ini murni
+  /// pengingat jadwal — keduanya jalan di timer/poll yang sama tapi tidak
+  /// saling exclude satu sama lain.
+  ///
+  /// Tidak berlaku sama sekali (return awal) di 3 kondisi: hari libur, bukan
+  /// hari kerja shift staff, atau staff sedang cuti/izin hari ini —
+  /// mengulang jadwal kerja yang memang tidak berlaku hari itu cuma bikin
+  /// notifikasi sampah.
+  Future<void> _runShiftReminders() async {
+    final now = DateTime.now();
+    if (AppCalendar.instance.isHoliday(now) ||
+        !AppCalendar.instance.isShiftWorkday(now)) {
+      return;
+    }
+    if (_attendance.today?.status == AttendanceStatus.leave) return;
+
+    final todayKey = WorkCalendar.dateKey(now);
+
+    // ── Sebelum check-in: T-15, T-5, tepat jam masuk, sudah telat ──
+    if (_attendance.status == AttendanceProviderStatus.notCheckedIn) {
+      final untilMasuk = AttendanceRules.timeUntilMasuk;
+      if (untilMasuk != null) {
+        if (untilMasuk <= const Duration(minutes: 15) &&
+            untilMasuk > const Duration(minutes: 5)) {
+          await NotificationCenter.alertOnce(
+            key: 'checkin_t15_$todayKey',
+            title: '15 Menit Lagi Jam Masuk',
+            body: 'Jam masuk shift Anda ${AttendanceRules.jamMasukLabel}. '
+                'Bersiap check-in ya.',
+            type: 'attendance_reminder_checkin',
+          );
+        } else if (untilMasuk <= const Duration(minutes: 5)) {
+          await NotificationCenter.alertOnce(
+            key: 'checkin_t5_$todayKey',
+            title: '5 Menit Lagi Jam Masuk',
+            body: 'Jam masuk shift Anda ${AttendanceRules.jamMasukLabel}. '
+                'Segera menuju lokasi kerja.',
+            type: 'attendance_reminder_checkin',
+          );
+        }
+      }
+
+      final late = AttendanceRules.lateSinceMasuk;
+      if (late != null) {
+        if (late <= const Duration(minutes: 10)) {
+          await NotificationCenter.alertOnce(
+            key: 'checkin_ontime_$todayKey',
+            title: 'Sekarang Waktunya Check-In',
+            body: 'Jam masuk shift Anda ${AttendanceRules.jamMasukLabel} '
+                'sudah tiba. Jangan lupa check-in.',
+            type: 'attendance_reminder_checkin',
+          );
+        } else if (late >= const Duration(minutes: 15)) {
+          await NotificationCenter.alertOnce(
+            key: 'checkin_late_$todayKey',
+            title: 'Anda Belum Check-In',
+            body: 'Jam masuk shift Anda ${AttendanceRules.jamMasukLabel} '
+                'sudah lewat dan Anda belum check-in. Segera check-in.',
+            type: 'attendance_reminder_late',
+          );
+        }
+      }
+    }
+
+    // ── Separuh shift lewat, belum istirahat sama sekali ──
+    if (_attendance.status == AttendanceProviderStatus.checkedIn &&
+        (_attendance.today?.breakMinutes ?? 0) == 0 &&
+        AttendanceRules.isPastHalfShift) {
+      await NotificationCenter.alertOnce(
+        key: 'halfshift_no_break_$todayKey',
+        title: 'Belum Istirahat',
+        body: 'Sudah separuh jam kerja hari ini dan Anda belum istirahat. '
+            'Jangan lupa Break In saat sempat.',
+        type: 'attendance_reminder_break',
+      );
+    }
+
+    // ── Mendekati/pas/lewat jam pulang (push version dari kartu Home) ──
+    // Sengaja EXCLUDE onBreak -- kasus itu sudah punya push sendiri
+    // (`break_open_after_checkout` di atas) dengan pesan yang lebih spesifik
+    // ("tutup istirahat dulu"), dobel notif buat kondisi yang sama kalau
+    // disatukan.
+    final workingStatuses = {
+      AttendanceProviderStatus.checkedIn,
+      AttendanceProviderStatus.breakEnded,
+    };
+    if (workingStatuses.contains(_attendance.status) &&
+        AttendanceRules.isAfterNormalCheckout) {
+      await NotificationCenter.alertOnce(
+        key: 'checkout_reminder_$todayKey',
+        title: 'Waktunya Check-Out',
+        body: 'Jam pulang shift Anda ${AttendanceRules.jamPulangLabel} sudah '
+            'tiba. Jangan lupa absen pulang.',
+        type: 'attendance_reminder_checkout',
+      );
+    }
   }
 
   /// Tampilkan dialog penutup absensi yang menggantung, lalu tutup absensi

@@ -262,6 +262,49 @@ class AttendanceRules {
         jamPulang: _jamPulang,
       );
 
+  // ── Sprint 3 Fase 4 (2026-09-08): pengingat time-driven sebelum check-in ──
+  //
+  // Sama pola pasangan null-di-satu-sisi seperti [timeUntilCheckout]/
+  // [overtimeElapsedSinceCheckout]: tepat satu dari [timeUntilMasuk]/
+  // [lateSinceMasuk] non-null pada satu waktu (persis di titik jam masuk,
+  // keduanya null sesaat).
+
+  /// Berapa lama lagi sampai jam masuk shift (null bila sudah lewat/belum
+  /// diketahui).
+  static Duration? get timeUntilMasuk {
+    final target = jamMasukTarget;
+    if (target == null) return null;
+    final now = TestingConfig.now();
+    return now.isBefore(target) ? target.difference(now) : null;
+  }
+
+  /// Sudah berapa lama LEWAT jam masuk (null bila belum lewat/belum
+  /// diketahui) — dipakai buat pengingat "sudah telat", BUKAN buat mengarang
+  /// angka toleransi keterlambatan (tidak ada field itu di client).
+  static Duration? get lateSinceMasuk {
+    final target = jamMasukTarget;
+    if (target == null) return null;
+    final now = TestingConfig.now();
+    return now.isBefore(target) ? null : now.difference(target);
+  }
+
+  /// Titik tengah shift (jam masuk + separuh durasi shift) — dipakai buat
+  /// pengingat "belum istirahat" di Fase 4. Null bila jam shift belum
+  /// diketahui.
+  static DateTime? get halfShiftTarget {
+    final masuk = jamMasukTarget;
+    final pulang = _pulangTarget;
+    if (masuk == null || pulang == null) return null;
+    return masuk.add(pulang.difference(masuk) ~/ 2);
+  }
+
+  /// Sudah melewati titik tengah shift?
+  static bool get isPastHalfShift {
+    final target = halfShiftTarget;
+    if (target == null) return false;
+    return !TestingConfig.now().isBefore(target);
+  }
+
   /// SISA waktu kerja sampai jam pulang — inti dari perubahan "timer ke atas
   /// jadi countdown ke bawah" di kartu Aktivitas Hari Ini.
   ///
