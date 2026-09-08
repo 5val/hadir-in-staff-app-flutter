@@ -228,4 +228,75 @@ void main() {
       );
     });
   });
+
+  // ── Sprint 3 Fase 4 fix (2026-09-08, post-ship review) ────────────────
+  //
+  // Bug ditemukan lewat recheck: [jamMasukTarget]/[computeMasukTarget]
+  // sengaja resolve ke masuk KEMARIN selagi masih di ekor shift overnight
+  // (benar buat remainingWorkTime pasca check-in), tapi resolusi itu bikin
+  // pengingat PRA-check-in (T-15/T-5/telat) salah nembak "sudah telat"
+  // pas JEDA SIANG biasa sebelum shift overnight mulai, padahal
+  // seharusnya kasih pengingat buat masuk NANTI MALAM.
+  // [computeNextMasukTarget] adalah fix-nya -- sama seperti
+  // [computeMasukTarget] di 2 dari 3 cabang, beda HANYA di jeda siang.
+  group('computeNextMasukTarget -- jam masuk BERIKUTNYA (bukan pasangan jam pulang aktif)', () {
+    const masukPagi = TimeOfDay(hour: 8, minute: 0);
+    const pulangPagi = TimeOfDay(hour: 17, minute: 0);
+    const masukMalam = TimeOfDay(hour: 21, minute: 0);
+    const pulangMalam = TimeOfDay(hour: 6, minute: 0);
+
+    test('shift sehari -> selalu masuk hari ini, gak peduli jam berapa sekarang', () {
+      for (final hour in [7, 10, 18]) {
+        final target = AttendanceRules.computeNextMasukTarget(
+            now: at(hour, 0), jamMasuk: masukPagi, jamPulang: pulangPagi);
+        expect(target, DateTime(2026, 9, 7, 8, 0), reason: 'now=$hour:00');
+      }
+    });
+
+    test(
+        'BUG YANG DIPERBAIKI: jeda siang sebelum shift overnight (14:00) -> masuk berikutnya HARI INI 21:00 (akan datang), BUKAN kemarin 21:00 (sudah lewat)',
+        () {
+      final target = AttendanceRules.computeNextMasukTarget(
+          now: at(14, 0), jamMasuk: masukMalam, jamPulang: pulangMalam);
+      expect(target, DateTime(2026, 9, 7, 21, 0));
+      expect(target!.isAfter(at(14, 0)), isTrue,
+          reason: 'target harus di MASA DEPAN relatif ke 14:00, bukan di masa lalu');
+    });
+
+    test('tepat awal jeda siang (06:00, baru saja checkout pagi) -> masuk berikutnya hari ini 21:00', () {
+      final target = AttendanceRules.computeNextMasukTarget(
+          now: at(6, 0), jamMasuk: masukMalam, jamPulang: pulangMalam);
+      expect(target, DateTime(2026, 9, 7, 21, 0));
+    });
+
+    test('masih ekor shift overnight kemarin (03:00, belum sampai jam pulang sendiri) -> masuk KEMARIN 21:00 (memang telat sejak shift yang sedang berjalan)', () {
+      final target = AttendanceRules.computeNextMasukTarget(
+          now: at(3, 0), jamMasuk: masukMalam, jamPulang: pulangMalam);
+      expect(target, DateTime(2026, 9, 6, 21, 0));
+      expect(target!.isBefore(at(3, 0)), isTrue);
+    });
+
+    test('shift overnight sudah jalan malam ini (23:00) -> masuk hari ini 21:00 (sudah lewat 2 jam)', () {
+      final target = AttendanceRules.computeNextMasukTarget(
+          now: at(23, 0), jamMasuk: masukMalam, jamPulang: pulangMalam);
+      expect(target, DateTime(2026, 9, 7, 21, 0));
+    });
+
+    test('tepat di jam masuk (21:00) -> masuk hari ini 21:00', () {
+      final target = AttendanceRules.computeNextMasukTarget(
+          now: at(21, 0), jamMasuk: masukMalam, jamPulang: pulangMalam);
+      expect(target, DateTime(2026, 9, 7, 21, 0));
+    });
+
+    test('jamMasuk atau jamPulang null -> null', () {
+      expect(
+          AttendanceRules.computeNextMasukTarget(
+              now: at(10, 0), jamMasuk: null, jamPulang: pulangPagi),
+          isNull);
+      expect(
+          AttendanceRules.computeNextMasukTarget(
+              now: at(10, 0), jamMasuk: masukPagi, jamPulang: null),
+          isNull);
+    });
+  });
 }

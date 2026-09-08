@@ -269,10 +269,64 @@ class AttendanceRules {
   // [lateSinceMasuk] non-null pada satu waktu (persis di titik jam masuk,
   // keduanya null sesaat).
 
+  /// Fix (2026-09-08, post-ship review) -- [jamMasukTarget] di atas SENGAJA
+  /// resolve ke masuk KEMARIN selagi masih di ekor shift overnight yang
+  /// belum sampai jam pulangnya sendiri (benar buat [remainingWorkTime]/
+  /// [overtimeElapsed] pasca check-in). Tapi resolusi "kemarin" yang sama
+  /// itu SALAH buat pengingat pra-check-in (T-15/T-5/telat) di
+  /// `main_screen.dart`: pas JEDA SIANG biasa sebelum shift overnight
+  /// dimulai (pulangMin <= nowMin < masukMin, mis. jam 14:00 buat shift
+  /// 21:00-06:00), [jamMasukTarget] tetap balikin kemarin jam 21:00 --
+  /// sudah lewat berjam-jam -- jadi staff yang memang belum mulai shift
+  /// HARI INI malah dapat alert "sudah telat" palsu, bukan pengingat T-15/
+  /// T-5 buat masuk NANTI MALAM. Persis kenapa komentar [computeMasukTarget]
+  /// sendiri nyebut kasus jeda siang ini "ambigu ... konservatif, bukan
+  /// klaim sempurna" -- konservatif itu benar buat [isAfterNormalCheckout],
+  /// salah buat "kapan masuk BERIKUTNYA".
+  ///
+  /// Split overnight/non-overnight sama kayak [computeMasukTarget], HANYA
+  /// sub-kasus jeda siang yang beda: resolve ke masuk HARI INI (yang akan
+  /// datang) bukan kemarin (yang sudah lewat). 2 cabang lain (masih di
+  /// dalam shift overnight yang belum sampai pulangnya sendiri; shift
+  /// sudah berjalan lewat jam masuknya sendiri) identik dengan
+  /// [computeMasukTarget] -- staff di salah satu dari itu memang benar
+  /// "telat sejak" shift yang SEDANG berjalan, bukan "shift berikutnya
+  /// nanti malam".
+  static DateTime? computeNextMasukTarget({
+    required DateTime now,
+    required TimeOfDay? jamMasuk,
+    required TimeOfDay? jamPulang,
+  }) {
+    if (jamMasuk == null || jamPulang == null) return null;
+    final today = DateTime(now.year, now.month, now.day);
+    final todayMasuk =
+        today.add(Duration(hours: jamMasuk.hour, minutes: jamMasuk.minute));
+
+    final masukMin = jamMasuk.hour * 60 + jamMasuk.minute;
+    final pulangMin = jamPulang.hour * 60 + jamPulang.minute;
+    final isOvernight = pulangMin <= masukMin;
+    if (!isOvernight) return todayMasuk;
+
+    final nowMin = now.hour * 60 + now.minute;
+    if (nowMin >= masukMin) return todayMasuk; // shift overnight sudah jalan malam ini
+    if (nowMin < pulangMin) {
+      // Masih di ekor shift overnight yang mulai KEMARIN.
+      return todayMasuk.subtract(const Duration(days: 1));
+    }
+    // Jeda siang (pulangMin <= nowMin < masukMin): masuk berikutnya NANTI MALAM.
+    return todayMasuk;
+  }
+
+  static DateTime? get _nextMasukTarget => computeNextMasukTarget(
+        now: TestingConfig.now(),
+        jamMasuk: _jamMasuk,
+        jamPulang: _jamPulang,
+      );
+
   /// Berapa lama lagi sampai jam masuk shift (null bila sudah lewat/belum
   /// diketahui).
   static Duration? get timeUntilMasuk {
-    final target = jamMasukTarget;
+    final target = _nextMasukTarget;
     if (target == null) return null;
     final now = TestingConfig.now();
     return now.isBefore(target) ? target.difference(now) : null;
@@ -282,7 +336,7 @@ class AttendanceRules {
   /// diketahui) — dipakai buat pengingat "sudah telat", BUKAN buat mengarang
   /// angka toleransi keterlambatan (tidak ada field itu di client).
   static Duration? get lateSinceMasuk {
-    final target = jamMasukTarget;
+    final target = _nextMasukTarget;
     if (target == null) return null;
     final now = TestingConfig.now();
     return now.isBefore(target) ? null : now.difference(target);
