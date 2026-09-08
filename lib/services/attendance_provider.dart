@@ -110,28 +110,102 @@ class AttendanceRules {
       ? '--:--'
       : '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
+  /// Target `DateTime` jam pulang shift yang BENAR relatif terhadap `now`,
+  /// overnight-wrap-aware.
+  ///
+  /// Sprint 3 Fase 6 (2026-09-07): shift NORMAL (jam pulang > jam masuk,
+  /// mis. 08:00–17:00) selalu diarahkan ke jam pulang HARI INI, berapa pun
+  /// jam sekarang -- sama seperti sebelumnya, dan itu sudah benar untuk
+  /// kasus ini (before/during/after shift semua dibandingkan terhadap satu
+  /// titik yang sama).
+  ///
+  /// Shift OVERNIGHT (jam pulang <= jam masuk, mis. 21:00–06:00) butuh
+  /// pemilihan tanggal: dulu kode ini SELALU memakai jam pulang hari ini,
+  /// jadi begitu jam sekarang < jam pulang tapi shift belum lagi mulai
+  /// malam itu (mis. jam 15:00 siang), `target` yang dihasilkan (hari ini
+  /// jam 06:00) sudah LEWAT -- `isAfterNormalCheckout` salah bilang "sudah
+  /// waktunya checkout" padahal shift malam itu bahkan belum dimulai.
+  /// Sebaliknya begitu shift beneran jalan lewat tengah malam (mis. jam
+  /// 23:00), `target` hari ini jam 06:00 juga SALAH arah (di masa lalu),
+  /// bikin `timeUntilCheckout` jadi null padahal seharusnya masih
+  /// menghitung mundur ke besok jam 06:00.
+  ///
+  /// Aturan yang benar (dipisah HANYA untuk kasus overnight): jam sekarang
+  /// < jam masuk berarti kita masih di "ekor" shift semalam ATAU di jeda
+  /// siang sebelum shift malam ini mulai -- keduanya memakai jam pulang
+  /// HARI INI (yang di kasus jeda siang otomatis sudah lewat, memicu
+  /// `isAfterNormalCheckout = true` dengan benar). Begitu jam sekarang >=
+  /// jam masuk, shift malam ini sudah berjalan -- jam pulang jadi BESOK.
+  ///
+  /// Catatan jujur soal batasnya: jeda siang [jamPulang, jamMasuk) itu
+  /// sendiri ambigu kalau HANYA dilihat dari jam-di-hari saja -- tidak bisa
+  /// dibedakan antara "lupa checkout berjam-jam" vs "check-in lebih awal
+  /// dari biasanya buat shift malam nanti", karena kelas ini cuma menyimpan
+  /// TimeOfDay statis shift, bukan jam check-in AKTUAL hari itu. Pilihan di
+  /// atas (anggap sudah lewat) konservatif dan sama seperti perilaku SEBELUM
+  /// fix ini untuk seluruh rentang jam -- bukan klaim sempurna buat kasus
+  /// tepi itu, cuma tidak lebih buruk dari sebelumnya di situ. Fix ini
+  /// secara spesifik menyasar bug yang benar-benar dilaporkan: shift lagi
+  /// berjalan melewati tengah malam (jam sekarang >= jam masuk).
+  ///
+  /// Pure (no static state, no `TestingConfig` dependency) version of the
+  /// calculation above -- pulled out purely so it's actually unit-testable.
+  /// `TestingConfig.now()` is compile-time gated behind
+  /// `bool.fromEnvironment('TESTING_MODE', ...)`, and `flutter test` never
+  /// receives `--dart-define` (see `test/testing_config_test.dart`'s own
+  /// comment on this), so a test can never make `TestingConfig.now()`
+  /// return anything but the real wall clock -- there would be no way to
+  /// exercise the overnight-midnight-crossing branches deterministically
+  /// without this split. `_pulangTarget` below is the only caller in real
+  /// app code.
+  static DateTime? computePulangTarget({
+    required DateTime now,
+    required TimeOfDay? jamMasuk,
+    required TimeOfDay? jamPulang,
+  }) {
+    if (jamPulang == null) return null;
+    final today = DateTime(now.year, now.month, now.day);
+    final todayPulang = today
+        .add(Duration(hours: jamPulang.hour, minutes: jamPulang.minute));
+
+    if (jamMasuk == null) return todayPulang; // kalender belum lengkap termuat
+
+    final pulangMin = jamPulang.hour * 60 + jamPulang.minute;
+    final masukMin = jamMasuk.hour * 60 + jamMasuk.minute;
+    final isOvernight = pulangMin <= masukMin;
+    if (!isOvernight) return todayPulang;
+
+    final nowMin = now.hour * 60 + now.minute;
+    if (nowMin < masukMin) return todayPulang;
+    return todayPulang.add(const Duration(days: 1));
+  }
+
+  static DateTime? get _pulangTarget => computePulangTarget(
+        now: TestingConfig.now(),
+        jamMasuk: _jamMasuk,
+        jamPulang: _jamPulang,
+      );
+
   /// Sudah melewati jam pulang shift?
   ///
   /// TESTING — `TestingConfig.now()` mengembalikan jam asli HP di mode normal,
   /// dan `TestingConfig.clockTime` saat mode testing aktif. Dipakai supaya
   /// dialog "Belum Jam Pulang!" tidak menghalangi pengujian check-out.
   static bool get isAfterNormalCheckout {
-    final pulang = _jamPulang;
-    if (pulang == null) return false;
-    final now = TestingConfig.now();
-    final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
-    return !now.isBefore(target);
+    final target = _pulangTarget;
+    if (target == null) return false;
+    return !TestingConfig.now().isBefore(target);
   }
 
   /// Berapa lama lagi sampai jam pulang (null bila sudah lewat/belum diketahui).
   static Duration? get timeUntilCheckout {
-    final pulang = _jamPulang;
-    if (pulang == null) return null;
+    final target = _pulangTarget;
+    if (target == null) return null;
     final now = TestingConfig.now();
-    final target = DateTime(now.year, now.month, now.day, pulang.hour, pulang.minute);
     return now.isBefore(target) ? target.difference(now) : null;
   }
 
+<<<<<<< HEAD
   // ── Countdown jam kerja & batas lembur ──────────────────────────────
 
   /// Jam masuk shift HARI INI sebagai timestamp. Null bila kalender belum
@@ -226,6 +300,17 @@ class AttendanceRules {
   static bool get isPastOvertimeLimit {
     final over = overtimeElapsed;
     return over != null && over > maxLembur;
+=======
+  /// Sudah berapa lama LEWAT jam pulang (lembur berjalan) -- null bila
+  /// belum lewat jam pulang atau kalender belum termuat. Pasangan
+  /// [timeUntilCheckout]: tepat satu dari keduanya non-null pada satu
+  /// waktu (persis titik jam pulang, keduanya null sesaat).
+  static Duration? get overtimeElapsedSinceCheckout {
+    final target = _pulangTarget;
+    if (target == null) return null;
+    final now = TestingConfig.now();
+    return now.isBefore(target) ? null : now.difference(target);
+>>>>>>> e59bbc4242a7ab2a720ef7eacfe33f8b75d74234
   }
 }
 
