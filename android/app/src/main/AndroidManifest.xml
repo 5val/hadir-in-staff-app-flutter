@@ -1,5 +1,8 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-   package="com.example.app_staff_flutter">
+<!-- Package/namespace app TIDAK lagi ditulis di sini: sejak AGP 8 atribut
+     `package` pada manifest tidak didukung dan sumber kebenarannya adalah
+     `namespace` + `applicationId` di android/app/build.gradle.kts
+     (com.hadirin.staff). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
    <!-- Camera permission -->
     <uses-permission android:name="android.permission.CAMERA"/>
@@ -56,6 +59,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Firebase Cloud Messaging: saluran yang dipakai Android untuk
+             menampilkan push saat app di-background/ditutup. Harus SAMA
+             dengan id saluran yang dibuat PushNotificationService
+             ("hadirin_umum"), kalau tidak Android membuat saluran "Lain-lain"
+             berprioritas rendah sendiri dan notifikasi tidak muncul sebagai
+             heads-up. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="hadirin_umum" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

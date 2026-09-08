@@ -1,12 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'screens/auth_wrapper.dart';
 import 'theme/app_theme.dart';
+import 'services/fcm_service.dart';
 import 'services/session_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Push FCM (notifikasi tetap sampai walau app di-background/ditutup).
+  //
+  // SENGAJA tanpa `await`: init-nya memunculkan dialog izin notifikasi
+  // Android 13+, dan menunggu staff menjawab dialog itu di sini akan menahan
+  // layar pertama app selama dialog terbuka. Sama seperti
+  // `PushNotificationService.init()` di MainScreen, ini best-effort — app
+  // tetap jalan penuh (dengan polling sebagai jalur notifikasi) kalau
+  // Firebase gagal menyala.
+  unawaited(FcmService.init());
+
   await initializeDateFormatting('id_ID', null);
   await SessionService.lockSession();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);

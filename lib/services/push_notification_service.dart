@@ -317,6 +317,30 @@ class NotificationCenter {
     }
   }
 
+  /// Tandai satu notifikasi backend sebagai SUDAH dimunculkan di HP ini,
+  /// tanpa memunculkannya.
+  ///
+  /// Dipakai jalur push FCM: saat app di-background/ditutup, notifikasinya
+  /// ditampilkan Android sendiri dari payload push — [syncFromServer] tidak
+  /// terlibat sama sekali dan karenanya tidak tahu apa-apa. Tanpa penanda ini
+  /// polling berikutnya akan memunculkan ULANG notifikasi yang barusan sudah
+  /// dilihat staff di tray.
+  static Future<void> markShown(String id) async {
+    if (id.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = prefs.getStringList(_seenKey) ?? const <String>[];
+      if (seen.contains(id)) return;
+      final updated = <String>[id, ...seen];
+      await prefs.setStringList(
+        _seenKey,
+        updated.length > _maxSeen ? updated.sublist(0, _maxSeen) : updated,
+      );
+    } catch (e) {
+      debugPrint('[notif-center] markShown gagal: $e');
+    }
+  }
+
   /// Lupakan semua penanda — dipakai saat logout supaya staff berikutnya di
   /// HP yang sama tidak kehilangan notifikasinya (id staff lain).
   static Future<void> reset() async {

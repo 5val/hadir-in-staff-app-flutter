@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'api_client.dart';
+import 'fcm_service.dart';
 import 'session_service.dart';
 
 /// Hasil permintaan OTP (langkah pertama login).
@@ -229,6 +232,14 @@ class AuthService {
 
     await SessionService.saveToken(token);
     await SessionService.saveStaffId(staff.id);
+
+    // Daftarkan HP ini sebagai alamat push milik staff yang baru login.
+    // TANPA `await`: pendaftarannya murni tambahan dan endpoint-nya bisa saja
+    // lambat/gagal (jaringan kantor), sementara komentar di atas menuntut
+    // fungsi ini kembali begitu kredensial tersimpan. Token FCM biasanya
+    // sudah dipegang app jauh sebelum staff login, jadi tanpa panggilan ini
+    // HP baru terdaftar saat token kebetulan di-refresh -- bisa berhari-hari.
+    unawaited(FcmService.registerWithBackend());
 
     return LoginResult(staff: staff, hasPasscode: data['hasPasscode'] == true);
   }

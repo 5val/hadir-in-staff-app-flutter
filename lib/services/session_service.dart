@@ -1,4 +1,5 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'fcm_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -90,6 +91,11 @@ class SessionService {
   /// otomatis di layar login). Ia bukan kredensial: tanpa passcode/OTP nomor
   /// itu tidak memberi akses apa pun.
   static Future<void> clearSession() async {
+    // WAJIB duluan, selagi JWT masih ada: endpoint pencabutannya ber-auth.
+    // Kalau dilewatkan, notifikasi pribadi staff ini tetap mendarat di HP
+    // sampai ada staff lain yang login dan mengambil alih tokennya.
+    await FcmService.unregisterFromBackend();
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyLoggedIn);
     await prefs.remove(_keyEmployeeId);

@@ -21,6 +21,9 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.11.1" apply false
     id("org.jetbrains.kotlin.android") version "2.2.20" apply false
+    // Firebase Cloud Messaging (2026-09-08): hanya menaruh plugin di classpath.
+    // Penerapannya bersyarat di app/build.gradle.kts -- lihat komentar di sana.
+    id("com.google.gms.google-services") version "4.4.2" apply false
 }
 
 include(":app")

@@ -15,6 +15,7 @@ import '../services/staff_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/notification_menu_hints.dart';
 import '../services/push_notification_service.dart';
+import '../services/fcm_service.dart';
 import '../services/document_draft_service.dart';
 import '../widgets/staff_log_dialog.dart';
 import '../widgets/open_session_dialog.dart';
@@ -73,11 +74,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   // ── Notifikasi: polling + candy-bar banner (2026-09-07, Fase 6 PHASE 1) ──
   //
-  // PHASE 1 ONLY -- polling + in-app banner selagi app di-foreground. FCM
-  // (push saat app di-background/tertutup) sengaja TIDAK dikerjakan di sini:
-  // itu butuh kredensial Firebase project (google-services.json, APNs
-  // certificate, service account key) yang bukan keputusan/tugas kode,
-  // perlu disiapkan pemilik project dulu di Firebase Console.
+  // Polling + banner in-app selagi app di-foreground. Sisi PUSH-nya (app
+  // di-background/ditutup) sudah ada sejak 2026-09-08 di
+  // `services/fcm_service.dart` — kredensial Firebase-nya sudah turun.
+  //
+  // Polling ini SENGAJA masih hidup: backend belum mengirim FCM sama sekali
+  // (belum ada kolom device token maupun pengirim server-side), jadi ia tetap
+  // satu-satunya sumber notifikasi backend hari ini. Begitu backend mulai
+  // mengirim push, kecilkan ini jadi sekadar penyelaras saat app dibuka —
+  // lihat dokumen requirement FCM. Notifikasi kembar antara kedua jalur sudah
+  // dicegah lewat id notifikasi yang sama (`PushNotificationService.idFor`).
   Timer? _notifPollTimer;
   final Set<String> _seenNotifIds = {};
   bool _notifSeeded = false;
@@ -196,6 +202,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     // mungkin, lalu arahkan ketukan notifikasi ke layar Notifikasi.
     PushNotificationService.onNotificationTap = _handleNotificationTap;
     PushNotificationService.init();
+
+    // Ketukan push yang MEMBUKA app dari keadaan tertutup sudah ditangkap
+    // FcmService sebelum layar ini ada, jadi tujuannya masih menggantung di
+    // sana. Ditebus setelah frame pertama karena `_handleNotificationTap`
+    // memakai Navigator, yang belum tersedia selama initState.
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => FcmService.flushPendingTap());
 
     _hydrateProfile();
   }

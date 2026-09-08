@@ -40,6 +40,13 @@ dependencies:
   # Menyimpan berkas dokumen yang DIPILIH tapi BELUM diajukan ke folder
   # privat app, supaya draft-nya bertahan walau app ditutup.
   path_provider: ^2.1.4
+  # Push NYATA lewat Firebase Cloud Messaging: notifikasi tetap sampai walau
+  # app di-background atau ditutup -- sesuatu yang polling 45 detik di
+  # MainScreen tidak bisa lakukan (polling hanya jalan saat app dibuka).
+  # firebase_core wajib ikut: ia yang membaca android/app/google-services.json
+  # (di-gitignore, minta ke pemilik project) dan menyalakan Firebase.
+  firebase_core: ^4.14.0
+  firebase_messaging: ^16.6.0
 
 dev_dependencies:
   flutter_test:
