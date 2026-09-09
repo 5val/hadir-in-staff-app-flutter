@@ -43,12 +43,19 @@ class AttendanceRules {
   static TimeOfDay? _jamIstirahatMulai;
   static TimeOfDay? _jamIstirahatSelesai;
 
+  // 2026-09-09 -- toleransi pulang awal (`Shift.toleransiPulang`, menit).
+  // Default 0 (bukan null) supaya sebelum kalender termuat, "boleh
+  // check-out paling awal" jatuh balik ke jamPulang persis -- konservatif,
+  // sama seperti perilaku sebelum field ini ada.
+  static int _toleransiPulangMenit = 0;
+
   /// Diisi dari [WorkCalendar] setelah kalender kerja termuat.
   static void hydrateFromShift({
     required String jamMasuk,
     required String jamPulang,
     String? jamIstirahatMulai,
     String? jamIstirahatSelesai,
+    int toleransiPulangMenit = 0,
   }) {
     _jamMasuk = _parse(jamMasuk) ?? _jamMasuk;
     _jamPulang = _parse(jamPulang) ?? _jamPulang;
@@ -59,6 +66,7 @@ class AttendanceRules {
     _jamIstirahatMulai = jamIstirahatMulai == null ? null : _parse(jamIstirahatMulai);
     _jamIstirahatSelesai =
         jamIstirahatSelesai == null ? null : _parse(jamIstirahatSelesai);
+    _toleransiPulangMenit = toleransiPulangMenit;
   }
 
   static TimeOfDay? _parse(String hhmm) {
@@ -193,6 +201,28 @@ class AttendanceRules {
   /// dialog "Belum Jam Pulang!" tidak menghalangi pengujian check-out.
   static bool get isAfterNormalCheckout {
     final target = _pulangTarget;
+    if (target == null) return false;
+    return !TestingConfig.now().isBefore(target);
+  }
+
+  /// 2026-09-09 -- jam PALING AWAL staff boleh check-out tanpa peringatan
+  /// "Belum Jam Pulang!" (`_pulangTarget` dikurangi `toleransiPulangMenit`).
+  /// HANYA dipakai untuk keputusan "tampilkan peringatan atau tidak" --
+  /// setiap pemakaian [jamPulang]/[isAfterNormalCheckout] LAIN (kartu
+  /// Aktivitas, hitung lembur, dst) tetap ke jam pulang SHIFT yang
+  /// sebenarnya, bukan target yang sudah dilonggarkan ini.
+  static DateTime? get earliestCheckoutTarget {
+    final target = _pulangTarget;
+    if (target == null) return null;
+    return target.subtract(Duration(minutes: _toleransiPulangMenit));
+  }
+
+  /// Sudah melewati jam paling awal boleh check-out (jam pulang shift
+  /// dikurangi toleransi)? Beda dari [isAfterNormalCheckout] -- ini yang
+  /// dipakai FAB check-out (main_screen.dart) buat keputusan "tampilkan
+  /// peringatan sebelum kamera dibuka atau tidak".
+  static bool get isAfterEarliestCheckout {
+    final target = earliestCheckoutTarget;
     if (target == null) return false;
     return !TestingConfig.now().isBefore(target);
   }

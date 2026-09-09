@@ -19,6 +19,7 @@ import '../services/fcm_service.dart';
 import '../services/document_draft_service.dart';
 import '../widgets/staff_log_dialog.dart';
 import '../widgets/open_session_dialog.dart';
+import '../widgets/early_checkout_dialog.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
 import 'login_screen.dart';
@@ -343,6 +344,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           jamPulang: calendar.jamPulang,
           jamIstirahatMulai: calendar.jamIstirahatMulai,
           jamIstirahatSelesai: calendar.jamIstirahatSelesai,
+          toleransiPulangMenit: calendar.toleransiPulang,
         );
       } catch (_) {}
 
@@ -644,6 +646,16 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final actionType = (status == AttendanceProviderStatus.notCheckedIn)
         ? CameraActionType.checkIn
         : CameraActionType.checkOut;
+
+    // 2026-09-09 -- peringatan "Belum Jam Pulang!" SEBELUM kamera dibuka,
+    // bukan sesudah foto diambil (perilaku lama, lihat
+    // widgets/early_checkout_dialog.dart's doc comment). Staff yang batal
+    // di sini tidak pernah membuka kamera sama sekali.
+    if (actionType == CameraActionType.checkOut &&
+        !AttendanceRules.isAfterEarliestCheckout) {
+      final proceed = await showEarlyCheckoutDialog(context);
+      if (!mounted || !proceed) return;
+    }
 
     // Buka halaman kamera
     final result = await Navigator.push<CameraResult>(
