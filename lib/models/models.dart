@@ -312,6 +312,20 @@ class AttendanceRecord {
   /// perkiraan momen check-out untuk membekukan timer setelah pulang.
   final DateTime? lastUpdatedAt;
 
+  // ── 2026-09-10: snapshot 5 term Shift, diambil SEKALI saat check-in ────
+  //
+  // Bugfix "mid-shift Shift edit" (lihat `resolveShiftTerms` di backend,
+  // `docs/api-contracts/sprint3.md` entri "Attendance shift-terms snapshot").
+  // Semua null berarti belum ada sesi terbuka hari ini LEWAT jalur ini, atau
+  // baris pra-migrasi -- pemanggil HARUS jatuh balik ke nilai Shift LIVE
+  // (office-wide, `CalendarService`) di kasus itu, persis seperti fallback
+  // backend sendiri. Jangan mengarang nilai default di sini.
+  final String? jamMasukShiftSnapshot;
+  final String? jamPulangShiftSnapshot;
+  final int? toleransiMasukSnapshot;
+  final int? toleransiPulangSnapshot;
+  final int? durasiIstirahatSnapshot;
+
   const AttendanceRecord({
     required this.id,
     required this.date,
@@ -336,6 +350,11 @@ class AttendanceRecord {
     this.fotoKeluar = '',
     this.recordedAt,
     this.lastUpdatedAt,
+    this.jamMasukShiftSnapshot,
+    this.jamPulangShiftSnapshot,
+    this.toleransiMasukSnapshot,
+    this.toleransiPulangSnapshot,
+    this.durasiIstirahatSnapshot,
   });
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/attendance).
@@ -402,6 +421,11 @@ class AttendanceRecord {
       recordedAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal(),
       lastUpdatedAt:
           DateTime.tryParse((j['updatedAt'] ?? '').toString())?.toLocal(),
+      jamMasukShiftSnapshot: j['jamMasukShiftSnapshot']?.toString(),
+      jamPulangShiftSnapshot: j['jamPulangShiftSnapshot']?.toString(),
+      toleransiMasukSnapshot: asIntN(j['toleransiMasukSnapshot']),
+      toleransiPulangSnapshot: asIntN(j['toleransiPulangSnapshot']),
+      durasiIstirahatSnapshot: asIntN(j['durasiIstirahatSnapshot']),
     );
   }
 

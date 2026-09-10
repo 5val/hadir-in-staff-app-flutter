@@ -69,6 +69,60 @@ class AttendanceRules {
     _toleransiPulangMenit = toleransiPulangMenit;
   }
 
+  // ── 2026-09-10: snapshot shift-terms PER-INSTANCE hari ini ──────────────
+  //
+  // Mirror sisi client dari bugfix backend `resolveShiftTerms`
+  // (`src/routes/mobile/attendance.ts`, lihat entri "Attendance shift-terms
+  // snapshot" di `docs/api-contracts/sprint3.md`): kalau office admin
+  // mengedit Shift SELAGI staff sedang clock-in (antara check-in dan
+  // check-out), gerbang peringatan "Belum Jam Pulang!" di client dulu diam-
+  // diam ikut memakai nilai Shift BARU yang di-edit -- padahal backend
+  // sendiri sekarang menilai checkout terhadap snapshot yang direkam SEKALI
+  // saat check-in. Field di bawah ini adalah snapshot itu (dari
+  // `GET .../attendance/today`, field `jamPulangShiftSnapshot`/
+  // `toleransiPulangSnapshot`/`jamMasukShiftSnapshot`) -- non-null berarti
+  // "menang" atas nilai Shift LIVE ([_jamMasuk]/[_jamPulang]/
+  // [_toleransiPulangMenit] di atas) HANYA untuk keputusan early-checkout
+  // hari ini; null (belum ada sesi terbuka hari ini lewat jalur ini, atau
+  // baris pra-migrasi) berarti jatuh balik ke nilai live seperti sebelum fix
+  // ini -- pola "snapshot menang kalau ada, kalau tidak pakai live" persis
+  // sama seperti `resolveShiftTerms` backend.
+  static TimeOfDay? _snapshotJamMasuk;
+  static TimeOfDay? _snapshotJamPulang;
+  static int? _snapshotToleransiPulang;
+
+  /// Diisi dari record `AttendanceRecord` hari ini (`.../attendance/today`).
+  /// Panggil ini sesegar mungkin persis sebelum keputusan early-checkout
+  /// diambil (`main_screen.dart#_onFabTap`) -- bukan cuma sekali di awal
+  /// sesi -- karena celah bug yang di-fix ini persis "check-in lalu Shift
+  /// diedit lalu (jauh) kemudian staff tap check-out", dan hidrasi sekali di
+  /// awal sesi bisa ketinggalan edit yang terjadi setelahnya.
+  static void hydrateTodaySnapshot({
+    String? jamMasukShiftSnapshot,
+    String? jamPulangShiftSnapshot,
+    int? toleransiPulangSnapshot,
+  }) {
+    _snapshotJamMasuk =
+        jamMasukShiftSnapshot == null ? null : _parse(jamMasukShiftSnapshot);
+    _snapshotJamPulang =
+        jamPulangShiftSnapshot == null ? null : _parse(jamPulangShiftSnapshot);
+    _snapshotToleransiPulang = toleransiPulangSnapshot;
+  }
+
+  static TimeOfDay? get _effectiveJamMasukForCheckout =>
+      _snapshotJamMasuk ?? _jamMasuk;
+  static TimeOfDay? get _effectiveJamPulangForCheckout =>
+      _snapshotJamPulang ?? _jamPulang;
+  static int get _effectiveToleransiPulangForCheckout =>
+      _snapshotToleransiPulang ?? _toleransiPulangMenit;
+
+  /// Label jam pulang yang dipakai dialog "Belum Jam Pulang!" -- snapshot
+  /// kalau ada (record absensi hari ini), kalau tidak jam pulang Shift live.
+  /// Beda dari [jamPulangLabel] (SELALU live) supaya pesan dialog tidak
+  /// pernah menyebut jam yang berbeda dari yang benar-benar dipakai
+  /// [earliestCheckoutTarget] di bawah.
+  static String get todayJamPulangLabel => _fmt(_effectiveJamPulangForCheckout);
+
   static TimeOfDay? _parse(String hhmm) {
     final parts = hhmm.split(':');
     if (parts.length < 2) return null;
@@ -206,15 +260,25 @@ class AttendanceRules {
   }
 
   /// 2026-09-09 -- jam PALING AWAL staff boleh check-out tanpa peringatan
-  /// "Belum Jam Pulang!" (`_pulangTarget` dikurangi `toleransiPulangMenit`).
-  /// HANYA dipakai untuk keputusan "tampilkan peringatan atau tidak" --
-  /// setiap pemakaian [jamPulang]/[isAfterNormalCheckout] LAIN (kartu
-  /// Aktivitas, hitung lembur, dst) tetap ke jam pulang SHIFT yang
-  /// sebenarnya, bukan target yang sudah dilonggarkan ini.
+  /// "Belum Jam Pulang!" (jam pulang dikurangi toleransi pulang). HANYA
+  /// dipakai untuk keputusan "tampilkan peringatan atau tidak" -- setiap
+  /// pemakaian [jamPulang]/[isAfterNormalCheckout] LAIN (kartu Aktivitas,
+  /// hitung lembur, dst) tetap ke jam pulang SHIFT live, bukan target yang
+  /// sudah dilonggarkan ini.
+  ///
+  /// 2026-09-10 -- dihitung dari [_effectiveJamPulangForCheckout]/
+  /// [_effectiveToleransiPulangForCheckout] (snapshot hari ini kalau ada,
+  /// kalau tidak live), BUKAN [_pulangTarget]/[_toleransiPulangMenit] yang
+  /// selalu live -- lihat komentar [hydrateTodaySnapshot] di atas untuk bug
+  /// yang ini fix.
   static DateTime? get earliestCheckoutTarget {
-    final target = _pulangTarget;
+    final target = computePulangTarget(
+      now: TestingConfig.now(),
+      jamMasuk: _effectiveJamMasukForCheckout,
+      jamPulang: _effectiveJamPulangForCheckout,
+    );
     if (target == null) return null;
-    return target.subtract(Duration(minutes: _toleransiPulangMenit));
+    return target.subtract(Duration(minutes: _effectiveToleransiPulangForCheckout));
   }
 
   /// Sudah melewati jam paling awal boleh check-out (jam pulang shift

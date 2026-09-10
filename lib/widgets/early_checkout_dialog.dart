@@ -18,7 +18,11 @@ import '../theme/app_theme.dart';
 /// Mengembalikan `true` kalau staff memilih lanjut check-out sekarang,
 /// `false` (termasuk dismiss dengan tombol back) kalau batal.
 Future<bool> showEarlyCheckoutDialog(BuildContext context) async {
-  final jamPulang = AttendanceRules.jamPulangLabel;
+  // 2026-09-10 -- snapshot hari ini kalau ada (lihat
+  // `AttendanceRules.hydrateTodaySnapshot`), supaya pesan dialog ini selalu
+  // menyebut jam yang SAMA dengan yang dipakai `earliestCheckoutTarget`
+  // untuk keputusan tampil/tidaknya dialog ini sendiri.
+  final jamPulang = AttendanceRules.todayJamPulangLabel;
 
   final ok = await showDialog<bool>(
     context: context,

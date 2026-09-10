@@ -306,6 +306,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     await _loadWorkCalendar();
   }
 
+  /// 2026-09-10 -- salurkan snapshot 5 term shift dari record absensi hari
+  /// ini ke [AttendanceRules], supaya gerbang "Belum Jam Pulang!" menilai
+  /// terhadap shift yang berlaku SAAT staff check-in, bukan Shift office-wide
+  /// yang mungkin sudah diedit admin di tengah hari. `rec == null` (belum
+  /// check-in / API gagal) meneruskan semua null → [AttendanceRules] jatuh
+  /// balik ke nilai Shift live seperti sebelum fix ini.
+  void _hydrateCheckoutSnapshot(AttendanceRecord? rec) {
+    AttendanceRules.hydrateTodaySnapshot(
+      jamMasukShiftSnapshot: rec?.jamMasukShiftSnapshot,
+      jamPulangShiftSnapshot: rec?.jamPulangShiftSnapshot,
+      toleransiPulangSnapshot: rec?.toleransiPulangSnapshot,
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
@@ -375,6 +389,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       try {
         final today = await AttendanceService.today();
         _attendance.hydrateFromToday(today);
+        _hydrateCheckoutSnapshot(today);
       } catch (_) {}
 
       if (!mounted) return;
@@ -684,10 +699,27 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     // bukan sesudah foto diambil (perilaku lama, lihat
     // widgets/early_checkout_dialog.dart's doc comment). Staff yang batal
     // di sini tidak pernah membuka kamera sama sekali.
-    if (actionType == CameraActionType.checkOut &&
-        !AttendanceRules.isAfterEarliestCheckout) {
-      final proceed = await showEarlyCheckoutDialog(context);
-      if (!mounted || !proceed) return;
+    if (actionType == CameraActionType.checkOut) {
+      // 2026-09-10 -- tarik ulang `attendance/today` SEKARANG, sesegar
+      // mungkin persis sebelum keputusan gerbang diambil, supaya snapshot
+      // shift-terms (`jamPulangShiftSnapshot`/`toleransiPulangSnapshot`)
+      // yang dipakai [AttendanceRules.earliestCheckoutTarget] tidak
+      // ketinggalan. Snapshot yang dihidrasi cuma sekali di awal sesi
+      // (`_hydrateProfile`) bisa basi persis di celah bug yang di-fix ini:
+      // staff check-in → admin edit Shift → (jauh) kemudian staff tap
+      // check-out, semua SETELAH sesi app dimulai. Best-effort: gagal
+      // refresh tidak memblokir check-out, cuma jatuh balik ke snapshot/
+      // nilai live yang sudah ada dari hidrasi sebelumnya.
+      try {
+        await _attendance.refreshToday();
+      } catch (_) {}
+      if (!mounted) return;
+      _hydrateCheckoutSnapshot(_attendance.today);
+
+      if (!AttendanceRules.isAfterEarliestCheckout) {
+        final proceed = await showEarlyCheckoutDialog(context);
+        if (!mounted || !proceed) return;
+      }
     }
 
     // Buka halaman kamera
