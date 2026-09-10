@@ -299,4 +299,48 @@ void main() {
           isNull);
     });
   });
+
+  // ── Sprint 3 Fase 6 fix (2026-09-09) ───────────────────────────────────
+  //
+  // Bug dilaporkan: staff masih bisa check-out kapan pun setelah check-in,
+  // tanpa menunggu toleransi jam pulang shift-nya sama sekali (dulu
+  // `_canCheckout` di home_tab.dart hanya mengecek status, tidak pernah
+  // membandingkan jam sekarang terhadap `jamPulang - toleransiPulang`).
+  // [computeEarliestCheckoutTarget] adalah gerbang yang seharusnya ada dari
+  // awal -- staff HANYA boleh check-out setelah melewati titik ini.
+  group('computeEarliestCheckoutTarget -- gerbang toleransi jam pulang', () {
+    test('toleransi 15 menit pada shift 08:00-17:00 -> earliest = 16:45', () {
+      final earliest = AttendanceRules.computeEarliestCheckoutTarget(
+        pulangTarget: DateTime(2026, 9, 7, 17, 0),
+        toleransiPulang: 15,
+      );
+      expect(earliest, DateTime(2026, 9, 7, 16, 45));
+    });
+
+    test('toleransi 0 menit -> earliest sama persis dengan jam pulang', () {
+      final earliest = AttendanceRules.computeEarliestCheckoutTarget(
+        pulangTarget: DateTime(2026, 9, 7, 17, 0),
+        toleransiPulang: 0,
+      );
+      expect(earliest, DateTime(2026, 9, 7, 17, 0));
+    });
+
+    test(
+        'shift overnight (21:00-06:00) yang pulangnya BESOK -> earliest tetap wrap-aware lewat pulangTarget besok',
+        () {
+      final earliest = AttendanceRules.computeEarliestCheckoutTarget(
+        pulangTarget: DateTime(2026, 9, 8, 6, 0),
+        toleransiPulang: 15,
+      );
+      expect(earliest, DateTime(2026, 9, 8, 5, 45));
+    });
+
+    test('pulangTarget null (kalender belum termuat) -> null, bukan mengarang batas', () {
+      expect(
+        AttendanceRules.computeEarliestCheckoutTarget(
+            pulangTarget: null, toleransiPulang: 15),
+        isNull,
+      );
+    });
+  });
 }

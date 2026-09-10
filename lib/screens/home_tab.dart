@@ -75,15 +75,22 @@ class _HomeTabState extends State<HomeTab> {
       _status == AttendanceProviderStatus.checkedIn ||
       _status == AttendanceProviderStatus.breakEnded;
 
-  /// Check-out boleh dilakukan kapan pun setelah check-in.
+  /// Check-out boleh dilakukan setelah check-in DAN sudah melewati toleransi
+  /// jam pulang shift (`jamPulang - toleransiPulang`).
   ///
   /// Dulu digerbangi `AttendanceRules.canCheckout` yang berpatokan
   /// `checkoutCutoffHour = 24` — artinya "setelah pukul 24", yang tidak
   /// pernah tercapai dalam satu hari kerja, sehingga tombol check-out
   /// praktis selalu mati dan teksnya berbunyi "Tersedia setelah pukul 24:00".
+  /// Fix itu sempat menghapus gerbang waktu SAMA SEKALI (kapan pun setelah
+  /// check-in), yang berakibat staff bisa check-out sebelum toleransi jam
+  /// pulang -- `AttendanceRules.canCheckoutNow` mengembalikan gerbang itu
+  /// tanpa mengulang bug lama (fail-open selama kalender belum termuat;
+  /// server tetap jadi validasi akhir di `check-out`).
   bool get _canCheckout =>
       _status != AttendanceProviderStatus.notCheckedIn &&
-      _status != AttendanceProviderStatus.checkedOut;
+      _status != AttendanceProviderStatus.checkedOut &&
+      AttendanceRules.canCheckoutNow;
 
   // Location (GPS nyata — lihat _checkLocation)
   bool _locationChecked = false;
@@ -1295,11 +1302,9 @@ class _HomeTabState extends State<HomeTab> {
                           style: GoogleFonts.jetBrainsMono(
                               fontSize: 28,
                               fontWeight: FontWeight.w800,
-                              color: _isPastOvertimeLimit
+                              color: _isOvertimeNow
                                   ? AppColors.danger
-                                  : (_isOvertimeNow
-                                      ? AppColors.warning
-                                      : AppColors.slate900))),
+                                  : AppColors.slate900)),
                     ),
                     const SizedBox(height: 2),
                     Text(_activityTimerCaption,
@@ -1567,7 +1572,7 @@ class _HomeTabState extends State<HomeTab> {
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: isOvertimeRunning
-                              ? AppColors.warning
+                              ? AppColors.danger
                               : (checkoutActive
                                   ? Colors.white
                                   : AppColors.slate600),

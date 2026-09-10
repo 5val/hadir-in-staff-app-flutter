@@ -576,7 +576,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 6),
             Center(child: StatusBadge(
               label: '⏰ Lembur: ${_overtimeMinutes ~/ 60}j ${_overtimeMinutes % 60}m',
-              color: AppColors.warning,
+              color: AppColors.danger,
             )),
           ],
         ],

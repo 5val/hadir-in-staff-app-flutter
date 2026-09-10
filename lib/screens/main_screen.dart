@@ -343,6 +343,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           jamPulang: calendar.jamPulang,
           jamIstirahatMulai: calendar.jamIstirahatMulai,
           jamIstirahatSelesai: calendar.jamIstirahatSelesai,
+          toleransiPulang: calendar.toleransiPulang,
         );
       } catch (_) {}
 
@@ -403,12 +404,20 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   Future<void> _runAttendanceGuards() async {
     if (!mounted || _loadingProfile || _needsOnboarding || _isAdmin) return;
 
-    // (2) Sesi menggantung — diperiksa lebih dulu karena ia menutupi
-    // pertanyaan lembur: kalau kemarin belum ditutup, batas lembur hari ini
-    // tidak relevan.
+    // (2) Sesi menggantung dari HARI SEBELUMNYA — diperiksa lebih dulu
+    // karena ia menutupi pertanyaan lembur: kalau kemarin belum ditutup,
+    // batas lembur hari ini tidak relevan.
+    //
+    // 2026-09-09 (product decision) — popup "Anda Belum Check-Out" HANYA
+    // untuk `isPreviousDay` (staff genuinely lupa bermalam, harus ditutup
+    // dulu sebelum bisa check-in lagi). Sesi HARI INI yang cuma lewat batas
+    // lembur (`open != null` tapi bukan `isPreviousDay`) TIDAK memicu popup
+    // ini — staff masih bisa lanjut kerja/istirahat/check-out manual kapan
+    // pun, jadi jatuh ke pengingat (1) di bawah (notifikasi saja, tanpa
+    // popup, tanpa auto-checkout).
     await _attendance.refreshOpenSession();
     final open = _attendance.openSession;
-    if (open != null) {
+    if (open != null && open.isPreviousDay) {
       await NotificationCenter.alertOnce(
         key: 'open_session_${open.tanggal}',
         title: 'Anda Belum Check-Out',
@@ -644,6 +653,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     final actionType = (status == AttendanceProviderStatus.notCheckedIn)
         ? CameraActionType.checkIn
         : CameraActionType.checkOut;
+
+    // Toleransi jam pulang: FAB ini jalur absensi utama (di luar tombol
+    // Check-Out di home_tab.dart), jadi butuh gerbang yang sama supaya staff
+    // tidak sempat buka kamera dulu baru ditolak server -- lihat
+    // `AttendanceRules.canCheckoutNow` untuk kenapa gerbang ini ada.
+    if (actionType == CameraActionType.checkOut &&
+        !AttendanceRules.canCheckoutNow) {
+      final target = AttendanceRules.earliestCheckoutTarget;
+      final label = target == null
+          ? AttendanceRules.jamPulangLabel
+          : '${target.hour.toString().padLeft(2, '0')}:'
+              '${target.minute.toString().padLeft(2, '0')}';
+      _showInfoSnackbar('Belum bisa check-out. Check-out baru bisa dilakukan mulai $label.');
+      return;
+    }
 
     // Buka halaman kamera
     final result = await Navigator.push<CameraResult>(

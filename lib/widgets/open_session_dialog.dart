@@ -81,17 +81,29 @@ Future<bool> showOpenSessionDialog(
 
 /// Penjelasan yang sama dipakai dialog dan notifikasi HP, supaya staff tidak
 /// membaca dua versi cerita untuk kejadian yang sama.
+///
+/// 2026-09-09 (product decision) — jam yang dijanjikan di sini beda
+/// tergantung kapan staff MENUTUPNYA, bukan cuma jenis absensinya:
+///   - Absensi hari SEBELUMNYA (`isPreviousDay`, staff genuinely lupa
+///     bermalam) -> dipatok ke jam pulang SHIFT, karena "sekarang" sudah
+///     hari lain dan tidak merepresentasikan kapan ia sebenarnya selesai.
+///   - Absensi HARI INI juga (baru lewat batas lembur, staff menutupnya
+///     sendiri sekarang) -> dicatat jam SEKARANG, sama seperti check-out
+///     manual — server yang menerapkan aturan ini (routes/mobile/
+///     attendance.ts#auto-checkout), teks ini cuma mengikutinya.
 String openSessionExplanation(OpenAttendanceSession open) {
   final pembuka = open.lupaBreakOut
       ? 'Absensi tanggal ${open.tanggal} masih terbuka: istirahat dan '
           'check-out Anda belum ditutup.'
       : 'Absensi tanggal ${open.tanggal} masih terbuka: Anda belum check-out.';
+
+  final jamKeterangan = open.isPreviousDay
+      ? 'pukul ${open.jamPulangShift} (jam pulang shift)'
+      : 'sesuai jam sekarang';
   final aturan = open.lupaBreakOut
-      ? 'Selesai istirahat dan check-out akan dicatat pukul '
-          '${open.jamPulangShift} (jam pulang shift), tanpa lembur — karena '
-          'Anda lupa menutupnya, bukan bekerja lembur.'
-      : 'Check-out akan dicatat pukul ${open.jamPulangShift} '
-          '(jam pulang shift), tanpa lembur.';
+      ? 'Selesai istirahat dan check-out akan dicatat $jamKeterangan, tanpa '
+          'lembur — karena Anda lupa menutupnya, bukan bekerja lembur.'
+      : 'Check-out akan dicatat $jamKeterangan, tanpa lembur.';
   return '$pembuka\n\n$aturan\n\n'
       'Anda harus check-out dulu sebelum bisa check-in kembali.';
 }
