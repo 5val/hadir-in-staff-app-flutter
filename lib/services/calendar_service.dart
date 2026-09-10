@@ -41,10 +41,11 @@ class WorkCalendar {
   final String? jamIstirahatMulai;
   final String? jamIstirahatSelesai;
 
-  /// Toleransi pulang awal (menit) shift ini -- staff baru boleh check-out
-  /// setelah melewati `jamPulang - toleransiPulang`. Null bila kalender
-  /// belum termuat.
-  final int? toleransiPulang;
+  /// 2026-09-09 -- toleransi pulang awal shift, dalam MENIT
+  /// (`Shift.toleransiPulang`). Berapa menit sebelum `jamPulang` staff masih
+  /// boleh check-out tanpa peringatan "Belum Jam Pulang!" (lihat
+  /// `AttendanceRules.earliestCheckoutTarget`/`isAfterEarliestCheckout`).
+  final int toleransiPulang;
 
   const WorkCalendar({
     required this.holidayByDate,
@@ -54,7 +55,7 @@ class WorkCalendar {
     required this.jamPulang,
     this.jamIstirahatMulai,
     this.jamIstirahatSelesai,
-    this.toleransiPulang,
+    this.toleransiPulang = 0,
   });
 
   /// Kalender kosong — dipakai sebagai fallback aman bila data belum termuat:
@@ -146,9 +147,7 @@ class CalendarService {
       jamPulang: (shift['jamPulang'] ?? '').toString(),
       jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
       jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
-      toleransiPulang: shift['toleransiPulang'] is num
-          ? (shift['toleransiPulang'] as num).toInt()
-          : int.tryParse((shift['toleransiPulang'] ?? '').toString()),
+      toleransiPulang: (shift['toleransiPulang'] as num?)?.toInt() ?? 0,
     );
   }
 }

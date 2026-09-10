@@ -8,7 +8,6 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../config/testing_config.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
-import '../services/attendance_provider.dart';
 import '../services/location_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -552,15 +551,15 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   }
 
   // ── Konfirmasi → kirim hasil ────────────────────────────────
+  //
+  // 2026-09-09: peringatan "Belum Jam Pulang!" PINDAH ke sebelum kamera ini
+  // dibuka sama sekali -- lihat main_screen.dart's `_onFabTap` +
+  // widgets/early_checkout_dialog.dart. Dulu dicek di sini, SETELAH foto
+  // sudah diambil, jadi staff yang batal sudah kehilangan usaha foto+GPS
+  // untuk apa-apa. Kalau eksekusi sampai ke sini untuk sebuah check-out,
+  // peringatan itu sudah pernah ditampilkan (atau memang tidak perlu),
+  // jadi tidak diulang lagi di sini.
   void _confirm() {
-    // Peringatan pulang awal kini dibandingkan dengan jam pulang SHIFT staff
-    // dari database (AttendanceRules dihidrasi dari kalender kerja), bukan
-    // konstanta `normalCheckoutHour = 24`.
-    if (widget.actionType == CameraActionType.checkOut &&
-        !AttendanceRules.isAfterNormalCheckout) {
-      _showEarlyCheckoutWarningDialog();
-      return;
-    }
     Navigator.pop(
         context,
         CameraResult(
@@ -569,59 +568,6 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
           imagePath: _capturedFile?.path,
           address: _currentAddress.isNotEmpty ? _currentAddress : null,
         ));
-  }
-
-  // ── Dialog peringatan pulang awal ───────────────────────────
-  void _showEarlyCheckoutWarningDialog() {
-    final jamPulang = AttendanceRules.jamPulangLabel;
-
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(children: [
-          const Text('⚠️', style: TextStyle(fontSize: 22)),
-          const SizedBox(width: 10),
-          Text('Belum Jam Pulang!',
-              style:
-                  GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800)),
-        ]),
-        content: Text(
-          'Jam pulang shift Anda pukul $jamPulang. '
-          'Apakah Anda yakin ingin check-out sekarang?',
-          style: GoogleFonts.inter(fontSize: 13, color: AppColors.slate600),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Batal',
-                style: GoogleFonts.inter(color: AppColors.slate700)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB01E1E),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(
-                  context,
-                  CameraResult(
-                    confirmed: true,
-                    actionType: widget.actionType,
-                    imagePath: _capturedFile?.path,
-                    address:
-                        _currentAddress.isNotEmpty ? _currentAddress : null,
-                  ));
-            },
-            child: Text('Ya, Check-Out Sekarang',
-                style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w700, color: Colors.white)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _retake() {

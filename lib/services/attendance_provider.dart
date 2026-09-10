@@ -43,12 +43,11 @@ class AttendanceRules {
   static TimeOfDay? _jamIstirahatMulai;
   static TimeOfDay? _jamIstirahatSelesai;
 
-  /// Toleransi pulang awal (menit) shift — staff baru boleh check-out
-  /// setelah melewati `jamPulang - toleransiPulang`. Default 0 (tidak ada
-  /// toleransi) selama kalender belum termuat, BUKAN null, supaya
-  /// [earliestCheckoutTarget] tetap punya nilai begitu [_pulangTarget]
-  /// sudah diketahui.
-  static int _toleransiPulang = 0;
+  // 2026-09-09 -- toleransi pulang awal (`Shift.toleransiPulang`, menit).
+  // Default 0 (bukan null) supaya sebelum kalender termuat, "boleh
+  // check-out paling awal" jatuh balik ke jamPulang persis -- konservatif,
+  // sama seperti perilaku sebelum field ini ada.
+  static int _toleransiPulangMenit = 0;
 
   /// Diisi dari [WorkCalendar] setelah kalender kerja termuat.
   static void hydrateFromShift({
@@ -56,7 +55,7 @@ class AttendanceRules {
     required String jamPulang,
     String? jamIstirahatMulai,
     String? jamIstirahatSelesai,
-    int? toleransiPulang,
+    int toleransiPulangMenit = 0,
   }) {
     _jamMasuk = _parse(jamMasuk) ?? _jamMasuk;
     _jamPulang = _parse(jamPulang) ?? _jamPulang;
@@ -67,7 +66,7 @@ class AttendanceRules {
     _jamIstirahatMulai = jamIstirahatMulai == null ? null : _parse(jamIstirahatMulai);
     _jamIstirahatSelesai =
         jamIstirahatSelesai == null ? null : _parse(jamIstirahatSelesai);
-    _toleransiPulang = toleransiPulang ?? _toleransiPulang;
+    _toleransiPulangMenit = toleransiPulangMenit;
   }
 
   static TimeOfDay? _parse(String hhmm) {
@@ -206,32 +205,25 @@ class AttendanceRules {
     return !TestingConfig.now().isBefore(target);
   }
 
-  /// Titik waktu paling awal staff boleh check-out: `jamPulang -
-  /// toleransiPulang`. Null bila kalender belum termuat — pemanggil harus
-  /// memperlakukan itu sebagai "belum tahu" (fail-open, sama seperti getter
-  /// jam pulang lain di kelas ini), BUKAN memblokir check-out.
-  ///
-  /// Pure version (tanpa static state) dengan alasan yang sama seperti
-  /// [computePulangTarget] — lihat komentarnya.
-  static DateTime? computeEarliestCheckoutTarget({
-    required DateTime? pulangTarget,
-    required int toleransiPulang,
-  }) {
-    if (pulangTarget == null) return null;
-    return pulangTarget.subtract(Duration(minutes: toleransiPulang));
+  /// 2026-09-09 -- jam PALING AWAL staff boleh check-out tanpa peringatan
+  /// "Belum Jam Pulang!" (`_pulangTarget` dikurangi `toleransiPulangMenit`).
+  /// HANYA dipakai untuk keputusan "tampilkan peringatan atau tidak" --
+  /// setiap pemakaian [jamPulang]/[isAfterNormalCheckout] LAIN (kartu
+  /// Aktivitas, hitung lembur, dst) tetap ke jam pulang SHIFT yang
+  /// sebenarnya, bukan target yang sudah dilonggarkan ini.
+  static DateTime? get earliestCheckoutTarget {
+    final target = _pulangTarget;
+    if (target == null) return null;
+    return target.subtract(Duration(minutes: _toleransiPulangMenit));
   }
 
-  static DateTime? get earliestCheckoutTarget => computeEarliestCheckoutTarget(
-        pulangTarget: _pulangTarget,
-        toleransiPulang: _toleransiPulang,
-      );
-
-  /// Staff sudah boleh check-out (sudah melewati toleransi jam pulang)?
-  /// `true` selama kalender belum termuat — server tetap memvalidasi ulang,
-  /// jadi client tidak pernah memblokir tanpa data yang valid.
-  static bool get canCheckoutNow {
+  /// Sudah melewati jam paling awal boleh check-out (jam pulang shift
+  /// dikurangi toleransi)? Beda dari [isAfterNormalCheckout] -- ini yang
+  /// dipakai FAB check-out (main_screen.dart) buat keputusan "tampilkan
+  /// peringatan sebelum kamera dibuka atau tidak".
+  static bool get isAfterEarliestCheckout {
     final target = earliestCheckoutTarget;
-    if (target == null) return true;
+    if (target == null) return false;
     return !TestingConfig.now().isBefore(target);
   }
 

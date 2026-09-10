@@ -75,22 +75,20 @@ class _HomeTabState extends State<HomeTab> {
       _status == AttendanceProviderStatus.checkedIn ||
       _status == AttendanceProviderStatus.breakEnded;
 
-  /// Check-out boleh dilakukan setelah check-in DAN sudah melewati toleransi
-  /// jam pulang shift (`jamPulang - toleransiPulang`).
+  /// Check-out boleh dilakukan kapan pun setelah check-in -- tombolnya
+  /// sendiri tidak digerbangi toleransi jam pulang (2026-09-09: itu jadi
+  /// tanggung jawab peringatan "Belum Jam Pulang!" yang tampil sebelum
+  /// kamera dibuka, lihat `main_screen.dart#_onFabTap` +
+  /// `AttendanceRules.isAfterEarliestCheckout`; server tetap jadi validasi
+  /// akhir di `check-out`).
   ///
   /// Dulu digerbangi `AttendanceRules.canCheckout` yang berpatokan
   /// `checkoutCutoffHour = 24` — artinya "setelah pukul 24", yang tidak
   /// pernah tercapai dalam satu hari kerja, sehingga tombol check-out
   /// praktis selalu mati dan teksnya berbunyi "Tersedia setelah pukul 24:00".
-  /// Fix itu sempat menghapus gerbang waktu SAMA SEKALI (kapan pun setelah
-  /// check-in), yang berakibat staff bisa check-out sebelum toleransi jam
-  /// pulang -- `AttendanceRules.canCheckoutNow` mengembalikan gerbang itu
-  /// tanpa mengulang bug lama (fail-open selama kalender belum termuat;
-  /// server tetap jadi validasi akhir di `check-out`).
   bool get _canCheckout =>
       _status != AttendanceProviderStatus.notCheckedIn &&
-      _status != AttendanceProviderStatus.checkedOut &&
-      AttendanceRules.canCheckoutNow;
+      _status != AttendanceProviderStatus.checkedOut;
 
   // Location (GPS nyata — lihat _checkLocation)
   bool _locationChecked = false;
