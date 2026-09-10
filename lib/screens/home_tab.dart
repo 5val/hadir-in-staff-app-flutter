@@ -57,7 +57,27 @@ class _HomeTabState extends State<HomeTab> {
   bool _showMascot = false;
   String _mascotMsg = '';
 
-  bool get _isWorkDay => true;
+  /// Hari ini boleh absen atau tidak.
+  ///
+  /// Dulu di-hardcode `true`: master `hari_libur` sudah dipakai payroll dan
+  /// date picker pengajuan cuti/izin/lembur, tapi layar Home tidak pernah
+  /// membacanya, jadi tombol Check-In tetap muncul di tanggal merah.
+  /// Sekarang jawabannya datang dari SERVER lewat blok `hariIni` pada
+  /// `GET /mobile/staff/:id/hari-libur` — logika yang sama persis dengan
+  /// gerbang di endpoint check-in, termasuk pengecualian untuk staff yang
+  /// punya lembur disetujui pada tanggal itu.
+  ///
+  /// Fail-open: bila kalender gagal dimuat, [WorkCalendar.empty] menjawab
+  /// "boleh", dan server tetap menolak sendiri kalau memang libur. App tidak
+  /// pernah memblokir staff hanya karena jaringannya bermasalah.
+  bool get _isWorkDay => AppCalendar.instance.canCheckInToday;
+
+  /// Nama hari libur hari ini (mis. "Hari Raya Idul Fitri"), untuk kartu
+  /// "Hari Libur" di bawah. Null bila hari ini bukan hari libur.
+  String? get _holidayName => AppCalendar.instance.hariIni.namaLibur;
+
+  /// Penjelasan dari server kenapa absensi tidak tersedia hari ini.
+  String? get _holidayReason => AppCalendar.instance.hariIni.alasan;
 
   AttendanceProvider get _att => widget.attendance;
   AttendanceProviderStatus get _status => _att.status;
@@ -1474,20 +1494,25 @@ class _HomeTabState extends State<HomeTab> {
       // ── Belum check-in ────────────────────────────────────────
       case AttendanceProviderStatus.notCheckedIn:
         if (!_isWorkDay) {
+          final nama = _holidayName;
           return SectionCard(
             color: AppColors.warning.withOpacity(0.07),
             borderColor: AppColors.warning.withOpacity(0.3),
             child: Column(
               children: [
-                const Icon(Icons.weekend_rounded,
+                const Icon(Icons.beach_access_rounded,
                     color: AppColors.warning, size: 36),
                 const SizedBox(height: 8),
-                Text('Hari Libur',
+                Text(nama == null || nama.isEmpty ? 'Hari Libur' : nama,
                     style:
-                        AppText.headline3.copyWith(color: AppColors.warning)),
+                        AppText.headline3.copyWith(color: AppColors.warning),
+                    textAlign: TextAlign.center),
                 const SizedBox(height: 4),
-                Text('Check-in hanya tersedia pada hari kerja (Senin–Jumat)',
-                    style: AppText.body2, textAlign: TextAlign.center),
+                Text(
+                    _holidayReason ??
+                        'Hari ini hari libur — absensi tidak tersedia.',
+                    style: AppText.body2,
+                    textAlign: TextAlign.center),
               ],
             ),
           );

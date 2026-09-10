@@ -280,12 +280,41 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     return rawType.isEmpty ? null : rawType;
   }
 
+  /// Muat kalender kerja (hari libur + status hari ini + jam shift) lalu
+  /// hidrasi AttendanceRules. Best-effort: kegagalan memuat TIDAK boleh
+  /// memblokir app — `WorkCalendar.empty` menjawab "boleh absen" dan server
+  /// tetap memvalidasi ulang saat check-in.
+  Future<void> _loadWorkCalendar() async {
+    try {
+      final calendar = await CalendarService.load();
+      AppCalendar.set(calendar);
+      AttendanceRules.hydrateFromShift(
+        jamMasuk: calendar.jamMasuk,
+        jamPulang: calendar.jamPulang,
+        jamIstirahatMulai: calendar.jamIstirahatMulai,
+        jamIstirahatSelesai: calendar.jamIstirahatSelesai,
+        toleransiPulangMenit: calendar.toleransiPulang,
+      );
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  /// Muat ulang kalender bila tanggalnya sudah berganti sejak terakhir
+  /// dimuat — lihat [AppCalendar.isStale] untuk kenapa ini perlu.
+  Future<void> _refreshCalendarIfStale() async {
+    if (!AppCalendar.isStale) return;
+    await _loadWorkCalendar();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
     // App baru dibuka lagi: tarik notifikasi baru dan periksa apakah ada
     // absensi yang menggantung selagi app tertutup — dua hal yang paling
-    // mungkin berubah tanpa sepengetahuan app.
+    // mungkin berubah tanpa sepengetahuan app. Kalender ikut disegarkan bila
+    // tanggalnya sudah berganti (status "hari ini libur/tidak" milik
+    // kemarin tidak boleh dipakai hari ini).
+    _refreshCalendarIfStale();
     _pollNotifications();
     _runAttendanceGuards();
   }
@@ -336,17 +365,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       // lalu hidrasi AttendanceRules. Ini yang mengganti konstanta hardcode
       // `normalCheckoutHour = 24` dengan jam pulang shift yang sebenarnya.
       // Best-effort: gagal memuat kalender tidak boleh memblokir app.
-      try {
-        final calendar = await CalendarService.load();
-        AppCalendar.instance = calendar;
-        AttendanceRules.hydrateFromShift(
-          jamMasuk: calendar.jamMasuk,
-          jamPulang: calendar.jamPulang,
-          jamIstirahatMulai: calendar.jamIstirahatMulai,
-          jamIstirahatSelesai: calendar.jamIstirahatSelesai,
-          toleransiPulangMenit: calendar.toleransiPulang,
-        );
-      } catch (_) {}
+      await _loadWorkCalendar();
 
       // Batas maksimal lembur staff ini (Jabatan.maxExtraHour), dipakai
       // kartu Aktivitas Hari Ini & peringatan "saatnya check-out".
@@ -404,6 +423,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   ///     terbawa sampai hari berikutnya).
   Future<void> _runAttendanceGuards() async {
     if (!mounted || _loadingProfile || _needsOnboarding || _isAdmin) return;
+
+    // App staff sering dibiarkan terbuka semalaman. Begitu tanggal berganti,
+    // status "hari ini libur/boleh absen" milik kemarin harus dibuang dulu
+    // sebelum guard & pengingat di bawah memakai kalender itu.
+    await _refreshCalendarIfStale();
+    if (!mounted) return;
 
     // (2) Sesi menggantung dari HARI SEBELUMNYA — diperiksa lebih dulu
     // karena ia menutupi pertanyaan lembur: kalau kemarin belum ditutup,
