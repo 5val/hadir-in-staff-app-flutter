@@ -18,6 +18,60 @@ class HariLibur {
       );
 }
 
+/// Status hari ini menurut SERVER: libur atau tidak, dan boleh absen atau
+/// tidak.
+///
+/// Dua hal berbeda yang sengaja dipisah:
+///  - [isLibur] = tanggal hari ini ada di master hari libur.
+///  - [bolehAbsen] = server mengizinkan check-in hari ini.
+/// Keduanya bisa sama-sama true: staff yang punya pengajuan LEMBUR berstatus
+/// approved untuk tanggal itu tetap boleh absen walaupun hari libur
+/// ([dikecualikanLembur]). Karena itu app tidak boleh menyimpulkan sendiri
+/// "libur berarti tidak bisa absen" dari daftar tanggal — keputusannya
+/// diambil dari server, memakai logika yang sama persis dengan gerbang
+/// check-in di `POST .../attendance/check-in`.
+class TodayHolidayStatus {
+  final bool isLibur;
+  final String? namaLibur;
+
+  /// nasional | perusahaan | null
+  final String? tipeLibur;
+
+  final bool bolehAbsen;
+
+  /// Pesan siap tampil dari server saat absensi diblokir (null bila boleh).
+  final String? alasan;
+
+  final bool dikecualikanLembur;
+
+  const TodayHolidayStatus({
+    this.isLibur = false,
+    this.namaLibur,
+    this.tipeLibur,
+    this.bolehAbsen = true,
+    this.alasan,
+    this.dikecualikanLembur = false,
+  });
+
+  /// Default aman ketika data belum termuat / server versi lama tidak
+  /// mengirim blok `hariIni`: bukan libur, absensi diizinkan. App tidak boleh
+  /// memblokir staff hanya karena gagal memuat kalender — server tetap
+  /// memvalidasi ulang saat check-in.
+  static const unknown = TodayHolidayStatus();
+
+  factory TodayHolidayStatus.fromApi(Map<String, dynamic> j) => TodayHolidayStatus(
+        isLibur: j['isLibur'] == true,
+        namaLibur: (j['namaLibur'] as Object?)?.toString(),
+        tipeLibur: (j['tipeLibur'] as Object?)?.toString(),
+        // Hanya `false` eksplisit yang memblokir; nilai hilang/aneh
+        // diperlakukan sebagai boleh absen (fail-open, sama seperti
+        // [unknown]).
+        bolehAbsen: j['bolehAbsen'] != false,
+        alasan: (j['alasan'] as Object?)?.toString(),
+        dikecualikanLembur: j['dikecualikanLembur'] == true,
+      );
+}
+
 /// Kalender kerja staff: hari libur + hari kerja shift-nya.
 ///
 /// Fase 8 — inilah yang membuat date picker pengajuan cuti/izin/lembur tidak
@@ -47,6 +101,9 @@ class WorkCalendar {
   /// `AttendanceRules.earliestCheckoutTarget`/`isAfterEarliestCheckout`).
   final int toleransiPulang;
 
+  /// Status hari ini menurut server (lihat [TodayHolidayStatus]).
+  final TodayHolidayStatus hariIni;
+
   const WorkCalendar({
     required this.holidayByDate,
     required this.hariKerja,
@@ -56,6 +113,7 @@ class WorkCalendar {
     this.jamIstirahatMulai,
     this.jamIstirahatSelesai,
     this.toleransiPulang = 0,
+    this.hariIni = TodayHolidayStatus.unknown,
   });
 
   /// Kalender kosong — dipakai sebagai fallback aman bila data belum termuat:
@@ -90,6 +148,17 @@ class WorkCalendar {
   /// Predikat untuk `showDatePicker(selectableDayPredicate: ...)`:
   /// tanggal bisa dipilih hanya bila hari kerja shift DAN bukan hari libur.
   bool isSelectable(DateTime d) => isShiftWorkday(d) && !isHoliday(d);
+
+  /// Boleh check-in hari ini? Keputusan server ([TodayHolidayStatus]), bukan
+  /// turunan dari [isHoliday], supaya pengecualian lembur-disetujui dan
+  /// kill switch server ikut terhormati.
+  bool get canCheckInToday => hariIni.bolehAbsen;
+
+  /// Nama hari libur hari ini untuk ditampilkan di layar Home. Mengutamakan
+  /// jawaban server, dan jatuh ke daftar tanggal lokal bila server tidak
+  /// mengirimnya (mis. backend versi lama).
+  String? get todayHolidayName =>
+      hariIni.namaLibur ?? holidayName(DateTime.now());
 }
 
 /// Kalender kerja yang berlaku untuk sesi ini.
@@ -100,6 +169,25 @@ class WorkCalendar {
 class AppCalendar {
   AppCalendar._();
   static WorkCalendar instance = WorkCalendar.empty;
+
+  /// Kunci "YYYY-MM-DD" tanggal saat [instance] terakhir dimuat.
+  ///
+  /// Kalender ini memuat status HARI INI (libur/boleh absen), jadi ia basi
+  /// begitu tanggal berganti — dan app staff biasa dibiarkan terbuka
+  /// berhari-hari di HP. Tanpa penanda ini, staff yang membuka app pada hari
+  /// libur setelah app-nya menginap dari hari kerja akan tetap melihat
+  /// tombol Check-In (server tetap menolak, tapi staff-nya sudah terlanjur
+  /// berfoto). Lihat `MainScreen._refreshCalendarIfStale`.
+  static String? loadedForDate;
+
+  static void set(WorkCalendar calendar) {
+    instance = calendar;
+    loadedForDate = WorkCalendar.dateKey(DateTime.now());
+  }
+
+  /// True bila kalender belum pernah dimuat, atau dimuat pada tanggal lain.
+  static bool get isStale =>
+      loadedForDate == null || loadedForDate != WorkCalendar.dateKey(DateTime.now());
 }
 
 class CalendarService {
@@ -148,6 +236,10 @@ class CalendarService {
       jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
       jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
       toleransiPulang: (shift['toleransiPulang'] as num?)?.toInt() ?? 0,
+      hariIni: data['hariIni'] is Map
+          ? TodayHolidayStatus.fromApi(
+              Map<String, dynamic>.from(data['hariIni'] as Map))
+          : TodayHolidayStatus.unknown,
     );
   }
 }
