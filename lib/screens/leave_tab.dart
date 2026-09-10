@@ -2094,8 +2094,7 @@ class _CutiFormState extends State<_CutiForm> {
 }
 
 // ═══════════════════════════════════════════════════════════
-// IZIN FORM  (with end-date + conditional photo upload)
-// Sekolah → Others (maks 1 foto)
+// IZIN FORM
 // ═══════════════════════════════════════════════════════════
 class _IzinForm extends StatefulWidget {
   final VoidCallback? onSubmitted;
@@ -2111,55 +2110,20 @@ class _IzinFormState extends State<_IzinForm> {
   final _noteCtrl = TextEditingController();
   bool _submitting = false;
 
-  // Photo slot: max 1 for Others, specific for Sakit/Seminar
-  _PhotoSlot? _photoSlot;
-
   static const _types = [
     ('Sakit', Icons.local_hospital_rounded),
     ('Seminar', Icons.school_rounded),
     ('Lainnya', Icons.event_note_rounded),
   ];
 
-  // Returns null if no photo required for this type
-  (String, IconData)? _slotDefFor(String type) {
-    switch (type) {
-      case 'Sakit':
-        return ('Surat Dokter / Resep', Icons.medical_information_rounded);
-      case 'Seminar':
-        return ('Bukti Transportasi/Konsumsi', Icons.receipt_long_rounded);
-      case 'Lainnya':
-        return ('Foto Pendukung', Icons.image_rounded);
-      default:
-        return null;
-    }
-  }
-
-  List<AllowanceType> get _allowances {
-    switch (_type) {
-      case 'Sakit':
-        return [AllowanceType.health];
-      case 'Seminar':
-        return [AllowanceType.transport, AllowanceType.accommodation];
-      default:
-        return [];
-    }
-  }
-
   void _onTypeChanged(String type) {
-    final def = _slotDefFor(type);
-    setState(() {
-      _type = type;
-      _photoSlot = def != null ? _PhotoSlot(label: def.$1, icon: def.$2) : null;
-    });
+    setState(() => _type = type);
   }
 
   bool get _canSubmit {
     if (_type == null) return false;
     if (_startDate == null || _endDate == null) return false;
     if (_noteCtrl.text.trim().isEmpty) return false;
-    // For Sakit and Seminar, photo is required
-    if ((_type == 'Sakit' || _type == 'Seminar') &&
-        (_photoSlot == null || !_photoSlot!.uploaded)) return false;
     return true;
   }
 
@@ -2194,7 +2158,6 @@ class _IzinFormState extends State<_IzinForm> {
       _type = null;
       _startDate = null;
       _endDate = null;
-      _photoSlot = null;
       _noteCtrl.clear();
     });
     widget.onSubmitted?.call();
@@ -2359,12 +2322,6 @@ class _IzinFormState extends State<_IzinForm> {
             ),
           ),
 
-          // ── Photo upload (max 1) ───────────────────────
-          if (_photoSlot != null) ...[
-            const SizedBox(height: 16),
-            _buildPhotoSection(),
-          ],
-
           const SizedBox(height: 16),
 
           GradientButton(
@@ -2376,248 +2333,6 @@ class _IzinFormState extends State<_IzinForm> {
             onTap: _canSubmit && !_submitting ? _submit : null,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildPhotoSection() {
-    final slot = _photoSlot!;
-    final required = _type == 'Sakit' || _type == 'Seminar';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text('Lampiran Foto', style: AppText.label),
-            const SizedBox(width: 6),
-            if (required)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.danger.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text('Wajib',
-                    style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.danger)),
-              )
-            else
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.slate200,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text('Opsional',
-                    style: GoogleFonts.inter(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.slate600)),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Maks. 1 foto pendukung.',
-          style: AppText.body2.copyWith(fontSize: 11),
-        ),
-        const SizedBox(height: 10),
-        _PhotoUploadSlot(
-          slot: slot,
-          index: 1,
-          onUpload: () {
-            setState(() {
-              _photoSlot = _PhotoSlot.uploaded(slot.label, slot.icon);
-            });
-          },
-          onRemove: () {
-            setState(() {
-              _photoSlot = _PhotoSlot(label: slot.label, icon: slot.icon);
-            });
-          },
-        ),
-        if (_allowances.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.brandCyanDark.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(8),
-              border:
-                  Border.all(color: AppColors.brandCyanDark.withOpacity(0.15)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded,
-                    size: 14, color: AppColors.brandCyanDark),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Dokumen ini dibutuhkan untuk klaim: ${_allowances.map(_allowanceName).join(', ')}.',
-                    style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.brandCyanDark),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  String _allowanceName(AllowanceType a) {
-    switch (a) {
-      case AllowanceType.health:
-        return 'Surat Dokter';
-      case AllowanceType.accommodation:
-        return 'Resep';
-      case AllowanceType.transport:
-        return 'Nota Transportasi';
-      case AllowanceType.spp:
-        return 'Konsumsi';
-    }
-  }
-}
-
-// ── Photo Slot Model ─────────────────────────────────────────
-class _PhotoSlot {
-  final String label;
-  final IconData icon;
-  final String? filePath;
-
-  const _PhotoSlot({required this.label, required this.icon}) : filePath = null;
-
-  const _PhotoSlot.uploaded(this.label, this.icon)
-      : filePath = 'mock_photo_path';
-
-  bool get uploaded => filePath != null;
-}
-
-// ── Photo Upload Slot Widget ──────────────────────────────────
-class _PhotoUploadSlot extends StatelessWidget {
-  final _PhotoSlot slot;
-  final int index;
-  final VoidCallback onUpload;
-  final VoidCallback onRemove;
-
-  const _PhotoUploadSlot({
-    required this.slot,
-    required this.index,
-    required this.onUpload,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: slot.uploaded ? null : onUpload,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: slot.uploaded
-              ? AppColors.brandLimeDark.withOpacity(0.06)
-              : AppColors.slate50,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: slot.uploaded
-                ? AppColors.brandLimeDark.withOpacity(0.4)
-                : AppColors.slate200,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: slot.uploaded
-                    ? AppColors.brandLimeDark.withOpacity(0.12)
-                    : AppColors.slate100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                slot.uploaded ? Icons.check_circle_rounded : slot.icon,
-                size: 18,
-                color: slot.uploaded
-                    ? AppColors.brandLimeDark
-                    : AppColors.slate700,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    slot.label,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: slot.uploaded
-                          ? AppColors.slate800
-                          : AppColors.slate700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    slot.uploaded
-                        ? 'Foto berhasil diunggah'
-                        : 'Ketuk untuk unggah foto',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: slot.uploaded
-                          ? AppColors.brandLimeDark
-                          : AppColors.slate400,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (slot.uploaded)
-              GestureDetector(
-                onTap: onRemove,
-                child: Container(
-                  padding: const EdgeInsets.all(5),
-                  decoration: BoxDecoration(
-                    color: AppColors.danger.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Icon(Icons.close_rounded,
-                      size: 14, color: AppColors.danger),
-                ),
-              )
-            else
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppColors.brandCyanDark.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.upload_rounded,
-                        size: 12, color: AppColors.brandCyanDark),
-                    const SizedBox(width: 4),
-                    Text('Upload',
-                        style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.brandCyanDark)),
-                  ],
-                ),
-              ),
-          ],
-        ),
       ),
     );
   }
