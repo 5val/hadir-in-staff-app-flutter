@@ -263,7 +263,18 @@ enum UserRole { staff, supervisor, admin }
 // ── Attendance ────────────────────────────────────────────────
 class AttendanceRecord {
   final String id;
+
+  /// Tanggal CHECK-IN (`Attendance.tanggalMasuk`). Ini tetap identitas satu
+  /// baris absensi: shift malam yang masuk tanggal N dan pulang tanggal N+1
+  /// tetap SATU baris, milik tanggal N.
   final DateTime date;
+
+  /// Tanggal CHECK-OUT (`Attendance.tanggalKeluar`), null bila belum
+  /// check-out. Untuk shift siang nilainya sama dengan [date]; untuk shift
+  /// malam ia [date] + 1 hari. Ditambahkan 2026-09-11 bersamaan dengan
+  /// pemecahan kolom tanggal di backend — sebelumnya tanggal check-out tidak
+  /// pernah tersimpan sehingga [workDuration] shift malam selalu 0.
+  final DateTime? dateKeluar;
   final DateTime? checkIn;
   final DateTime? checkOut;
   final DateTime? breakStart;
@@ -329,6 +340,7 @@ class AttendanceRecord {
   const AttendanceRecord({
     required this.id,
     required this.date,
+    this.dateKeluar,
     this.checkIn,
     this.checkOut,
     this.breakStart,
@@ -365,19 +377,49 @@ class AttendanceRecord {
     // Backend mengirim `tanggal` sebagai local-midnight yang diserialisasi ke
     // UTC (mis. "…T17:00:00.000Z" untuk WIB). Konversi ke lokal dulu agar
     // komponen tanggalnya tidak mundur satu hari.
-    final parsed = DateTime.tryParse((j['tanggal'] ?? '').toString())?.toLocal();
-    final base = parsed != null
-        ? DateTime(parsed.year, parsed.month, parsed.day)
-        : DateTime.now();
+    // `tanggalMasuk` adalah nama kolom sejak 2026-09-11; `tanggal` dibaca
+    // sebagai cadangan supaya app ini tetap jalan terhadap backend versi lama
+    // (backend baru juga masih mengirim alias itu — lihat
+    // `serializeAttendance` di routes/mobile/attendance.ts).
+    DateTime? parseTanggal(dynamic raw) {
+      final p = DateTime.tryParse((raw ?? '').toString())?.toLocal();
+      return p == null ? null : DateTime(p.year, p.month, p.day);
+    }
 
-    DateTime? combine(dynamic hhmm) {
+    final base = parseTanggal(j['tanggalMasuk'] ?? j['tanggal']) ?? DateTime.now();
+    final baseKeluar = parseTanggal(j['tanggalKeluar']);
+
+    DateTime? combineOn(DateTime day, dynamic hhmm) {
       final s = hhmm?.toString() ?? '';
       final parts = s.split(':');
       if (parts.length < 2) return null;
       final h = int.tryParse(parts[0]);
       final m = int.tryParse(parts[1]);
       if (h == null || m == null) return null;
-      return DateTime(base.year, base.month, base.day, h, m);
+      return DateTime(day.year, day.month, day.day, h, m);
+    }
+
+    DateTime? combine(dynamic hhmm) => combineOn(base, hhmm);
+
+    /// Jam check-out DITEMPELKAN pada tanggal keluarnya, bukan pada tanggal
+    /// masuk. Ini yang membuat shift malam benar: check-in 22:00 tanggal N,
+    /// check-out 05:00 tanggal N+1 -> durasi 7 jam. Sebelum kolom
+    /// `tanggalKeluar` ada, keduanya ditempel pada tanggal yang sama sehingga
+    /// selisihnya negatif dan `workDuration` selalu jatuh ke 0.
+    ///
+    /// Bila `tanggalKeluar` tidak dikirim (baris pra-migrasi / backend lama),
+    /// dipakai tebakan yang sama seperti di server: jam check-out yang lebih
+    /// kecil dari jam check-in hanya mungkin berarti menyeberang tengah malam.
+    DateTime? combineCheckOut(dynamic hhmm) {
+      final onKeluar = baseKeluar == null ? null : combineOn(baseKeluar, hhmm);
+      if (onKeluar != null) return onKeluar;
+      final onBase = combineOn(base, hhmm);
+      if (onBase == null) return null;
+      final masuk = combineOn(base, j['checkIn']);
+      if (masuk != null && onBase.isBefore(masuk)) {
+        return onBase.add(const Duration(days: 1));
+      }
+      return onBase;
     }
 
     AttendanceStatus mapStatus(String s) {
@@ -405,8 +447,9 @@ class AttendanceRecord {
     return AttendanceRecord(
       id: (j['id'] ?? '').toString(),
       date: base,
+      dateKeluar: baseKeluar,
       checkIn: combine(j['checkIn']),
-      checkOut: combine(j['checkOut']),
+      checkOut: combineCheckOut(j['checkOut']),
       status: mapStatus((j['status'] ?? '').toString()),
       locationLabel: lokasi.isEmpty ? null : lokasi,
       useGps: true,
@@ -427,6 +470,15 @@ class AttendanceRecord {
       toleransiPulangSnapshot: asIntN(j['toleransiPulangSnapshot']),
       durasiIstirahatSnapshot: asIntN(j['durasiIstirahatSnapshot']),
     );
+  }
+
+  /// true bila check-out terjadi di hari kalender BERIKUTNYA dari check-in
+  /// (shift malam). Dibaca dari FAKTA [dateKeluar] bila tersedia; kalau tidak,
+  /// dari perbandingan jam — sama seperti `isCheckoutNextDay` di backend.
+  bool get checkoutNextDay {
+    if (dateKeluar != null) return dateKeluar!.isAfter(date);
+    if (checkIn == null || checkOut == null) return false;
+    return checkOut!.isBefore(checkIn!);
   }
 
   /// Durasi kerja bersih = (checkout - checkin) - durasi istirahat.
@@ -450,6 +502,7 @@ class AttendanceRecord {
   AttendanceRecord copyWith({
     String? id,
     DateTime? date,
+    DateTime? dateKeluar,
     DateTime? checkIn,
     DateTime? checkOut,
     DateTime? breakStart,
@@ -473,6 +526,7 @@ class AttendanceRecord {
     return AttendanceRecord(
       id: id ?? this.id,
       date: date ?? this.date,
+      dateKeluar: dateKeluar ?? this.dateKeluar,
       checkIn: checkIn ?? this.checkIn,
       checkOut: checkOut ?? this.checkOut,
       breakStart: breakStart ?? this.breakStart,

@@ -49,6 +49,12 @@ class AttendanceRules {
   // sama seperti perilaku sebelum field ini ada.
   static int _toleransiPulangMenit = 0;
 
+  // 2026-09-11 -- `Shift.jamPulangHariBerikutnya`. true = jam pulang shift
+  // jatuh di hari BERIKUTNYA. Sebelumnya "lintas hari" hanya DITEBAK di
+  // [computePulangTarget] dari `jamPulang <= jamMasuk`; sekarang penyetelan
+  // admin di web yang menentukan, dan tebakan itu cuma cadangan.
+  static bool? _jamPulangHariBerikutnya;
+
   /// Diisi dari [WorkCalendar] setelah kalender kerja termuat.
   static void hydrateFromShift({
     required String jamMasuk,
@@ -56,7 +62,9 @@ class AttendanceRules {
     String? jamIstirahatMulai,
     String? jamIstirahatSelesai,
     int toleransiPulangMenit = 0,
+    bool? jamPulangHariBerikutnya,
   }) {
+    _jamPulangHariBerikutnya = jamPulangHariBerikutnya;
     _jamMasuk = _parse(jamMasuk) ?? _jamMasuk;
     _jamPulang = _parse(jamPulang) ?? _jamPulang;
     // Beda dari jamMasuk/jamPulang: null di sini artinya Shift MEMANG tidak
@@ -224,6 +232,9 @@ class AttendanceRules {
     required DateTime now,
     required TimeOfDay? jamMasuk,
     required TimeOfDay? jamPulang,
+    /// `Shift.jamPulangHariBerikutnya`. null = tidak tersedia, jatuh ke
+    /// tebakan lama `jamPulang <= jamMasuk` (perilaku sebelum 2026-09-11).
+    bool? jamPulangHariBerikutnya,
   }) {
     if (jamPulang == null) return null;
     final today = DateTime(now.year, now.month, now.day);
@@ -234,7 +245,7 @@ class AttendanceRules {
 
     final pulangMin = jamPulang.hour * 60 + jamPulang.minute;
     final masukMin = jamMasuk.hour * 60 + jamMasuk.minute;
-    final isOvernight = pulangMin <= masukMin;
+    final isOvernight = jamPulangHariBerikutnya ?? (pulangMin <= masukMin);
     if (!isOvernight) return todayPulang;
 
     final nowMin = now.hour * 60 + now.minute;
@@ -246,6 +257,7 @@ class AttendanceRules {
         now: TestingConfig.now(),
         jamMasuk: _jamMasuk,
         jamPulang: _jamPulang,
+        jamPulangHariBerikutnya: _jamPulangHariBerikutnya,
       );
 
   /// Sudah melewati jam pulang shift?
@@ -276,6 +288,12 @@ class AttendanceRules {
       now: TestingConfig.now(),
       jamMasuk: _effectiveJamMasukForCheckout,
       jamPulang: _effectiveJamPulangForCheckout,
+      // SENGAJA tanpa penanda lintas hari: jam yang dipakai di sini bisa
+      // berasal dari SNAPSHOT baris absensi hari ini (yang tidak menyimpan
+      // penanda itu). Memadukan jam snapshot dengan penanda Shift LIVE bisa
+      // saling bertentangan, jadi di jalur ini "lintas hari" tetap
+      // diturunkan dari pasangan jam yang sama — konsisten dengan
+      // `resolveShiftTerms` di backend.
     );
     if (target == null) return null;
     return target.subtract(Duration(minutes: _effectiveToleransiPulangForCheckout));

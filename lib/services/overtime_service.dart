@@ -12,7 +12,22 @@ class OvertimeEligibleDay {
   final String? checkIn;
   final String? checkOut;
   final String jamPulangShift;
+
+  /// MENIT MENTAH lembur hari itu: berapa menit check-out melewati jam pulang
+  /// shift. Hanya untuk DITAMPILKAN ("lembur tercatat 2 jam 15 menit") —
+  /// durasi yang diajukan diambil dari [jamLembur], bukan dari sini.
   final int menitLewatJamPulang;
+
+  /// JAM lembur terbayar yang sudah final untuk hari itu (`Attendance.lembur`
+  /// di server): ambang minimal 1 jam, pembulatan ke bawah per jam, dan
+  /// potongan batas lembur staff SEMUANYA sudah diterapkan server saat
+  /// check-out. Inilah durasi yang diajukan.
+  final int jamLembur;
+
+  /// Batas lembur (jam/hari) yang berlaku untuk staff ini menurut server —
+  /// `Jabatan.maxExtraHour` bila disetel, kalau tidak batas legal 4 jam.
+  final int batasLemburJam;
+
   final int estimasiJamLembur;
   final bool sudahDiajukan;
   final String? statusPengajuan;
@@ -25,6 +40,8 @@ class OvertimeEligibleDay {
     required this.checkOut,
     required this.jamPulangShift,
     required this.menitLewatJamPulang,
+    required this.jamLembur,
+    required this.batasLemburJam,
     required this.estimasiJamLembur,
     required this.sudahDiajukan,
     required this.statusPengajuan,
@@ -39,6 +56,15 @@ class OvertimeEligibleDay {
       checkOut: j['checkOut']?.toString(),
       jamPulangShift: (j['jamPulangShift'] ?? '').toString(),
       menitLewatJamPulang: (j['menitLewatJamPulang'] as num?)?.toInt() ?? 0,
+      // `jamLembur` ditambahkan 2026-09-11. Fallback ke `estimasiJamLembur`
+      // (nilainya selalu sama) supaya app ini tetap benar bila dijalankan
+      // terhadap backend yang belum diperbarui.
+      jamLembur: (j['jamLembur'] as num?)?.toInt() ??
+          (j['estimasiJamLembur'] as num?)?.toInt() ??
+          0,
+      // 0 berarti server tidak mengirimkannya; pemanggil jatuh ke batas
+      // legal 4 jam — lihat `_batasLemburMenit()` di leave_tab.dart.
+      batasLemburJam: (j['batasLemburJam'] as num?)?.toInt() ?? 0,
       estimasiJamLembur: (j['estimasiJamLembur'] as num?)?.toInt() ?? 0,
       sudahDiajukan: j['sudahDiajukan'] == true,
       statusPengajuan: j['statusPengajuan']?.toString(),

@@ -101,6 +101,16 @@ class WorkCalendar {
   /// `AttendanceRules.earliestCheckoutTarget`/`isAfterEarliestCheckout`).
   final int toleransiPulang;
 
+  /// 2026-09-11 -- `Shift.jamPulangHariBerikutnya`: true = jam pulang shift
+  /// jatuh di hari BERIKUTNYA (mis. masuk 22:00, pulang 05:00).
+  ///
+  /// Sebelum kolom ini ada, app menebaknya sendiri dari `jamPulang <=
+  /// jamMasuk`. Tebakan itu benar untuk kasus lazim tapi tidak pernah bisa
+  /// dipastikan; sekarang nilainya datang dari penyetelan admin di web.
+  /// Default false supaya sebelum kalender termuat perilakunya konservatif
+  /// (shift dianggap selesai di hari yang sama).
+  final bool jamPulangHariBerikutnya;
+
   /// Status hari ini menurut server (lihat [TodayHolidayStatus]).
   final TodayHolidayStatus hariIni;
 
@@ -113,6 +123,7 @@ class WorkCalendar {
     this.jamIstirahatMulai,
     this.jamIstirahatSelesai,
     this.toleransiPulang = 0,
+    this.jamPulangHariBerikutnya = false,
     this.hariIni = TodayHolidayStatus.unknown,
   });
 
@@ -236,6 +247,7 @@ class CalendarService {
       jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
       jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
       toleransiPulang: (shift['toleransiPulang'] as num?)?.toInt() ?? 0,
+      jamPulangHariBerikutnya: shift['jamPulangHariBerikutnya'] == true,
       hariIni: data['hariIni'] is Map
           ? TodayHolidayStatus.fromApi(
               Map<String, dynamic>.from(data['hariIni'] as Map))

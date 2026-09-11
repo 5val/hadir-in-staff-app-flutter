@@ -479,7 +479,13 @@ class _AllAttendanceHistoryScreenState
                                     ),
                                     const SizedBox(width: 14),
                                     _HistoryTimeCol(
-                                      label: 'Check Out',
+                                      // Label ikut menandai shift malam:
+                                      // check-out yang terjadi di hari
+                                      // kalender berikutnya (kolom
+                                      // `tanggalKeluar`, 2026-09-11).
+                                      label: rec.checkoutNextDay
+                                          ? 'Check Out (+1 hari)'
+                                          : 'Check Out',
                                       value: rec.checkOut != null
                                           ? _fmtHM24(rec.checkOut!)
                                           : '--:--',

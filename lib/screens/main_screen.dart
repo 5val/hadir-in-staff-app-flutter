@@ -294,6 +294,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         jamIstirahatMulai: calendar.jamIstirahatMulai,
         jamIstirahatSelesai: calendar.jamIstirahatSelesai,
         toleransiPulangMenit: calendar.toleransiPulang,
+        jamPulangHariBerikutnya: calendar.jamPulangHariBerikutnya,
       );
       if (mounted) setState(() {});
     } catch (_) {}

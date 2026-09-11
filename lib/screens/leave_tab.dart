@@ -674,9 +674,10 @@ class _LeaveTabState extends State<LeaveTab> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
-          // Info batas lembur — angkanya dari Jabatan.maxExtraHour di DB,
-          // lewat [_batasLemburMenit] supaya sama persis dengan batas yang
-          // dipakai memotong durasi saat pengajuan.
+          // Info batas lembur — angkanya dari server (`batasLemburJam` pada
+          // respons eligible-days, turunan Jabatan.maxExtraHour), lewat
+          // [_batasLemburJam] supaya sama persis dengan batas yang dipakai
+          // memotong durasi saat pengajuan.
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -712,7 +713,7 @@ class _LeaveTabState extends State<LeaveTab> {
                               color: Colors.white.withOpacity(0.8))),
                       const SizedBox(height: 2),
                       Text(
-                        '${_formatDurasi(_batasLemburMenit())} / Pengajuan',
+                        '${_formatDurasi(_batasLemburJam(dariServer: _overtimeDays.isNotEmpty ? _overtimeDays.first.batasLemburJam : null) * 60)} / Pengajuan',
                         style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
@@ -783,9 +784,14 @@ class _LeaveTabState extends State<LeaveTab> {
   }
 
   Widget _buildOvertimeDayCard(OvertimeEligibleDay day, DateFormat df) {
-    final jam = day.menitLewatJamPulang ~/ 60;
-    final menit = day.menitLewatJamPulang % 60;
-    final lebihStr = jam > 0 ? '$jam jam $menit menit' : '$menit menit';
+    // `menitLewatJamPulang` = menit MENTAH lewat jam pulang shift (untuk
+    // ditampilkan apa adanya), `jamLembur` = jam terbayar setelah pembulatan
+    // ke bawah + potongan batas (yang benar-benar diajukan). Dulu kartu ini
+    // memformat `menitLewatJamPulang` sebagai satu-satunya angka, padahal
+    // field itu saat itu berisi JAM — sehingga lembur 1 jam tampil sebagai
+    // "1 menit".
+    final lebihStr = _formatDurasi(day.menitLewatJamPulang);
+    final window = _resolveOvertimeWindow(day);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -830,6 +836,28 @@ class _LeaveTabState extends State<LeaveTab> {
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: AppColors.brandOrange)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.more_time_rounded,
+                    size: 16, color: AppColors.slate700),
+                const SizedBox(width: 6),
+                Text('Diajukan: ${_formatDurasi(window.durasiJam * 60)}',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.brandNavy)),
+                if (window.dipotong) ...[
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '(dipotong batas ${_formatDurasi(window.batasJam * 60)})',
+                      style: AppText.caption,
+                    ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 14),
@@ -2694,37 +2722,49 @@ class _SummaryChip extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════
 // OVERTIME REQUEST DIALOG
 // ═══════════════════════════════════════════════════════════
-/// Batas lembur legal PP 35/2021 Pasal 26(1), dalam menit — kembaran
-/// `LEMBUR_MAX_JAM_PER_HARI` di routes/mobile/lembur.ts. Ada di sini supaya
-/// app tidak pernah menawarkan durasi yang pasti ditolak server, BUKAN supaya
-/// app yang menegakkan aturannya (server tetap memeriksanya sendiri).
-const int _lemburMaksMenitLegal = 4 * 60;
 
 /// Rentang lembur yang akan diajukan untuk satu hari — seluruhnya diturunkan,
 /// tidak ada satu pun angkanya yang diketik staff.
+///
+/// SEMUA durasi di kelas ini berbasis JAM PENUH, bukan menit.
+///
+/// BUG DIPERBAIKI 2026-09-11: kelas ini dulu berbasis menit dan mengambil
+/// angkanya dari `day.menitLewatJamPulang`. Sejak `Attendance.lembur` di
+/// server berubah unit jadi JAM TERBAYAR (2026-09-09), field itu berisi JAM
+/// walau namanya menit — sehingga lembur 1 jam terbaca sebagai 1 MENIT:
+/// kartunya menampilkan "Kelebihan: 1 menit" dan pengajuannya terkirim
+/// sebagai jendela satu menit (mis. 18:14–18:15). Sekarang durasinya diambil
+/// dari `day.jamLembur` (jam terbayar final dari server) dan menit mentah
+/// hanya dipakai untuk teks "lembur tercatat".
 class _OvertimeWindow {
-  /// Menit lembur yang tercatat di absensi hari itu (`Attendance.lembur`).
-  final int lemburMenit;
+  /// Menit MENTAH lembur yang tercatat di absensi hari itu — hanya untuk
+  /// ditampilkan ("tercatat 2 jam 15 menit"), tidak menentukan durasi.
+  final int lemburMenitMentah;
 
-  /// Batas yang berlaku untuk staff ini (jabatan, atau batas legal).
-  final int batasMenit;
+  /// JAM lembur terbayar hari itu menurut server, sebelum dipotong [batasJam].
+  final int lemburJam;
 
-  /// Yang benar-benar diajukan = [lemburMenit] dipotong [batasMenit].
-  final int durasiMenit;
+  /// Batas lembur (jam/hari) yang berlaku untuk staff ini — `maxExtraHour`
+  /// jabatan bila disetel, kalau tidak batas legal 4 jam.
+  final int batasJam;
+
+  /// Yang benar-benar diajukan = [lemburJam] dipotong [batasJam], dalam JAM.
+  final int durasiJam;
 
   final String jamMulai;
   final String jamSelesai;
 
   const _OvertimeWindow({
-    required this.lemburMenit,
-    required this.batasMenit,
-    required this.durasiMenit,
+    required this.lemburMenitMentah,
+    required this.lemburJam,
+    required this.batasJam,
+    required this.durasiJam,
     required this.jamMulai,
     required this.jamSelesai,
   });
 
   /// true = lemburnya lebih panjang dari batas, jadi yang diajukan dipotong.
-  bool get dipotong => lemburMenit > durasiMenit;
+  bool get dipotong => lemburJam > durasiJam;
 }
 
 int? _menitDariJam(String? hhmm) {
@@ -2752,57 +2792,76 @@ String _formatDurasi(int menit) {
   return '$sisa menit';
 }
 
-/// Batas lembur yang berlaku untuk staff yang sedang login, dalam menit.
+/// Batas lembur legal per PP 35/2021, dalam JAM.
+const int _lemburMaksJamLegal = 4;
+
+/// Batas lembur (JAM/hari) yang berlaku untuk staff yang sedang login.
 ///
 /// Satu definisi untuk dua tempat yang harus setuju: banner "Batas Maksimal
 /// Lembur Anda" di atas daftar, dan pemotongan durasi di
-/// [_resolveOvertimeWindow]. Sebelumnya banner-nya membaca `maxExtraHour`
-/// mentah, jadi staff tanpa jabatan (nilainya 0) melihat "0 Jam" padahal
-/// yang berlaku baginya adalah batas legal.
-int _batasLemburMenit() {
+/// [_resolveOvertimeWindow].
+///
+/// [dariServer] adalah `batasLemburJam` pada respons `eligible-days` —
+/// dipakai lebih dulu bila ada, supaya app dan server tidak mungkin memakai
+/// angka berbeda. 0/null berarti server tidak mengirimkannya (backend versi
+/// lama), dan app menurunkannya sendiri dari `maxExtraHour` sesi.
+///
+/// `maxExtraHour` 0 berarti jabatan tidak menetapkan batas sendiri (itu nilai
+/// default kolomnya), BUKAN "tidak boleh lembur" — jadi jatuh ke batas legal.
+/// Tanpa aturan ini, staff tanpa jabatan melihat "0 Jam" dan setiap
+/// pengajuannya mustahil.
+int _batasLemburJam({int? dariServer}) {
+  if (dariServer != null && dariServer > 0) {
+    return dariServer < _lemburMaksJamLegal ? dariServer : _lemburMaksJamLegal;
+  }
   final jabatanJam = AppSession.staff?.maxExtraHour ?? 0;
-  final jabatanMenit = jabatanJam > 0 ? jabatanJam * 60 : _lemburMaksMenitLegal;
-  return jabatanMenit < _lemburMaksMenitLegal
-      ? jabatanMenit
-      : _lemburMaksMenitLegal;
+  if (jabatanJam <= 0) return _lemburMaksJamLegal;
+  return jabatanJam < _lemburMaksJamLegal ? jabatanJam : _lemburMaksJamLegal;
 }
 
 /// Durasi lembur yang diajukan untuk [day], beserta rentang jamnya.
 ///
-/// Aturannya (2026-09-05, permintaan pemilik produk): durasi MENGIKUTI lembur
-/// yang tercatat di absensi hari itu, dan kalau lebih panjang dari batas
-/// lembur staff, dipotong tepat di batas itu. Batas 1 jam + lembur tercatat
-/// 10 menit -> 10 menit; batas 1 jam + lembur tercatat 2 jam -> 1 jam.
+/// ATURAN (dikonfirmasi pemilik produk 2026-09-11):
+///  - Lembur yang BELUM sampai 1 jam tidak bisa diajukan sama sekali — hari
+///    seperti itu bahkan tidak dikirim server ke daftar ini.
+///  - Begitu sudah sampai 1 jam, jam pertamanya IKUT: dibulatkan KE BAWAH ke
+///    jam penuh. Terhadap shift yang jam pulangnya 17:00 —
+///    check-out 17:59 tidak muncul, 18:15 dan 18:59 sama-sama 1 jam,
+///    19:15 jadi 2 jam.
+///  - Lalu dipotong batas lembur staff: lembur 2 jam dengan `maxExtraHour` 1
+///    tetap diajukan 1 jam.
 ///
-/// Rentang jamnya dihitung MUNDUR dari check-out (`checkOut - lemburMenit`),
-/// bukan maju dari `jamPulangShift`. Keduanya sering sama, tapi tidak selalu:
-/// `Attendance.lembur` adalah snapshot saat check-out, jadi kalau
-/// `Shift.jamPulang` diedit sesudahnya, hanya hitungan mundur dari check-out
-/// yang masih menghasilkan rentang sepanjang lembur yang benar-benar
-/// tercatat. `jamPulangShift` hanya dipakai sebagai cadangan bila check-out
-/// tidak bisa dibaca.
+/// Pembulatan dan pemotongan itu sudah dikerjakan SERVER (nilainya ada di
+/// [OvertimeEligibleDay.jamLembur], salinan `Attendance.lembur`). App tidak
+/// menghitungnya ulang — ia hanya memotong sekali lagi terhadap
+/// [OvertimeEligibleDay.batasLemburJam] sebagai jaring pengaman, supaya
+/// "yang ditampilkan" tidak mungkin melebihi "yang akan dibayar".
 ///
-/// `maxExtraHour` 0 (staff tanpa jabatan / jabatan tanpa batas) diperlakukan
-/// sebagai "tidak ada batas jabatan" dan jatuh ke batas legal — bukan sebagai
-/// batas 0 jam, yang akan membuat setiap pengajuan mustahil.
+/// Rentang jamnya dimulai dari jam pulang shift baris itu dan berlangsung
+/// selama durasi terbayar — mis. shift pulang 17:00, check-out 18:15, 1 jam
+/// terbayar -> 17:00–18:00. `jamPulangShift` yang dikirim server adalah
+/// SNAPSHOT jam shift saat check-in, jadi tetap benar walau Shift-nya diedit
+/// setelah check-out. Bila jam itu tidak bisa dibaca, rentangnya dihitung
+/// mundur dari check-out sebagai cadangan.
 _OvertimeWindow _resolveOvertimeWindow(OvertimeEligibleDay day) {
-  final lemburMenit = day.menitLewatJamPulang;
+  final batasJam = _batasLemburJam(dariServer: day.batasLemburJam);
+  final lemburJam = day.jamLembur;
+  final durasiJam = lemburJam < batasJam ? lemburJam : batasJam;
 
-  final batasMenit = _batasLemburMenit();
-
-  final durasiMenit = lemburMenit < batasMenit ? lemburMenit : batasMenit;
-
+  final pulangMenit = _menitDariJam(day.jamPulangShift);
   final checkOutMenit = _menitDariJam(day.checkOut);
-  final mulaiMenit = checkOutMenit != null
-      ? checkOutMenit - lemburMenit
-      : (_menitDariJam(day.jamPulangShift) ?? 17 * 60);
+  final mulaiMenit = pulangMenit ??
+      (checkOutMenit != null
+          ? checkOutMenit - durasiJam * 60
+          : 17 * 60);
 
   return _OvertimeWindow(
-    lemburMenit: lemburMenit,
-    batasMenit: batasMenit,
-    durasiMenit: durasiMenit,
+    lemburMenitMentah: day.menitLewatJamPulang,
+    lemburJam: lemburJam,
+    batasJam: batasJam,
+    durasiJam: durasiJam,
     jamMulai: _jamDariMenit(mulaiMenit),
-    jamSelesai: _jamDariMenit(mulaiMenit + durasiMenit),
+    jamSelesai: _jamDariMenit(mulaiMenit + durasiJam * 60),
   );
 }
 
@@ -2889,7 +2948,7 @@ class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _formatDurasi(widget.window.durasiMenit),
+                      _formatDurasi(widget.window.durasiJam * 60),
                       style: GoogleFonts.inter(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
@@ -2925,9 +2984,9 @@ class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
                       Expanded(
                         child: Text(
                           'Absensi Anda mencatat lembur '
-                          '${_formatDurasi(widget.window.lemburMenit)}, '
+                          '${_formatDurasi(widget.window.lemburJam * 60)}, '
                           'tapi yang bisa diajukan maksimal '
-                          '${_formatDurasi(widget.window.batasMenit)}.',
+                          '${_formatDurasi(widget.window.batasJam * 60)}.',
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,

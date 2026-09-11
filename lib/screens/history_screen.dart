@@ -346,7 +346,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                             color: AppColors.slate900)),
                                     if (r.checkIn != null)
                                       Text(
-                                        '${_fmtTime(r.checkIn)} — ${_fmtTime(r.checkOut)}',
+                                        // "+1 hari" untuk shift malam: sejak
+                                        // backend menyimpan tanggal keluar
+                                        // terpisah (2026-09-11), check-out
+                                        // pukul 05:00 yang sebenarnya terjadi
+                                        // keesokan harinya tidak lagi tampil
+                                        // seolah di hari yang sama.
+                                        '${_fmtTime(r.checkIn)} — ${_fmtTime(r.checkOut)}'
+                                        '${r.checkoutNextDay ? ' (+1 hari)' : ''}',
                                         style: AppText.body2,
                                       ),
                                     if ((r.lateMinutes ?? 0) > 0)
