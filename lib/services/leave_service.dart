@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import '../models/models.dart';
 import 'api_client.dart';
 import 'session_service.dart';
@@ -25,7 +28,12 @@ class LeaveService {
     return res.asList.map(LeaveRequest.fromApi).toList();
   }
 
-  /// POST pengajuan cuti/izin baru.
+  /// Batas lampiran per pengajuan — sama dengan `MAX_LAMPIRAN` backend.
+  static const maxLampiran = 3;
+
+  /// POST pengajuan cuti/izin baru. [lampiran] (foto bukti) dikirim sebagai
+  /// base64; backend menyimpannya ke Google Drive lalu URL-nya masuk ke
+  /// `dokumen` yang dilihat admin di halaman Approval Cuti/Izin.
   static Future<LeaveRequest> create({
     required String tipe, // Cuti | Izin | Sakit | Dinas
     String subTipe = '',
@@ -33,8 +41,16 @@ class LeaveService {
     required DateTime tanggalMulai,
     required DateTime tanggalSelesai,
     required int jumlahHari,
+    List<File> lampiran = const [],
   }) async {
     final id = await _staffId();
+    final encoded = <Map<String, String>>[];
+    for (final f in lampiran) {
+      encoded.add({
+        'base64': base64Encode(await f.readAsBytes()),
+        'mimeType': _mimeFromPath(f.path),
+      });
+    }
     String d(DateTime x) =>
         '${x.year.toString().padLeft(4, '0')}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
     final res = await ApiClient.instance.post(
@@ -46,6 +62,7 @@ class LeaveService {
         'tanggalMulai': d(tanggalMulai),
         'tanggalSelesai': d(tanggalSelesai),
         'jumlahHari': jumlahHari,
+        if (encoded.isNotEmpty) 'lampiran': encoded,
       },
     );
     return LeaveRequest.fromApi(res.asMap);
@@ -60,5 +77,13 @@ class LeaveService {
       sisaCuti: (m['sisaCuti'] as num?)?.toInt() ?? 0,
       totalCuti: (m['totalCuti'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  static String _mimeFromPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.heic')) return 'image/heic';
+    return 'image/jpeg';
   }
 }

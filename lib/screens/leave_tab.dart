@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/work_date_picker.dart';
@@ -1923,6 +1925,132 @@ class _EmployeeAppTile extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════
+// RENTANG TANGGAL PENGAJUAN
+// ═══════════════════════════════════════════════════════════
+// Harus sama dengan `leaveDateWindow` di backend
+// (routes/mobile/leave.ts) — server menolak tanggal di luar jendela ini.
+DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// Geser [d] sebanyak [months] bulan; tanggal yang tidak ada di bulan tujuan
+/// dijepit ke hari terakhirnya (31 Jan + 1 bulan = 28/29 Feb).
+DateTime _addMonthsClamped(DateTime d, int months) {
+  final lastDay = DateTime(d.year, d.month + months + 1, 0).day;
+  return DateTime(d.year, d.month + months, d.day < lastDay ? d.day : lastDay);
+}
+
+/// Cuti: besok s/d 1 bulan ke depan.
+({DateTime first, DateTime last}) _cutiRange() {
+  final today = _dateOnly(DateTime.now());
+  return (
+    first: today.add(const Duration(days: 1)),
+    last: _addMonthsClamped(today, 1),
+  );
+}
+
+/// Izin: 1 bulan ke belakang s/d kemarin.
+({DateTime first, DateTime last}) _izinRange() {
+  final today = _dateOnly(DateTime.now());
+  return (
+    first: _addMonthsClamped(today, -1),
+    last: today.subtract(const Duration(days: 1)),
+  );
+}
+
+/// Pesan error rentang tanggal, atau null kalau valid / belum lengkap.
+String? _rangeError(DateTime? start, DateTime? end,
+    ({DateTime first, DateTime last}) range, String jenis) {
+  if (start != null && end != null && end.isBefore(start)) {
+    return 'Tanggal selesai tidak boleh sebelum tanggal mulai.';
+  }
+  final f = DateFormat('dd MMM yyyy', 'id_ID');
+  for (final d in [start, end]) {
+    if (d == null) continue;
+    if (d.isBefore(range.first) || d.isAfter(range.last)) {
+      return '$jenis hanya bisa untuk ${f.format(range.first)} – ${f.format(range.last)}.';
+    }
+  }
+  return null;
+}
+
+/// Pasangan field Tanggal Mulai / Tanggal Selesai + pesan error-nya.
+/// Picker tanggal selesai dimulai dari tanggal mulai; kalau tanggal mulai
+/// diganti ke setelah tanggal selesai, pesan error tampil & tombol kirim mati.
+class _DateRangeFields extends StatelessWidget {
+  final DateTime? start;
+  final DateTime? end;
+  final ({DateTime first, DateTime last}) range;
+  final String jenis;
+  final ValueChanged<DateTime> onStart;
+  final ValueChanged<DateTime> onEnd;
+
+  const _DateRangeFields({
+    required this.start,
+    required this.end,
+    required this.range,
+    required this.jenis,
+    required this.onStart,
+    required this.onEnd,
+  });
+
+  Future<void> _pick(BuildContext context, bool isStart) async {
+    final s = start;
+    final first = !isStart && s != null && !s.isBefore(range.first)
+        ? s
+        : range.first;
+    final picked = await showWorkDatePicker(
+      context: context,
+      initialDate: isStart
+          ? (s ?? (jenis == 'Izin' ? range.last : range.first))
+          : (end ?? s ?? range.first),
+      firstDate: first,
+      lastDate: range.last,
+    );
+    if (picked == null) return;
+    isStart ? onStart(picked) : onEnd(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = DateFormat('dd MMM yyyy', 'id_ID');
+    final error = _rangeError(start, end, range, jenis);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _DatePickerField(
+                label: 'Tanggal Mulai',
+                value: start != null ? f.format(start!) : null,
+                onTap: () => _pick(context, true),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _DatePickerField(
+                label: 'Tanggal Selesai',
+                value: end != null ? f.format(end!) : null,
+                onTap: () => _pick(context, false),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          error ??
+              'Pilih antara ${f.format(range.first)} – ${f.format(range.last)}',
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: error != null ? FontWeight.w600 : FontWeight.w400,
+            color: error != null ? AppColors.danger : AppColors.slate400,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // CUTI FORM
 // ═══════════════════════════════════════════════════════════
 class _CutiForm extends StatefulWidget {
@@ -1948,38 +2076,17 @@ class _CutiFormState extends State<_CutiForm> {
   int get _quota =>
       AppSession.staff?.totalCuti ?? user.position.annualLeaveQuota;
   int get _remaining => AppSession.staff?.sisaCuti ?? _quota;
-  int get _days => (_start == null || _end == null)
-      ? 0
-      : _end!.difference(_start!).inDays + 1;
+  bool get _rangeValid =>
+      _start != null &&
+      _end != null &&
+      _rangeError(_start, _end, _cutiRange(), 'Cuti') == null;
+  int get _days => _rangeValid ? _end!.difference(_start!).inDays + 1 : 0;
 
   bool get _canSubmit {
-    if (_start == null || _end == null) return false;
+    if (!_rangeValid) return false;
     if (_reasonCtrl.text.trim().isEmpty) return false;
     if (_days > _remaining) return false;
-    final minDate =
-        DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
-    return !_start!.isBefore(minDate);
-  }
-
-  Future<void> _pickDate(bool isStart) async {
-    final minDate =
-        DateTime.now().add(Duration(days: user.position.minLeaveAdvanceDays));
-    // Fase 8: hari libur & hari non-kerja shift di-disable di picker.
-    final picked = await showWorkDatePicker(
-      context: context,
-      initialDate: isStart ? (_start ?? minDate) : (_end ?? _start ?? minDate),
-      firstDate: minDate,
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (picked == null) return;
-    setState(() {
-      if (isStart) {
-        _start = picked;
-        if (_end != null && _end!.isBefore(picked)) _end = picked;
-      } else {
-        _end = picked;
-      }
-    });
+    return true;
   }
 
   Future<void> _submit() async {
@@ -2034,7 +2141,6 @@ class _CutiFormState extends State<_CutiForm> {
 
   @override
   Widget build(BuildContext context) {
-    final f = DateFormat('dd MMM yyyy', 'id_ID');
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -2063,23 +2169,14 @@ class _CutiFormState extends State<_CutiForm> {
           ),
           const SizedBox(height: 14),
 
-          // Date pickers
-          Row(
-            children: [
-              Expanded(
-                  child: _DatePickerField(
-                label: 'Tanggal Mulai',
-                value: _start != null ? f.format(_start!) : null,
-                onTap: () => _pickDate(true),
-              )),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: _DatePickerField(
-                label: 'Tanggal Selesai',
-                value: _end != null ? f.format(_end!) : null,
-                onTap: () => _pickDate(false),
-              )),
-            ],
+          // Date pickers — besok s/d 1 bulan ke depan
+          _DateRangeFields(
+            start: _start,
+            end: _end,
+            range: _cutiRange(),
+            jenis: 'Cuti',
+            onStart: (d) => setState(() => _start = d),
+            onEnd: (d) => setState(() => _end = d),
           ),
           if (_days > 0) ...[
             const SizedBox(height: 8),
@@ -2136,6 +2233,8 @@ class _IzinFormState extends State<_IzinForm> {
   DateTime? _startDate;
   DateTime? _endDate;
   final _noteCtrl = TextEditingController();
+  final _picker = ImagePicker();
+  final List<File> _photos = [];
   bool _submitting = false;
 
   static const _types = [
@@ -2148,11 +2247,80 @@ class _IzinFormState extends State<_IzinForm> {
     setState(() => _type = type);
   }
 
+  bool get _rangeValid =>
+      _startDate != null &&
+      _endDate != null &&
+      _rangeError(_startDate, _endDate, _izinRange(), 'Izin') == null;
+
   bool get _canSubmit {
     if (_type == null) return false;
-    if (_startDate == null || _endDate == null) return false;
+    if (!_rangeValid) return false;
     if (_noteCtrl.text.trim().isEmpty) return false;
     return true;
+  }
+
+  Future<void> _addPhoto() async {
+    if (_photos.length >= LeaveService.maxLampiran) return;
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.slate200,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_rounded,
+                  color: AppColors.brandCyanDark),
+              title: Text('Ambil Foto', style: AppText.body1),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded,
+                  color: AppColors.brandCyanDark),
+              title: Text('Pilih dari Galeri', style: AppText.body1),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    XFile? picked;
+    try {
+      picked = await _picker.pickImage(
+        source: source,
+        // Ditekan supaya 3 foto sekaligus tetap jauh di bawah batas body
+        // JSON backend (12 MB) setelah di-base64.
+        imageQuality: 75,
+        maxWidth: 1600,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal membuka kamera/galeri. Periksa izin aplikasi.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+    if (picked == null || !mounted) return;
+    final path = picked.path;
+    setState(() => _photos.add(File(path)));
   }
 
   Future<void> _submit() async {
@@ -2171,12 +2339,23 @@ class _IzinFormState extends State<_IzinForm> {
         tanggalMulai: _startDate!,
         tanggalSelesai: _endDate!,
         jumlahHari: jumlahHari,
+        lampiran: List.of(_photos),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+      return;
+    } on FileSystemException {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Foto tidak bisa dibaca. Hapus lalu pilih ulang.'),
+          backgroundColor: AppColors.danger,
+        ),
       );
       return;
     }
@@ -2186,6 +2365,7 @@ class _IzinFormState extends State<_IzinForm> {
       _type = null;
       _startDate = null;
       _endDate = null;
+      _photos.clear();
       _noteCtrl.clear();
     });
     widget.onSubmitted?.call();
@@ -2217,10 +2397,83 @@ class _IzinFormState extends State<_IzinForm> {
     super.dispose();
   }
 
+  Widget _photoInput() {
+    final canAdd = _photos.length < LeaveService.maxLampiran && !_submitting;
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (var i = 0; i < _photos.length; i++)
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(
+                  _photos[i],
+                  width: 76,
+                  height: 76,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 76,
+                    height: 76,
+                    color: AppColors.slate100,
+                    child: const Icon(Icons.broken_image_rounded,
+                        color: AppColors.slate400),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: -6,
+                right: -6,
+                child: GestureDetector(
+                  onTap: _submitting
+                      ? null
+                      : () => setState(() => _photos.removeAt(i)),
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: const BoxDecoration(
+                        color: AppColors.danger, shape: BoxShape.circle),
+                    child: const Icon(Icons.close_rounded,
+                        size: 14, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        if (canAdd)
+          GestureDetector(
+            onTap: _addPhoto,
+            child: Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.slate200),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.add_a_photo_rounded,
+                      size: 22, color: AppColors.brandCyanDark),
+                  const SizedBox(height: 4),
+                  Text('Tambah',
+                      style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.brandCyanDark)),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final f = DateFormat('dd MMM yyyy', 'id_ID');
-
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -2277,55 +2530,17 @@ class _IzinFormState extends State<_IzinForm> {
 
           const SizedBox(height: 14),
 
-          // ── Date range ────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: _DatePickerField(
-                  label: 'Tanggal Mulai',
-                  value: _startDate != null ? f.format(_startDate!) : null,
-                  onTap: () async {
-                    final picked = await showWorkDatePicker(
-                      context: context,
-                      initialDate: _startDate ?? DateTime.now(),
-                      firstDate:
-                          DateTime.now().subtract(const Duration(days: 7)),
-                      lastDate: DateTime.now().add(const Duration(days: 30)),
-                    );
-                    if (picked != null) {
-                      setState(() {
-                        _startDate = picked;
-                        if (_endDate != null && _endDate!.isBefore(picked)) {
-                          _endDate = picked;
-                        }
-                      });
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _DatePickerField(
-                  label: 'Tanggal Selesai',
-                  value: _endDate != null ? f.format(_endDate!) : null,
-                  onTap: () async {
-                    final picked = await showWorkDatePicker(
-                      context: context,
-                      initialDate: _endDate ?? _startDate ?? DateTime.now(),
-                      firstDate: _startDate ??
-                          DateTime.now().subtract(const Duration(days: 7)),
-                      lastDate: DateTime.now().add(const Duration(days: 30)),
-                    );
-                    if (picked != null) {
-                      setState(() => _endDate = picked);
-                    }
-                  },
-                ),
-              ),
-            ],
+          // ── Date range — 1 bulan ke belakang s/d kemarin ─────
+          _DateRangeFields(
+            start: _startDate,
+            end: _endDate,
+            range: _izinRange(),
+            jenis: 'Izin',
+            onStart: (d) => setState(() => _startDate = d),
+            onEnd: (d) => setState(() => _endDate = d),
           ),
 
-          if (_startDate != null && _endDate != null) ...[
+          if (_rangeValid) ...[
             const SizedBox(height: 8),
             Text(
               'Total: ${_endDate!.difference(_startDate!).inDays + 1} hari',
@@ -2349,6 +2564,18 @@ class _IzinFormState extends State<_IzinForm> {
               hintText: 'Tuliskan keterangan izin kamu...',
             ),
           ),
+
+          const SizedBox(height: 14),
+
+          // ── Foto bukti ────────────────────────────────
+          Text('Foto Bukti (opsional)', style: AppText.label),
+          const SizedBox(height: 2),
+          Text(
+            'Mis. surat dokter atau undangan. Maks. ${LeaveService.maxLampiran} foto.',
+            style: GoogleFonts.inter(fontSize: 11, color: AppColors.slate400),
+          ),
+          const SizedBox(height: 8),
+          _photoInput(),
 
           const SizedBox(height: 16),
 

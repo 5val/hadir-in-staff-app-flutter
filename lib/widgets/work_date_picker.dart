@@ -35,27 +35,60 @@ Future<DateTime?> showWorkDatePicker({
   bool selectable(DateTime d) =>
       !blockHolidays || calendar.isSelectable(d);
 
-  // `initialDate` wajib lolos predikat, kalau tidak Flutter melempar assert.
+  final first = normalize(firstDate);
+  final last = normalize(lastDate);
+
+  // `initialDate` wajib berada di [firstDate, lastDate] DAN lolos predikat,
+  // kalau tidak Flutter melempar assert. Dijepit dulu ke rentang, lalu dicari
+  // hari kerja terdekat ke depan; kalau tidak ada (mis. rentang izin yang
+  // berakhir kemarin), dicari ke belakang.
   var initial = normalize(initialDate);
-  if (blockHolidays) {
-    var guard = 0;
-    while (!selectable(initial) &&
-        !initial.isAfter(normalize(lastDate)) &&
-        guard < 400) {
-      initial = initial.add(const Duration(days: 1));
-      guard++;
+  if (initial.isBefore(first)) initial = first;
+  if (initial.isAfter(last)) initial = last;
+  if (blockHolidays && !selectable(initial)) {
+    DateTime? found;
+    for (var d = initial; !d.isAfter(last); d = d.add(const Duration(days: 1))) {
+      if (selectable(d)) {
+        found = d;
+        break;
+      }
     }
-    if (!selectable(initial)) initial = normalize(initialDate);
+    if (found == null) {
+      for (var d = initial;
+          !d.isBefore(first);
+          d = d.subtract(const Duration(days: 1))) {
+        if (selectable(d)) {
+          found = d;
+          break;
+        }
+      }
+    }
+    // Tidak ada satu pun hari kerja di rentang ini — tampilkan picker tanpa
+    // predikat daripada crash; server tetap menolak tanggal libur.
+    if (found == null) {
+      return showDatePicker(
+        context: context,
+        initialDate: initial,
+        firstDate: first,
+        lastDate: last,
+        builder: _theme,
+      );
+    }
+    initial = found;
   }
 
   return showDatePicker(
     context: context,
     initialDate: initial,
-    firstDate: normalize(firstDate),
-    lastDate: normalize(lastDate),
+    firstDate: first,
+    lastDate: last,
     selectableDayPredicate: blockHolidays ? selectable : null,
     helpText: blockHolidays ? 'Pilih tanggal hari kerja' : null,
-    builder: (context, child) => Theme(
+    builder: _theme,
+  );
+}
+
+Widget _theme(BuildContext context, Widget? child) => Theme(
       data: Theme.of(context).copyWith(
         colorScheme: const ColorScheme.light(
           primary: AppColors.brandNavy,
@@ -64,6 +97,4 @@ Future<DateTime?> showWorkDatePicker({
         ),
       ),
       child: child!,
-    ),
-  );
-}
+    );
