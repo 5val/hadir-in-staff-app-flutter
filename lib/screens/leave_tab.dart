@@ -1956,6 +1956,25 @@ DateTime _addMonthsClamped(DateTime d, int months) {
   );
 }
 
+/// Jumlah HARI KERJA (hari kerja shift, bukan tanggal merah) dalam
+/// [start, end] inklusif -- angka yang dipotongkan dari jatah cuti.
+///
+/// Sebelumnya form menghitung `end - start + 1` (hari KALENDER) tapi
+/// melabelinya "hari kerja", jadi Jumat-Senin tampil 4 hari padahal 2, dan
+/// jumlah itu dikirim ke server. Sekarang sama dengan aturan server
+/// (`lib/leave-days.ts`): server tetap menghitung ulang dan mengabaikan
+/// angka dari app, ini hanya supaya tampilan dan cek sisa cuti di app benar.
+int _workingDaysBetween(DateTime start, DateTime end) {
+  var count = 0;
+  final last = DateTime(end.year, end.month, end.day);
+  for (var d = DateTime(start.year, start.month, start.day);
+      !d.isAfter(last);
+      d = DateTime(d.year, d.month, d.day + 1)) {
+    if (AppCalendar.instance.isSelectable(d)) count++;
+  }
+  return count;
+}
+
 /// Pesan error rentang tanggal, atau null kalau valid / belum lengkap.
 String? _rangeError(DateTime? start, DateTime? end,
     ({DateTime first, DateTime last}) range, String jenis) {
@@ -2080,7 +2099,7 @@ class _CutiFormState extends State<_CutiForm> {
       _start != null &&
       _end != null &&
       _rangeError(_start, _end, _cutiRange(), 'Cuti') == null;
-  int get _days => _rangeValid ? _end!.difference(_start!).inDays + 1 : 0;
+  int get _days => _rangeValid ? _workingDaysBetween(_start!, _end!) : 0;
 
   bool get _canSubmit {
     if (!_rangeValid) return false;
@@ -2328,7 +2347,7 @@ class _IzinFormState extends State<_IzinForm> {
     // Petakan jenis izin UI → tipe/subTipe backend.
     final String tipe = _type == 'Sakit' ? 'Sakit' : 'Izin';
     final String subTipe = _type == 'Sakit' ? '' : (_type ?? '');
-    final int jumlahHari = _endDate!.difference(_startDate!).inDays + 1;
+    final int jumlahHari = _workingDaysBetween(_startDate!, _endDate!);
 
     setState(() => _submitting = true);
     try {
