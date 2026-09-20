@@ -31,6 +31,13 @@ class NotificationMenuHints {
     'lembur_approved': 'Cuti & Izin > Lembur',
     'lembur_rejected': 'Cuti & Izin > Lembur',
 
+    // Slip gaji (alur konfirmasi, 2026-09-19): HR mengirim slip untuk
+    // dikonfirmasi, lalu mengunci slip yang sudah dikonfirmasi.
+    'gaji_slip_tersedia': 'Gaji > Slip Gaji',
+    'slip_konfirmasi_diminta': 'Gaji > Slip Gaji',
+    'slip_terkunci': 'Gaji > Slip Gaji',
+    'gaji_dicairkan': 'Gaji > Slip Gaji',
+
     // Log staff (popup naik jabatan / SP) — arsipnya di info akun.
     'promotion': 'Akun > Informasi Akun',
     'surat_peringatan': 'Akun > Informasi Akun',
@@ -135,6 +142,10 @@ class NotificationMenuHints {
       case 'lembur_approved':
       case 'lembur_rejected':
         return ' untuk melihat pengajuan lembur';
+      case 'slip_konfirmasi_diminta':
+        return ' untuk memeriksa dan mengonfirmasi slip';
+      case 'slip_terkunci':
+        return ' untuk mengunduh slip';
       case 'attendance_missing_checkout':
       case 'attendance_auto_checkout':
         return ' untuk memeriksa absensi Anda';

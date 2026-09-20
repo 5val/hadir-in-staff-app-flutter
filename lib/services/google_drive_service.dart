@@ -104,4 +104,98 @@ class GoogleDriveService {
 
     await driveApi.files.create(driveFile, uploadMedia: media);
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Slip gaji ke Google Drive PRIBADI staff (permintaan klien 2026-09-19).
+  //
+  // Server tidak bisa menaruh file di Drive tiap staff (butuh OAuth offline per
+  // staff), jadi app-lah yang mengunggah, memakai akun Google staff sendiri
+  // dan scope `drive.file` (hanya file yang dibuat app ini -- app tidak bisa
+  // membaca isi Drive lainnya). Slip masuk ke folder "Hadir-In - Slip Gaji".
+  // ─────────────────────────────────────────────────────────────────────────
+  static const _slipFolderName = 'Hadir-In - Slip Gaji';
+  static const _folderMime = 'application/vnd.google-apps.folder';
+
+  /// Menyimpan PDF slip ke folder Drive staff.
+  ///
+  /// [interactive] = false hanya memakai sesi Google yang SUDAH ada
+  /// (`signInSilently`) dan tidak pernah memunculkan dialog login -- dipakai
+  /// penyimpanan otomatis di latar. Bila belum ada sesi, hasilnya
+  /// [DriveSaveOutcome.needsSignIn]. [interactive] = true boleh meminta login
+  /// dan izin (dipakai tombol "Simpan ke Google Drive").
+  static Future<DriveSaveOutcome> saveSlipPdf({
+    required String filename,
+    required List<int> bytes,
+    bool interactive = false,
+  }) async {
+    if (bytes.isEmpty) throw 'File slip kosong, tidak ada yang disimpan.';
+
+    GoogleSignInAccount? user = _googleSignIn.currentUser;
+    user ??= await _googleSignIn.signInSilently();
+    if (user == null) {
+      if (!interactive) return DriveSaveOutcome.needsSignIn;
+      user = await _googleSignIn.signIn();
+      if (user == null) throw 'Login Google dibatalkan oleh pengguna.';
+    }
+
+    final client = await _googleSignIn.authenticatedClient();
+    if (client == null) {
+      if (!interactive) return DriveSaveOutcome.needsSignIn;
+      throw 'Izin Google Drive belum diberikan. Coba lagi dan setujui izin akses.';
+    }
+
+    final api = drive.DriveApi(client);
+    final folderId = await _findOrCreateFolder(api);
+
+    // Sudah ada dengan nama yang sama di folder itu -> jangan dobel.
+    final existing = await api.files.list(
+      q: "name = '${filename.replaceAll("'", "\'")}' and '$folderId' in parents and trashed = false",
+      $fields: 'files(id)',
+      pageSize: 1,
+    );
+    if ((existing.files ?? const []).isNotEmpty) {
+      return DriveSaveOutcome.alreadySaved;
+    }
+
+    final file = drive.File()
+      ..name = filename
+      ..parents = [folderId]
+      ..mimeType = 'application/pdf';
+    await api.files.create(
+      file,
+      uploadMedia: drive.Media(Stream<List<int>>.value(bytes), bytes.length,
+          contentType: 'application/pdf'),
+    );
+    return DriveSaveOutcome.saved;
+  }
+
+  static Future<String> _findOrCreateFolder(drive.DriveApi api) async {
+    final found = await api.files.list(
+      q: "name = '$_slipFolderName' and mimeType = '$_folderMime' and trashed = false",
+      $fields: 'files(id)',
+      pageSize: 1,
+    );
+    final id = (found.files ?? const []).isEmpty ? null : found.files!.first.id;
+    if (id != null) return id;
+
+    final created = await api.files.create(
+      drive.File()
+        ..name = _slipFolderName
+        ..mimeType = _folderMime,
+    );
+    return created.id!;
+  }
+}
+
+/// Hasil [GoogleDriveService.saveSlipPdf].
+enum DriveSaveOutcome {
+  /// Berhasil diunggah.
+  saved,
+
+  /// Sudah ada di folder itu sebelumnya (tidak diunggah ulang).
+  alreadySaved,
+
+  /// Belum ada sesi Google dan penyimpanan tidak boleh meminta login
+  /// (mode otomatis) -- staff perlu menekan tombol simpan sekali.
+  needsSignIn,
 }

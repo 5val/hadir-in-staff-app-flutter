@@ -734,6 +734,25 @@ class LeaveRecord {
 }
 
 class SalarySlip {
+  /// `slip_gaji.id` -- dibutuhkan untuk konfirmasi/tolak dan unduh PDF.
+  final String id;
+
+  /// Kunci periode dari server: "2026-08" (Bulanan), "2026-W37" (Mingguan,
+  /// minggu ISO) atau "2026-09-10" (Harian).
+  final String periodeKey;
+
+  /// Status alur konfirmasi (lihat backend `lib/slip-status.ts`). Slip `draft`
+  /// tidak pernah dikirim ke app. Nilai yang mungkin di sini:
+  /// `menunggu_konfirmasi` | `dikonfirmasi` | `ditolak` | `terkunci`.
+  final String statusSlip;
+
+  /// Alasan yang staff tulis saat menolak slip (hanya terisi setelah ditolak).
+  final String? alasanTolak;
+
+  /// Server: true hanya bila slip sudah `terkunci`. Selama false app HANYA
+  /// boleh menampilkan -- tanpa tombol unduh/simpan (permintaan klien).
+  final bool bisaUnduh;
+
   final String period;
   final DateTime periodStart;
   final DateTime periodEnd;
@@ -761,6 +780,11 @@ class SalarySlip {
   final int totalTunjanganUang;
 
   const SalarySlip({
+    required this.id,
+    required this.periodeKey,
+    required this.statusSlip,
+    required this.alasanTolak,
+    required this.bisaUnduh,
     required this.period,
     required this.periodStart,
     required this.periodEnd,
@@ -813,19 +837,19 @@ class SalarySlip {
       }).toList();
     }
 
-    final periodeRaw = (j['periode'] ?? '').toString(); // "2026-01"
-    final parts = periodeRaw.split('-');
-    final now = DateTime.now();
-    final year = parts.isNotEmpty ? int.tryParse(parts[0]) ?? now.year : now.year;
-    final month = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
-    final start = DateTime(year, month, 1);
-    final end = DateTime(year, month + 1, 0);
-    const monthNames = [
-      '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-    ];
-    final periodLabel =
-        (month >= 1 && month <= 12) ? '${monthNames[month]} $year' : periodeRaw;
+    // Periode bisa Bulanan ("2026-08"), Mingguan ("2026-W37") atau Harian
+    // ("2026-09-10"). Dulu hanya bentuk bulanan yang dipahami, jadi slip
+    // Mingguan tampil sebagai "Januari 2026". Rentang tanggal memakai snapshot
+    // server (`periodeStart`/`periodeEndExclusive`) bila ada.
+    final periodeRaw = (j['periode'] ?? '').toString();
+    final periode = SalarySlip.parsePeriode(
+      periodeRaw,
+      startIso: j['periodeStart']?.toString(),
+      endExclusiveIso: j['periodeEndExclusive']?.toString(),
+    );
+    final periodLabel = periode.label;
+    final start = periode.start;
+    final end = periode.end;
 
     final components = <SalaryComponent>[];
     void add(SalaryGroup group, String label, String note, int amount,
@@ -913,6 +937,18 @@ class SalarySlip {
     final bank = AppSession.staff?.namaBank ?? '';
 
     return SalarySlip(
+      id: (j['id'] ?? '').toString(),
+      periodeKey: periodeRaw,
+      statusSlip: (j['statusSlip'] ?? 'terkunci').toString(),
+      alasanTolak: (j['alasanTolak'] is String &&
+              (j['alasanTolak'] as String).trim().isNotEmpty)
+          ? (j['alasanTolak'] as String)
+          : null,
+      // Server yang memutuskan. Bila field tidak ada (backend lama) anggap
+      // hanya slip terkunci yang boleh diunduh.
+      bisaUnduh: j['bisaUnduh'] is bool
+          ? j['bisaUnduh'] as bool
+          : (j['statusSlip'] ?? 'terkunci') == 'terkunci',
       period: periodLabel,
       periodStart: start,
       periodEnd: end,
@@ -928,6 +964,118 @@ class SalarySlip {
       permissionHistory: parseHistory('permissionHistory'),
       gajiNetto: gi('gajiNetto'),
       totalTunjanganUang: gi('totalTunjanganUang'),
+    );
+  }
+
+  static const _bulan = [
+    '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
+  /// Label + rentang tanggal sebuah kunci periode. [startIso]/
+  /// [endExclusiveIso] adalah snapshot server (end EKSKLUSIF); bila tidak ada
+  /// rentang dihitung dari kuncinya.
+  static ({String label, DateTime start, DateTime end}) parsePeriode(
+    String key, {
+    String? startIso,
+    String? endExclusiveIso,
+  }) {
+    DateTime? serverDate(String? iso) {
+      if (iso == null || iso.isEmpty) return null;
+      final d = DateTime.tryParse(iso);
+      if (d == null) return null;
+      final u = d.toUtc(); // @db.Date = tengah malam UTC
+      return DateTime(u.year, u.month, u.day);
+    }
+
+    final snapStart = serverDate(startIso);
+    final snapEndExcl = serverDate(endExclusiveIso);
+    final snapEnd = snapEndExcl == null
+        ? null
+        : DateTime(snapEndExcl.year, snapEndExcl.month, snapEndExcl.day - 1);
+
+    final weekly = RegExp(r'^(\d{4})-W(\d{2})$').firstMatch(key);
+    if (weekly != null) {
+      final year = int.parse(weekly.group(1)!);
+      final week = int.parse(weekly.group(2)!);
+      // Kamis 4 Januari selalu berada di minggu ISO ke-1.
+      final jan4 = DateTime(year, 1, 4);
+      final monday1 = DateTime(year, 1, 4 - (jan4.weekday - 1));
+      final start = DateTime(monday1.year, monday1.month, monday1.day + (week - 1) * 7);
+      return (
+        label: 'Minggu ke-$week $year',
+        start: snapStart ?? start,
+        end: snapEnd ?? DateTime(start.year, start.month, start.day + 6),
+      );
+    }
+
+    final daily = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(key);
+    if (daily != null) {
+      final y = int.parse(daily.group(1)!);
+      final m = int.parse(daily.group(2)!);
+      final d = int.parse(daily.group(3)!);
+      final day = DateTime(y, m, d);
+      final name = (m >= 1 && m <= 12) ? _bulan[m] : daily.group(2)!;
+      return (label: '$d $name $y', start: snapStart ?? day, end: snapEnd ?? day);
+    }
+
+    final parts = key.split('-');
+    final now = DateTime.now();
+    final year = parts.isNotEmpty ? int.tryParse(parts[0]) ?? now.year : now.year;
+    final month = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
+    final label = (month >= 1 && month <= 12) ? '${_bulan[month]} $year' : key;
+    return (
+      label: label,
+      start: snapStart ?? DateTime(year, month, 1),
+      end: snapEnd ?? DateTime(year, month + 1, 0),
+    );
+  }
+
+  bool get perluKonfirmasi => statusSlip == 'menunggu_konfirmasi';
+  bool get sudahDikonfirmasi => statusSlip == 'dikonfirmasi';
+  bool get ditolak => statusSlip == 'ditolak';
+  bool get terkunci => statusSlip == 'terkunci';
+
+  /// Teks status untuk staff.
+  String get statusLabel {
+    switch (statusSlip) {
+      case 'menunggu_konfirmasi':
+        return 'Menunggu konfirmasi Anda';
+      case 'dikonfirmasi':
+        return 'Sudah Anda konfirmasi';
+      case 'ditolak':
+        return 'Anda menolak, menunggu revisi HR';
+      case 'terkunci':
+        return 'Final';
+      default:
+        return statusSlip;
+    }
+  }
+
+  /// Salinan dengan status alur konfirmasi yang baru (dipakai setelah staff
+  /// menekan Konfirmasi/Tolak, supaya layar langsung mengikuti tanpa muat ulang).
+  SalarySlip copyWith({String? statusSlip, String? alasanTolak, bool? bisaUnduh}) {
+    return SalarySlip(
+      id: id,
+      periodeKey: periodeKey,
+      statusSlip: statusSlip ?? this.statusSlip,
+      alasanTolak: alasanTolak ?? this.alasanTolak,
+      bisaUnduh: bisaUnduh ?? this.bisaUnduh,
+      period: period,
+      periodStart: periodStart,
+      periodEnd: periodEnd,
+      transferBy: transferBy,
+      components: components,
+      workingDays: workingDays,
+      presentDays: presentDays,
+      lateDays: lateDays,
+      overtimeHours: overtimeHours,
+      leaveDays: leaveDays,
+      permissionDays: permissionDays,
+      leaveHistory: leaveHistory,
+      permissionHistory: permissionHistory,
+      gajiNetto: gajiNetto,
+      totalTunjanganUang: totalTunjanganUang,
     );
   }
 

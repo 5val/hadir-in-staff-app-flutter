@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -106,10 +107,33 @@ class ApiClient {
       _send(() async => http.delete(_uri(path),
           headers: await _headers(auth: auth), body: jsonEncode(body ?? {})));
 
-  Future<ApiResponse> _send(Future<http.Response> Function() request) async {
-    http.Response res;
+  /// GET untuk respons biner (mis. PDF slip gaji). Non-2xx dipetakan ke
+  /// [ApiException] dengan pesan dari server, sama seperti request JSON.
+  Future<Uint8List> getBytes(String path,
+      {Map<String, dynamic>? query, bool auth = true}) async {
+    final res = await _execute(() async {
+      final headers = await _headers(auth: auth);
+      headers['Accept'] = '*/*';
+      return http.get(_uri(path, query), headers: headers);
+    });
+    if (res.statusCode >= 200 && res.statusCode < 300) return res.bodyBytes;
+
+    dynamic decoded;
     try {
-      res = await request().timeout(ApiConfig.timeout);
+      decoded = res.body.isNotEmpty ? jsonDecode(res.body) : null;
+    } catch (_) {
+      decoded = null;
+    }
+    throw ApiException(_errorMessage(decoded, res.statusCode),
+        statusCode: res.statusCode);
+  }
+
+  /// Menjalankan request dan menerjemahkan error jaringan menjadi
+  /// [ApiException] berbahasa manusia (dipakai [_send] dan [getBytes]).
+  Future<http.Response> _execute(
+      Future<http.Response> Function() request) async {
+    try {
+      return await request().timeout(ApiConfig.timeout);
     } on SocketException {
       throw ApiException(
           'Tidak dapat terhubung ke server. Pastikan HP dan komputer berada di jaringan WiFi yang sama.');
@@ -120,6 +144,10 @@ class ApiClient {
     } catch (e) {
       throw ApiException('Terjadi kesalahan jaringan.');
     }
+  }
+
+  Future<ApiResponse> _send(Future<http.Response> Function() request) async {
+    final res = await _execute(request);
 
     dynamic decoded;
     if (res.body.isNotEmpty) {

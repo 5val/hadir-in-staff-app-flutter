@@ -65,7 +65,7 @@ Map<String, dynamic> _slipPayload() => {
       'totalPendapatan': 5350000,
       'totalPotongan': 550000,
       'gajiNetto': 5850000,
-      'statusSlip': 'sent',
+      'statusSlip': 'terkunci',  // 'sent' diganti nama jadi 'terkunci' (2026-09-19)
       'statusBayar': 'paid',
       // ── statistik yang di-merge routes/mobile/gaji.ts ──
       'workingDays': 22,
@@ -225,6 +225,96 @@ void main() {
       expect(slip.lateDays, 2);
       // 22 hari kerja − 20 hadir − 1 cuti − 1 izin = 0 alpha
       expect(slip.absentDays, 0);
+    });
+  });
+
+  group('SalarySlip.fromApi — periode Bulanan/Mingguan/Harian', () {
+    test('slip Mingguan memakai label minggu ISO, bukan "Januari 2026"', () {
+      final slip = SalarySlip.fromApi(_slipPayload()..['periode'] = '2026-W37');
+
+      expect(slip.periodeKey, '2026-W37');
+      expect(slip.period, 'Minggu ke-37 2026');
+      // Minggu ISO 37 tahun 2026 = Senin 7 s/d Minggu 13 September.
+      expect(slip.periodStart, DateTime(2026, 9, 7));
+      expect(slip.periodEnd, DateTime(2026, 9, 13));
+    });
+
+    test('minggu ISO ke-1 yang dimulai di Desember tahun sebelumnya', () {
+      final slip = SalarySlip.fromApi(_slipPayload()..['periode'] = '2026-W01');
+
+      // 4 Januari 2026 hari Minggu -> Senin minggu ke-1 = 29 Desember 2025.
+      expect(slip.periodStart, DateTime(2025, 12, 29));
+      expect(slip.periodEnd, DateTime(2026, 1, 4));
+    });
+
+    test('slip Harian memakai tanggal sebagai label dan rentang satu hari', () {
+      final slip = SalarySlip.fromApi(_slipPayload()..['periode'] = '2026-09-10');
+
+      expect(slip.period, '10 September 2026');
+      expect(slip.periodStart, DateTime(2026, 9, 10));
+      expect(slip.periodEnd, DateTime(2026, 9, 10));
+    });
+
+    test('snapshot rentang dari server (end EKSKLUSIF) didahulukan', () {
+      // Bulanan dengan cutoff tanggal 26: 26 Jul .. 25 Agu, dilabeli "2026-08".
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['periode'] = '2026-08'
+        ..['periodeStart'] = '2026-07-26T00:00:00.000Z'
+        ..['periodeEndExclusive'] = '2026-08-26T00:00:00.000Z');
+
+      expect(slip.period, 'Agustus 2026');
+      expect(slip.periodStart, DateTime(2026, 7, 26));
+      expect(slip.periodEnd, DateTime(2026, 8, 25));
+    });
+  });
+
+  group('SalarySlip.fromApi — alur konfirmasi slip', () {
+    test('status dan alasan tolak dibaca dari server', () {
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['id'] = 'slip-9'
+        ..['statusSlip'] = 'ditolak'
+        ..['alasanTolak'] = 'Lembur saya kurang 2 jam'
+        ..['bisaUnduh'] = false);
+
+      expect(slip.id, 'slip-9');
+      expect(slip.ditolak, isTrue);
+      expect(slip.alasanTolak, 'Lembur saya kurang 2 jam');
+      expect(slip.bisaUnduh, isFalse);
+      expect(slip.statusLabel, contains('menunggu revisi'));
+    });
+
+    test('slip menunggu konfirmasi: bisa dikonfirmasi tapi TIDAK boleh diunduh', () {
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['statusSlip'] = 'menunggu_konfirmasi'
+        ..['bisaUnduh'] = false);
+
+      expect(slip.perluKonfirmasi, isTrue);
+      expect(slip.terkunci, isFalse);
+      expect(slip.bisaUnduh, isFalse);
+    });
+
+    test('bisaUnduh dari server didahulukan; tanpa field itu hanya slip terkunci yang boleh', () {
+      final terkunci = SalarySlip.fromApi(_slipPayload()..['statusSlip'] = 'terkunci');
+      expect(terkunci.bisaUnduh, isTrue);
+
+      final menunggu = SalarySlip.fromApi(_slipPayload()..['statusSlip'] = 'menunggu_konfirmasi');
+      expect(menunggu.bisaUnduh, isFalse);
+    });
+
+    test('alasanTolak kosong/spasi dianggap tidak ada', () {
+      final slip = SalarySlip.fromApi(_slipPayload()..['alasanTolak'] = '   ');
+      expect(slip.alasanTolak, isNull);
+    });
+
+    test('copyWith mengganti status saja; angka dan rincian tetap', () {
+      final slip = SalarySlip.fromApi(_slipPayload()..['statusSlip'] = 'menunggu_konfirmasi');
+      final after = slip.copyWith(statusSlip: 'dikonfirmasi');
+
+      expect(after.sudahDikonfirmasi, isTrue);
+      expect(after.gajiNetto, slip.gajiNetto);
+      expect(after.components.length, slip.components.length);
+      expect(after.period, slip.period);
+      expect(after.id, slip.id);
     });
   });
 }

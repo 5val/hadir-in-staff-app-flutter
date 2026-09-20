@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/salary_service.dart';
 import '../services/api_client.dart';
+import '../services/google_drive_service.dart';
+import '../services/slip_drive_sync.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY SCREEN
@@ -40,19 +39,28 @@ class _SalaryScreenState extends State<SalaryScreen> {
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final list = await SalaryService.mySlips();
       if (!mounted) return;
       setState(() {
         _slips = list;
         _loading = false;
+        _error = null;
       });
+      // Slip yang sudah terkunci disimpan ke Google Drive staff di latar
+      // (hanya bila akun Google sudah tersambung; tidak pernah memunculkan
+      // dialog login). Tombol manual ada di layar detail.
+      SlipDriveSync.autoSyncLocked(list);
     } on ApiException catch (e) {
+      if (silent) return; // muat ulang diam-diam tidak boleh menimpa daftar
+
       if (!mounted) return;
       setState(() {
         _error = e.message;
@@ -263,8 +271,8 @@ class _SalaryScreenState extends State<SalaryScreen> {
   // ── Salary Card (clickable, no Lihat Detail button) ──────────
   Widget _buildSalaryCard(SalarySlip slip) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => SalaryDetailScreen(
@@ -273,6 +281,8 @@ class _SalaryScreenState extends State<SalaryScreen> {
             ),
           ),
         );
+        // Status slip bisa berubah di layar detail (konfirmasi/tolak).
+        if (mounted) _load(silent: true);
       },
       child: Container(
         width: double.infinity,
@@ -307,6 +317,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                         color: Colors.white.withOpacity(0.9),
                       )),
                 ),
+                _statusChip(slip),
                 // Tap hint — subtle, no dedicated button
                 // Row(
                 //   children: [
@@ -383,6 +394,43 @@ class _SalaryScreenState extends State<SalaryScreen> {
             // ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Status alur konfirmasi di kartu. Slip yang menunggu konfirmasi dibuat
+  /// menonjol (lime) supaya staff tahu ada yang harus dilakukan.
+  Widget _statusChip(SalarySlip slip) {
+    final needsAction = slip.perluKonfirmasi;
+    final Color bg;
+    final Color fg;
+    switch (slip.statusSlip) {
+      case 'menunggu_konfirmasi':
+        bg = AppColors.brandLime;
+        fg = AppColors.brandNavy;
+        break;
+      case 'ditolak':
+        bg = const Color(0xFFFCA5A5);
+        fg = const Color(0xFF7F1D1D);
+        break;
+      default:
+        bg = Colors.white.withOpacity(0.12);
+        fg = Colors.white.withOpacity(0.9);
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (needsAction) ...[
+            Icon(Icons.notifications_active_rounded, size: 12, color: fg),
+            const SizedBox(width: 4),
+          ],
+          Text(slip.statusLabel,
+              style: GoogleFonts.inter(
+                  fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
+        ],
       ),
     );
   }
@@ -583,7 +631,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY DETAIL SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-class SalaryDetailScreen extends StatelessWidget {
+class SalaryDetailScreen extends StatefulWidget {
   const SalaryDetailScreen({
     super.key,
     required this.slip,
@@ -593,283 +641,264 @@ class SalaryDetailScreen extends StatelessWidget {
   final SalarySlip slip;
   final UserProfile user;
 
+  @override
+  State<SalaryDetailScreen> createState() => _SalaryDetailScreenState();
+}
+
+class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
+  // Status slip bisa berubah di layar ini (staff menekan Konfirmasi/Tolak), jadi
+  // salinan yang diperbarui disimpan di state dan seluruh isi layar membacanya.
+  late SalarySlip slip = widget.slip;
+  UserProfile get user => widget.user;
+
+  bool _busy = false;
+  bool? _savedToDrive;
+
+  @override
+  void initState() {
+    super.initState();
+    if (slip.bisaUnduh) {
+      SlipDriveSync.isSaved(slip.id).then((v) {
+        if (mounted) setState(() => _savedToDrive = v);
+      });
+    }
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   String _fmt(int amount) =>
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0)
           .format(amount);
 
-  // ── Generate & share PDF ──────────────────────────────────
+  // ── PDF: dari server, template yang sama dengan email HR ─────────
+  //
+  // Dulu app menyusun PDF-nya sendiri di HP (template kedua yang berbeda dari
+  // PDF server). Sekarang yang diunduh adalah PDF yang dirender server, jadi
+  // tampilan, identitas (NPWP/BPJS) dan angkanya identik di mana pun.
   Future<void> _downloadPdf(BuildContext context) async {
-    // Sama seperti tampilan layar: tunjangan berdiri sendiri di bawah gaji
-    // bersih, jadi "pendapatan" di PDF = pendapatan pokok + tunjangan.
-    final income = slip.components
-        .where((c) =>
-            c.group == SalaryGroup.pendapatanPokok ||
-            c.group == SalaryGroup.tunjangan)
-        .toList();
-    final deductions = slip.components.where((c) => c.isDeduction).toList();
+    if (!slip.bisaUnduh || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final bytes = await SalaryService.downloadPdf(slip.id);
+      await Printing.sharePdf(bytes: bytes, filename: SlipDriveSync.filenameFor(slip));
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-    final pdf = pw.Document();
+  Future<void> _saveToDrive() async {
+    if (!slip.bisaUnduh || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final outcome = await SlipDriveSync.save(slip, interactive: true);
+      if (!mounted) return;
+      setState(() => _savedToDrive = true);
+      _snack(outcome == DriveSaveOutcome.alreadySaved
+          ? 'Slip ini sudah ada di Google Drive Anda.'
+          : 'Slip disimpan ke Google Drive Anda (folder "Hadir-In - Slip Gaji").');
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } catch (e) {
+      _snack(e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-    const navyColor = PdfColor.fromInt(0xFF0F2D5A);
-    const limeColor = PdfColor.fromInt(0xFFCBF563);
-    const slate100 = PdfColor.fromInt(0xFFF1F5F9);
-    const slate500 = PdfColor.fromInt(0xFF64748B);
-    const slate700 = PdfColor.fromInt(0xFF334155);
-    const dangerColor = PdfColor.fromInt(0xFFEF4444);
-    const borderColor = PdfColor.fromInt(0xFFE2E8F0);
+  // ── Konfirmasi / tolak slip ───────────────────────────────
+  Future<void> _konfirmasi() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Konfirmasi slip gaji?'),
+        content: Text(
+            'Dengan mengonfirmasi, Anda menyatakan angka di slip ${slip.period} sudah benar. '
+            'Setelah itu HR akan mengunci slip dan gaji bisa dicairkan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ya, sudah benar')),
+        ],
+      ),
+    );
+    if (ok != true || _busy) return;
 
-    pw.TextStyle bold(double sz, {PdfColor color = slate700}) => pw.TextStyle(
-        fontSize: sz, fontWeight: pw.FontWeight.bold, color: color);
-    pw.TextStyle regular(double sz, {PdfColor color = slate700}) =>
-        pw.TextStyle(fontSize: sz, color: color);
+    setState(() => _busy = true);
+    try {
+      await SalaryService.konfirmasi(slip.id);
+      if (!mounted) return;
+      setState(() => slip = slip.copyWith(statusSlip: 'dikonfirmasi'));
+      _snack('Slip dikonfirmasi. Menunggu HR mengunci slip.');
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-    pw.Widget th(String text, {pw.TextAlign align = pw.TextAlign.left}) =>
-        pw.Container(
-          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          color: navyColor,
-          child: pw.Text(text,
-              textAlign: align, style: bold(9, color: PdfColors.white)),
-        );
+  Future<void> _tolak() async {
+    final alasan = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const _TolakSlipDialog(),
+    );
+    if (alasan == null || _busy) return;
 
-    pw.Widget td(
-      String text, {
-      pw.TextAlign align = pw.TextAlign.left,
-      PdfColor color = slate700,
-      bool isBold = false,
-      bool isAlt = false,
-    }) =>
-        pw.Container(
-          color: isAlt ? slate100 : PdfColors.white,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: pw.Text(text,
-              textAlign: align,
-              style: isBold ? bold(9, color: color) : regular(9, color: color)),
-        );
+    setState(() => _busy = true);
+    try {
+      await SalaryService.tolak(slip.id, alasan);
+      if (!mounted) return;
+      setState(() => slip = slip.copyWith(statusSlip: 'ditolak', alasanTolak: alasan.trim()));
+      _snack('Slip ditolak. HR akan memeriksa dan merevisinya.');
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-    pw.Widget summaryRow(
-      String label,
-      String value, {
-      bool isDeduction = false,
-      bool isTotal = false,
-    }) =>
-        pw.Padding(
-          padding: const pw.EdgeInsets.symmetric(vertical: 5),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(label,
-                  style: isTotal
-                      ? bold(10, color: PdfColors.white)
-                      : regular(9, color: PdfColor.fromInt(0xFFCBD5E1))),
-              pw.Text(value,
-                  style: isTotal
-                      ? bold(12, color: limeColor)
-                      : bold(10,
-                          color: isDeduction
-                              ? PdfColor.fromInt(0xFFFCA5A5)
-                              : PdfColors.white)),
-            ],
+  /// Banner status di atas rincian: menjelaskan apa yang sedang terjadi pada
+  /// slip dan apa yang bisa dilakukan staff.
+  Widget _buildStatusBanner() {
+    final IconData icon;
+    final Color bg;
+    final Color fg;
+    final String title;
+    final String body;
+    switch (slip.statusSlip) {
+      case 'menunggu_konfirmasi':
+        icon = Icons.fact_check_outlined;
+        bg = const Color(0xFFEFF6FF);
+        fg = const Color(0xFF1D4ED8);
+        title = 'Mohon periksa slip ini';
+        body = 'HR meminta Anda memeriksa angka di bawah. Jika sudah benar tekan '
+            '"Konfirmasi". Jika ada yang salah tekan "Ada yang salah" dan tulis alasannya. '
+            'Slip baru bisa diunduh setelah dikunci HR.';
+        break;
+      case 'dikonfirmasi':
+        icon = Icons.hourglass_top_rounded;
+        bg = const Color(0xFFECFDF5);
+        fg = const Color(0xFF047857);
+        title = 'Sudah Anda konfirmasi';
+        body = 'Menunggu HR mengunci slip. Setelah dikunci slip bisa diunduh.';
+        break;
+      case 'ditolak':
+        icon = Icons.report_gmailerrorred_rounded;
+        bg = const Color(0xFFFEF2F2);
+        fg = const Color(0xFFB91C1C);
+        title = 'Anda menolak slip ini';
+        body = 'HR akan memeriksa dan merevisinya, lalu mengirim ulang untuk Anda konfirmasi.'
+            '${slip.alasanTolak != null ? '\n\nAlasan Anda: ${slip.alasanTolak}' : ''}';
+        break;
+      default:
+        return _buildFinalBanner();
+    }
+    return _banner(icon, bg, fg, title, body);
+  }
+
+  Widget _buildFinalBanner() {
+    final saved = _savedToDrive == true;
+    return _banner(
+      Icons.verified_rounded,
+      const Color(0xFFF0FDF4),
+      const Color(0xFF15803D),
+      'Slip final',
+      'Slip ini sudah dikunci HR dan bisa diunduh.',
+      action: Row(
+        children: [
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _downloadPdf(context),
+            icon: const Icon(Icons.download_rounded, size: 18),
+            label: const Text('Unduh PDF'),
           ),
-        );
-
-    pdf.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        build: (ctx) => [
-          pw.Container(
-            padding: const pw.EdgeInsets.all(20),
-            decoration: pw.BoxDecoration(
-              color: navyColor,
-              borderRadius: pw.BorderRadius.circular(12),
-            ),
-            child: pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text('SLIP GAJI KARYAWAN',
-                        style: bold(15, color: PdfColors.white)),
-                    pw.SizedBox(height: 4),
-                    pw.Text(slip.period, style: bold(10, color: limeColor)),
-                  ],
-                ),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text(user.name, style: bold(11, color: PdfColors.white)),
-                    pw.SizedBox(height: 3),
-                    pw.Text(user.position.name,
-                        style: regular(9, color: PdfColor.fromInt(0xFFCBD5E1))),
-                    pw.SizedBox(height: 3),
-                    pw.Text('NIK: ${user.nik}',
-                        style: regular(9, color: PdfColor.fromInt(0xFF94A3B8))),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 14),
-          pw.Container(
-            padding: const pw.EdgeInsets.all(12),
-            decoration: pw.BoxDecoration(
-              color: slate100,
-              border: pw.Border.all(color: borderColor, width: 0.5),
-              borderRadius: pw.BorderRadius.circular(8),
-            ),
-            child: pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-              children: [
-                pw.Column(children: [
-                  pw.Text('${slip.workDays} hari',
-                      style: bold(11, color: navyColor)),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Hari Kerja', style: regular(8, color: slate500)),
-                ]),
-                pw.Column(children: [
-                  pw.Text('${slip.presentDays} hari',
-                      style: bold(11, color: PdfColor.fromInt(0xFF16A34A))),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Hadir', style: regular(8, color: slate500)),
-                ]),
-                pw.Column(children: [
-                  pw.Text('${slip.absentDays} hari',
-                      style: bold(11, color: dangerColor)),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Tidak Hadir', style: regular(8, color: slate500)),
-                ]),
-                pw.Column(children: [
-                  pw.Text('${slip.leaveDays ?? 0} hari',
-                      style: bold(11, color: PdfColor.fromInt(0xFF7C3AED))),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Cuti', style: regular(8, color: slate500)),
-                ]),
-                pw.Column(children: [
-                  pw.Text('${slip.permissionDays ?? 0} hari',
-                      style: bold(11, color: PdfColor.fromInt(0xFF0891B2))),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Izin', style: regular(8, color: slate500)),
-                ]),
-                pw.Column(children: [
-                  pw.Text(
-                    '${DateFormat("dd/MM").format(slip.periodStart)} - ${DateFormat("dd/MM/yy").format(slip.periodEnd)}',
-                    style: bold(10, color: slate700),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Periode', style: regular(8, color: slate500)),
-                ]),
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 10),
-          pw.Container(
-            padding: const pw.EdgeInsets.all(16),
-            decoration: pw.BoxDecoration(
-              color: navyColor,
-              borderRadius: pw.BorderRadius.circular(10),
-            ),
-            child: pw.Column(
-              children: [
-                // Sprint 2 EPIC 9 — baris ringkasan HARUS menjumlah tepat ke
-                // Take Home Pay (`gajiNetto` server), sama seperti kartu
-                // ringkasan di layar:
-                //   Pendapatan Pokok − Total Potongan + Tunjangan Tunai = THP
-                summaryRow('Pendapatan Pokok', _fmt(slip.pendapatanPokok)),
-                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Total Potongan', '- ${_fmt(slip.totalDeduction)}',
-                    isDeduction: true),
-                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Tunjangan Tunai', _fmt(slip.totalTunjanganUang)),
-                pw.Divider(color: PdfColor.fromInt(0x33FFFFFF), thickness: 0.5),
-                summaryRow('Take Home Pay', _fmt(slip.takeHomePay),
-                    isTotal: true),
-                if (slip.tunjanganDiluarThp > 0) ...[
-                  pw.SizedBox(height: 6),
-                  pw.Text(
-                    'Tunjangan barang, fasilitas & uang makan senilai '
-                    '${_fmt(slip.tunjanganDiluarThp)} tercantum di rincian, '
-                    'tetapi tidak menambah Take Home Pay.',
-                    style: regular(8, color: PdfColor.fromInt(0xFF94A3B8)),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          pw.SizedBox(height: 18),
-          pw.Text('Rincian Pendapatan', style: bold(11)),
-          pw.SizedBox(height: 6),
-          pw.Table(
-            border: pw.TableBorder.all(color: borderColor, width: 0.5),
-            columnWidths: const {
-              0: pw.FlexColumnWidth(3),
-              1: pw.FlexColumnWidth(4),
-              2: pw.FlexColumnWidth(3),
-            },
-            children: [
-              pw.TableRow(children: [
-                th('Komponen'),
-                th('Keterangan'),
-                th('Jumlah', align: pw.TextAlign.right),
-              ]),
-              ...income.asMap().entries.map((e) => pw.TableRow(children: [
-                    td(e.value.label, isBold: true, isAlt: e.key.isOdd),
-                    // PDF tidak punya badge — pakai catatan versi panjang
-                    // supaya item non-THP tetap jelas di slip cetak.
-                    td(e.value.noteWithThpNotice,
-                        color: slate500, isAlt: e.key.isOdd),
-                    td(_fmt(e.value.amount),
-                        align: pw.TextAlign.right,
-                        isBold: true,
-                        isAlt: e.key.isOdd),
-                  ])),
-            ],
-          ),
-          pw.SizedBox(height: 16),
-          pw.Text('Rincian Potongan', style: bold(11)),
-          pw.SizedBox(height: 6),
-          pw.Table(
-            border: pw.TableBorder.all(color: borderColor, width: 0.5),
-            columnWidths: const {
-              0: pw.FlexColumnWidth(3),
-              1: pw.FlexColumnWidth(4),
-              2: pw.FlexColumnWidth(3),
-            },
-            children: [
-              pw.TableRow(children: [
-                th('Komponen'),
-                th('Keterangan'),
-                th('Jumlah', align: pw.TextAlign.right),
-              ]),
-              ...deductions.asMap().entries.map((e) => pw.TableRow(children: [
-                    td(e.value.label, isBold: true, isAlt: e.key.isOdd),
-                    td(e.value.noteWithThpNotice,
-                        color: slate500, isAlt: e.key.isOdd),
-                    td('- ${_fmt(e.value.amount)}',
-                        align: pw.TextAlign.right,
-                        color: dangerColor,
-                        isBold: true,
-                        isAlt: e.key.isOdd),
-                  ])),
-            ],
-          ),
-          pw.SizedBox(height: 14),
-          pw.Center(
-            child: pw.Text(
-              'Dicetak pada ${DateFormat("dd MMMM yyyy, HH:mm").format(DateTime.now())} — Dokumen ini digenerate otomatis oleh sistem.',
-              style: regular(8, color: PdfColor.fromInt(0xFF94A3B8)),
-              textAlign: pw.TextAlign.center,
-            ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: (_busy || saved) ? null : _saveToDrive,
+            icon: Icon(saved ? Icons.check_circle_rounded : Icons.cloud_upload_outlined, size: 18),
+            label: Text(saved ? 'Tersimpan di Drive' : 'Simpan ke Google Drive'),
           ),
         ],
       ),
     );
+  }
 
-    await Printing.sharePdf(
-      bytes: await pdf.save(),
-      filename:
-          'slip_gaji_${slip.period.replaceAll(' ', '_').replaceAll('/', '-')}.pdf',
+  Widget _banner(IconData icon, Color bg, Color fg, String title, String body, {Widget? action}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: fg.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: fg, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(title,
+                    style: GoogleFonts.inter(fontSize: 13.5, fontWeight: FontWeight.w800, color: fg)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(body, style: GoogleFonts.inter(fontSize: 12, height: 1.45, color: fg)),
+          if (action != null) ...[const SizedBox(height: 10), action],
+        ],
+      ),
+    );
+  }
+
+  /// Bilah aksi di bawah layar selama slip menunggu konfirmasi.
+  Widget _buildKonfirmasiBar() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        decoration: const BoxDecoration(
+          color: AppColors.white,
+          border: Border(top: BorderSide(color: AppColors.slate200)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _busy ? null : _tolak,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFB91C1C),
+                  side: const BorderSide(color: Color(0xFFFCA5A5)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Ada yang salah'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: FilledButton(
+                onPressed: _busy ? null : _konfirmasi,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.brandNavy,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: _busy
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Konfirmasi, sudah benar'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -894,6 +923,7 @@ class SalaryDetailScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
+      bottomNavigationBar: slip.perluKonfirmasi ? _buildKonfirmasiBar() : null,
       body: SafeArea(
         child: Column(
           children: [
@@ -925,6 +955,10 @@ class SalaryDetailScreen extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // Unduh hanya untuk slip yang sudah dikunci HR (server yang
+                  // memutuskan lewat `bisaUnduh`); selama masih konfirmasi
+                  // slip ini hanya untuk dilihat.
+                  if (slip.bisaUnduh)
                   GestureDetector(
                     onTap: () => _downloadPdf(context),
                     child: Container(
@@ -965,6 +999,7 @@ class SalaryDetailScreen extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
                 children: [
+                  _buildStatusBanner(),
                   _buildHeroCard(),
                   const SizedBox(height: 16),
                   _buildAttendanceInfo(context),
@@ -1871,6 +1906,63 @@ class _SummaryRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIALOG: alasan menolak slip
+// ─────────────────────────────────────────────────────────────────────────────
+class _TolakSlipDialog extends StatefulWidget {
+  const _TolakSlipDialog();
+
+  @override
+  State<_TolakSlipDialog> createState() => _TolakSlipDialogState();
+}
+
+class _TolakSlipDialogState extends State<_TolakSlipDialog> {
+  final _controller = TextEditingController();
+  static const _min = 5;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = _controller.text.trim().length >= _min;
+    return AlertDialog(
+      title: const Text('Apa yang salah?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+              'Tulis bagian yang tidak sesuai supaya HR bisa memperbaikinya, '
+              'mis. "Lembur saya kurang 2 jam".'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLines: 3,
+            maxLength: 500,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'Alasan (minimal 5 karakter)',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+        FilledButton(
+          onPressed: valid ? () => Navigator.pop(context, _controller.text.trim()) : null,
+          child: const Text('Kirim ke HR'),
+        ),
+      ],
     );
   }
 }

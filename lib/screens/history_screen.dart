@@ -364,7 +364,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       ),
                                     if ((r.overtimeMinutes ?? 0) > 0)
                                       Text(
-                                        'Lembur ${r.overtimeMinutes} menit',
+                                        'Lembur ${r.overtimeMinutes} jam',
                                         style: AppText.caption.copyWith(
                                             color: AppColors.brandNavy),
                                       ),
