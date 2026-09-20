@@ -796,7 +796,10 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
             '${slip.alasanTolak != null ? '\n\nAlasan Anda: ${slip.alasanTolak}' : ''}';
         break;
       default:
-        return _buildFinalBanner();
+        // Banner "Slip final" (dengan tombol unduh) hanya untuk slip yang
+        // memang boleh diunduh menurut server; status lain yang tak dikenal
+        // tidak menampilkan apa pun ketimbang tombol yang tidak berfungsi.
+        return slip.bisaUnduh ? _buildFinalBanner() : const SizedBox.shrink();
     }
     return _banner(icon, bg, fg, title, body);
   }
@@ -809,7 +812,11 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       const Color(0xFF15803D),
       'Slip final',
       'Slip ini sudah dikunci HR dan bisa diunduh.',
-      action: Row(
+      // Wrap, bukan Row: dua tombol berdampingan tidak muat di layar sempit
+      // (overflow 100+ px di HP 360dp) dan harus turun ke baris berikutnya.
+      action: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
           OutlinedButton.icon(
             onPressed: _busy ? null : () => _downloadPdf(context),
