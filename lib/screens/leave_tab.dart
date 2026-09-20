@@ -727,6 +727,8 @@ class _LeaveTabState extends State<LeaveTab> {
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          _buildHolidayOvertimeCard(),
           const SizedBox(height: 20),
 
           Row(
@@ -900,6 +902,103 @@ class _LeaveTabState extends State<LeaveTab> {
         ),
       ),
     );
+  }
+
+  // ── Lembur hari libur (2026-09-20, meeting klien) ───────────────
+  //
+  // Beda dengan lembur hari biasa (diajukan SESUDAH check-out), kerja di hari
+  // libur harus diajukan dan disetujui SEBELUM harinya. Setelah disetujui,
+  // check-in di hari itu dibuka dan seluruh jam kerjanya dihitung lembur.
+
+  /// Hari libur mendatang yang belum punya pengajuan aktif.
+  List<({DateTime tanggal, String nama})> _holidaysAvailableForOvertime() {
+    final taken = _myOvertime
+        .where((r) => r.status != 'rejected')
+        .map((r) => WorkCalendar.dateKey(r.tanggal))
+        .toSet();
+    return AppCalendar.instance
+        .upcomingHolidays()
+        .where((h) => !taken.contains(WorkCalendar.dateKey(h.tanggal)))
+        .toList();
+  }
+
+  Widget _buildHolidayOvertimeCard() {
+    final available = _holidaysAvailableForOvertime();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.brandOrange.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.event_available_rounded,
+                  color: AppColors.brandOrange, size: 20),
+              const SizedBox(width: 8),
+              Text('Lembur di Hari Libur',
+                  style: AppText.body1.copyWith(fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Perlu bekerja di tanggal merah? Ajukan SEBELUM harinya. Setelah '
+            'disetujui, Anda bisa check-in di hari itu dan seluruh jam kerja '
+            'dihitung lembur.',
+            style: AppText.caption,
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: available.isEmpty ? null : _showHolidayOvertimeDialog,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(available.isEmpty
+                  ? 'Tidak ada hari libur yang bisa diajukan'
+                  : 'Ajukan Lembur Hari Libur'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.brandNavy,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showHolidayOvertimeDialog() async {
+    final holidays = _holidaysAvailableForOvertime();
+    if (holidays.isEmpty) return;
+    final input = await showDialog<_HolidayOvertimeInput>(
+      context: context,
+      builder: (_) => _HolidayOvertimeDialog(holidays: holidays),
+    );
+    if (input == null) return;
+
+    try {
+      await OvertimeService.submit(
+        tanggal: input.tanggal,
+        jamMulai: input.jamMulai,
+        jamSelesai: input.jamSelesai,
+        alasan: input.alasan,
+      );
+      if (!mounted) return;
+      await _loadOvertimeDays();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Pengajuan lembur hari libur dikirim. Anda baru bisa check-in di hari itu setelah disetujui.'),
+      ));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
+      );
+    }
   }
 
   /// Dialog pengajuan lembur -> kirim ke backend (bukan lagi menandai objek
@@ -1451,8 +1550,10 @@ class _OvertimeHistoryTile extends StatelessWidget {
                         .copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text(
-                  '${record.jamMulai} – ${record.jamSelesai} '
-                  '(${record.durasiJam.toStringAsFixed(record.durasiJam % 1 == 0 ? 0 : 1)} jam)',
+                  record.isHariLibur
+                      ? 'Hari libur · rencana ${record.jamMulai} – ${record.jamSelesai}'
+                      : '${record.jamMulai} – ${record.jamSelesai} '
+                          '(${record.durasiJam.toStringAsFixed(record.durasiJam % 1 == 0 ? 0 : 1)} jam)',
                   style: AppText.caption,
                 ),
                 if (record.alasan.isNotEmpty) ...[
@@ -3294,6 +3395,168 @@ class _OvertimeRequestDialogState extends State<_OvertimeRequestDialog> {
               color: Colors.white,
             ),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIALOG: pengajuan lembur hari libur (di muka)
+// ─────────────────────────────────────────────────────────────────────────────
+class _HolidayOvertimeInput {
+  final DateTime tanggal;
+  final String jamMulai;
+  final String jamSelesai;
+  final String alasan;
+
+  const _HolidayOvertimeInput({
+    required this.tanggal,
+    required this.jamMulai,
+    required this.jamSelesai,
+    required this.alasan,
+  });
+}
+
+class _HolidayOvertimeDialog extends StatefulWidget {
+  final List<({DateTime tanggal, String nama})> holidays;
+
+  const _HolidayOvertimeDialog({required this.holidays});
+
+  @override
+  State<_HolidayOvertimeDialog> createState() => _HolidayOvertimeDialogState();
+}
+
+class _HolidayOvertimeDialogState extends State<_HolidayOvertimeDialog> {
+  final _reasonCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  int _selected = 0;
+  TimeOfDay _mulai = const TimeOfDay(hour: 8, minute: 0);
+  TimeOfDay _selesai = const TimeOfDay(hour: 17, minute: 0);
+
+  @override
+  void dispose() {
+    _reasonCtrl.dispose();
+    super.dispose();
+  }
+
+  static String _hhmm(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _pickTime(bool isStart) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: isStart ? _mulai : _selesai,
+      builder: (ctx, child) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (picked == null) return;
+    setState(() => isStart ? _mulai = picked : _selesai = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final df = DateFormat('EEEE, dd MMMM yyyy', 'id_ID');
+    final sameTime = _hhmm(_mulai) == _hhmm(_selesai);
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      title: const Text('Ajukan Lembur Hari Libur'),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Tanggal', style: AppText.label),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<int>(
+                value: _selected,
+                isExpanded: true,
+                items: [
+                  for (var i = 0; i < widget.holidays.length; i++)
+                    DropdownMenuItem(
+                      value: i,
+                      child: Text(
+                        '${df.format(widget.holidays[i].tanggal)} - ${widget.holidays[i].nama}',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _selected = v ?? 0),
+              ),
+              const SizedBox(height: 14),
+              Text('Rencana jam kerja', style: AppText.label),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _pickTime(true),
+                      child: Text('Mulai ${_hhmm(_mulai)}'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _pickTime(false),
+                      child: Text('Selesai ${_hhmm(_selesai)}'),
+                    ),
+                  ),
+                ],
+              ),
+              if (sameTime)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text('Jam mulai dan selesai tidak boleh sama.',
+                      style: AppText.caption.copyWith(color: AppColors.danger)),
+                ),
+              const SizedBox(height: 6),
+              Text(
+                'Ini hanya rencana. Yang dihitung nanti adalah seluruh jam '
+                'Anda benar-benar bekerja (check-in sampai check-out).',
+                style: AppText.caption,
+              ),
+              const SizedBox(height: 14),
+              Text('Alasan', style: AppText.label),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _reasonCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'Contoh: Jaga toko karena ada acara di mal',
+                ),
+                validator: (v) => (v == null || v.trim().isEmpty)
+                    ? 'Masukkan alasan'
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal')),
+        FilledButton(
+          onPressed: sameTime
+              ? null
+              : () {
+                  if (!_formKey.currentState!.validate()) return;
+                  Navigator.pop(
+                    context,
+                    _HolidayOvertimeInput(
+                      tanggal: widget.holidays[_selected].tanggal,
+                      jamMulai: _hhmm(_mulai),
+                      jamSelesai: _hhmm(_selesai),
+                      alasan: _reasonCtrl.text.trim(),
+                    ),
+                  );
+                },
+          child: const Text('Kirim'),
         ),
       ],
     );

@@ -44,6 +44,16 @@ class TodayHolidayStatus {
 
   final bool dikecualikanLembur;
 
+  /// Jendela jam RENCANA pada pengajuan lembur hari libur yang disetujui untuk
+  /// hari ini ("HH:mm"), null bila hari ini bukan kerja lembur hari libur.
+  /// Dipakai popup konfirmasi sebelum check-in.
+  final String? lemburJamMulai;
+  final String? lemburJamSelesai;
+
+  /// Hari ini staff bekerja di hari libur dengan lembur yang sudah disetujui:
+  /// seluruh jam kerjanya dihitung lembur dan jadwal shift tidak berlaku.
+  bool get kerjaHariLibur => isLibur && dikecualikanLembur;
+
   const TodayHolidayStatus({
     this.isLibur = false,
     this.namaLibur,
@@ -51,6 +61,8 @@ class TodayHolidayStatus {
     this.bolehAbsen = true,
     this.alasan,
     this.dikecualikanLembur = false,
+    this.lemburJamMulai,
+    this.lemburJamSelesai,
   });
 
   /// Default aman ketika data belum termuat / server versi lama tidak
@@ -59,17 +71,24 @@ class TodayHolidayStatus {
   /// memvalidasi ulang saat check-in.
   static const unknown = TodayHolidayStatus();
 
-  factory TodayHolidayStatus.fromApi(Map<String, dynamic> j) => TodayHolidayStatus(
-        isLibur: j['isLibur'] == true,
-        namaLibur: (j['namaLibur'] as Object?)?.toString(),
-        tipeLibur: (j['tipeLibur'] as Object?)?.toString(),
-        // Hanya `false` eksplisit yang memblokir; nilai hilang/aneh
-        // diperlakukan sebagai boleh absen (fail-open, sama seperti
-        // [unknown]).
-        bolehAbsen: j['bolehAbsen'] != false,
-        alasan: (j['alasan'] as Object?)?.toString(),
-        dikecualikanLembur: j['dikecualikanLembur'] == true,
-      );
+  factory TodayHolidayStatus.fromApi(Map<String, dynamic> j) {
+    final window = j['lemburHariLibur'] is Map
+        ? Map<String, dynamic>.from(j['lemburHariLibur'] as Map)
+        : const <String, dynamic>{};
+    return TodayHolidayStatus(
+      isLibur: j['isLibur'] == true,
+      namaLibur: (j['namaLibur'] as Object?)?.toString(),
+      tipeLibur: (j['tipeLibur'] as Object?)?.toString(),
+      // Hanya `false` eksplisit yang memblokir; nilai hilang/aneh
+      // diperlakukan sebagai boleh absen (fail-open, sama seperti
+      // [unknown]).
+      bolehAbsen: j['bolehAbsen'] != false,
+      alasan: (j['alasan'] as Object?)?.toString(),
+      dikecualikanLembur: j['dikecualikanLembur'] == true,
+      lemburJamMulai: window['jamMulai']?.toString(),
+      lemburJamSelesai: window['jamSelesai']?.toString(),
+    );
+  }
 }
 
 /// Kalender kerja staff: hari libur + hari kerja shift-nya.
@@ -148,6 +167,21 @@ class WorkCalendar {
       '${d.day.toString().padLeft(2, '0')}';
 
   bool isHoliday(DateTime d) => holidayByDate.containsKey(dateKey(d));
+
+  /// Hari libur dari HARI INI ke depan (terdekat dulu), untuk memilih tanggal
+  /// pengajuan lembur hari libur. Server tetap yang memvalidasi.
+  List<({DateTime tanggal, String nama})> upcomingHolidays({DateTime? today}) {
+    final now = today ?? DateTime.now();
+    final todayKey = dateKey(now);
+    final result = <({DateTime tanggal, String nama})>[];
+    holidayByDate.forEach((key, nama) {
+      if (key.compareTo(todayKey) < 0) return;
+      final d = DateTime.tryParse(key);
+      if (d != null) result.add((tanggal: d, nama: nama));
+    });
+    result.sort((a, b) => a.tanggal.compareTo(b.tanggal));
+    return result;
+  }
 
   String? holidayName(DateTime d) => holidayByDate[dateKey(d)];
 

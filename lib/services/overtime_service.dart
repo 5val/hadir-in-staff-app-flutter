@@ -86,6 +86,10 @@ class OvertimeRequestRecord {
   final String status;
   final double durasiJam;
 
+  /// Pengajuan kerja di hari libur (diajukan di muka; jam di atas adalah
+  /// jendela RENCANA, jam final baru diketahui setelah check-out).
+  final bool isHariLibur;
+
   OvertimeRequestRecord({
     required this.id,
     required this.tanggal,
@@ -94,6 +98,7 @@ class OvertimeRequestRecord {
     required this.alasan,
     required this.status,
     required this.durasiJam,
+    this.isHariLibur = false,
   });
 
   factory OvertimeRequestRecord.fromApi(Map<String, dynamic> j) {
@@ -106,6 +111,7 @@ class OvertimeRequestRecord {
       alasan: (j['alasan'] ?? '').toString(),
       status: (j['status'] ?? 'pending').toString(),
       durasiJam: (j['durasiJam'] as num?)?.toDouble() ?? 0,
+      isHariLibur: j['isHariLibur'] == true,
     );
   }
 }

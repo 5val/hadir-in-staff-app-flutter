@@ -681,6 +681,12 @@ class _HomeTabState extends State<HomeTab> {
                       children: [
                         _buildHeaderInfo(),
                         const SizedBox(height: 8),
+                        // Kerja di hari libur dengan lembur yang sudah disetujui:
+                        // jelaskan bahwa seluruh jam dihitung lembur.
+                        if (AppCalendar.instance.hariIni.kerjaHariLibur) ...[
+                          _buildHolidayWorkBanner(),
+                          const SizedBox(height: 8),
+                        ],
                         // Pengingat isi rekening gaji (meeting klien 2026-09-20):
                         // hilang sendiri begitu ketiga isiannya terisi.
                         if (AppSession.staff != null &&
@@ -982,6 +988,51 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Header Info ───────────────────────────────────────────────
+  Widget _buildHolidayWorkBanner() {
+    final hariIni = AppCalendar.instance.hariIni;
+    final window = (hariIni.lemburJamMulai != null && hariIni.lemburJamSelesai != null)
+        ? ' Rencana ${hariIni.lemburJamMulai} - ${hariIni.lemburJamSelesai}.'
+        : '';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF6FF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF93C5FD)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.event_available_rounded,
+              size: 22, color: Color(0xFF1D4ED8)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    'Lembur hari libur${hariIni.namaLibur != null ? ' - ${hariIni.namaLibur}' : ''}',
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF1E3A8A))),
+                const SizedBox(height: 2),
+                Text(
+                    'Lembur Anda sudah disetujui.$window Seluruh jam kerja hari '
+                    'ini dihitung lembur, mulai check-in sampai check-out.',
+                    style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        height: 1.35,
+                        color: const Color(0xFF1E3A8A))),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRekeningBanner() {
     return Material(
       color: const Color(0xFFFFF7ED),

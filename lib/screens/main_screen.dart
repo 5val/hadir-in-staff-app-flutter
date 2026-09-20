@@ -696,6 +696,15 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         ? CameraActionType.checkIn
         : CameraActionType.checkOut;
 
+    // Kerja di hari libur (lembur yang sudah disetujui): jadwal shift tidak
+    // berlaku dan SEMUA jam kerja dihitung lembur. Staff dimintai konfirmasi
+    // SEBELUM kamera dibuka, supaya yang batal tidak perlu berfoto.
+    final holidayWork = AppCalendar.instance.hariIni.kerjaHariLibur;
+    if (actionType == CameraActionType.checkIn && holidayWork) {
+      final proceed = await _confirmHolidayWorkCheckIn();
+      if (!mounted || !proceed) return;
+    }
+
     // 2026-09-09 -- peringatan "Belum Jam Pulang!" SEBELUM kamera dibuka,
     // bukan sesudah foto diambil (perilaku lama, lihat
     // widgets/early_checkout_dialog.dart's doc comment). Staff yang batal
@@ -717,7 +726,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       _hydrateCheckoutSnapshot(_attendance.today);
 
-      if (!AttendanceRules.isAfterEarliestCheckout) {
+      // Hari libur tidak punya jam pulang shift untuk ditunggu (server pun
+      // tidak menggerbanginya), jadi peringatan "Belum Jam Pulang!" tidak
+      // relevan.
+      if (!holidayWork && !AttendanceRules.isAfterEarliestCheckout) {
         final proceed = await showEarlyCheckoutDialog(context);
         if (!mounted || !proceed) return;
       }
@@ -774,6 +786,38 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   // ── Dialog selesai istirahat ─────────────────────────────────
+  /// Popup konfirmasi check-in di hari libur. Mengembalikan true bila staff
+  /// melanjutkan.
+  Future<bool> _confirmHolidayWorkCheckIn() async {
+    final hariIni = AppCalendar.instance.hariIni;
+    final window = (hariIni.lemburJamMulai != null && hariIni.lemburJamSelesai != null)
+        ? '\nRencana yang disetujui: ${hariIni.lemburJamMulai} - ${hariIni.lemburJamSelesai}.'
+        : '';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.event_available_rounded,
+            color: AppColors.brandOrange, size: 36),
+        title: Text('Hari libur${hariIni.namaLibur != null ? ': ${hariIni.namaLibur}' : ''}'),
+        content: Text(
+          'Anda bekerja di hari libur dengan lembur yang sudah disetujui.$window\n\n'
+          'Seluruh jam kerja Anda hari ini, dari check-in sampai check-out, '
+          'dihitung sebagai lembur. Uang makan dan tunjangan harian tidak '
+          'berlaku di hari libur.\n\nLanjut check-in?',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Batal')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ya, check-in')),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _showEndBreakDialog() async {
     final ok = await showDialog<bool>(
       context: context,
