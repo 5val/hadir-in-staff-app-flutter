@@ -1810,6 +1810,62 @@ class StaffProfile {
     );
   }
 
+  /// Rekening gaji sudah terisi lengkap (bank, nomor, dan nama pemilik).
+  /// Dipakai banner pengingat di Home; slip tanpa rekening tidak punya tujuan
+  /// transfer saat dicairkan.
+  bool get rekeningLengkap =>
+      namaBank.trim().isNotEmpty &&
+      nomorRekening.trim().isNotEmpty &&
+      namaPemilikRekening.trim().isNotEmpty;
+
+  /// Nomor rekening dengan hanya 4 digit terakhir terlihat ("******7890").
+  String get nomorRekeningMasked => maskRekening(nomorRekening);
+
+  static String maskRekening(String nomor) {
+    final n = nomor.trim();
+    if (n.length <= 4) return n;
+    return '${'*' * (n.length - 4)}${n.substring(n.length - 4)}';
+  }
+
+  /// Salinan dengan rekening baru -- dipakai setelah staff menyimpan rekening
+  /// supaya banner dan layar lain langsung ikut tanpa menunggu muat ulang profil.
+  StaffProfile copyWithRekening({
+    required String namaBank,
+    required String nomorRekening,
+    required String namaPemilikRekening,
+  }) {
+    return StaffProfile(
+      id: id,
+      nama: nama,
+      email: email,
+      phone: phone,
+      level: level,
+      statusKepegawaian: statusKepegawaian,
+      status: status,
+      sisaCuti: sisaCuti,
+      totalCuti: totalCuti,
+      photo: photo,
+      namaBank: namaBank,
+      nomorRekening: nomorRekening,
+      namaPemilikRekening: namaPemilikRekening,
+      divisiNama: divisiNama,
+      divisiColor: divisiColor,
+      jabatanNama: jabatanNama,
+      jabatanIsSupervisor: jabatanIsSupervisor,
+      gajiPokok: gajiPokok,
+      maxExtraHour: maxExtraHour,
+      shiftNama: shiftNama,
+      jamMasuk: jamMasuk,
+      jamPulang: jamPulang,
+      lokasiNama: lokasiNama,
+      lokasiAlamat: lokasiAlamat,
+      lokasiLatitude: lokasiLatitude,
+      lokasiLongitude: lokasiLongitude,
+      lokasiRadius: lokasiRadius,
+      kontakAdminPhone: kontakAdminPhone,
+    );
+  }
+
   static TimeOfDay _parseTime(String hhmm) {
     final parts = hhmm.split(':');
     final h = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 8 : 8;

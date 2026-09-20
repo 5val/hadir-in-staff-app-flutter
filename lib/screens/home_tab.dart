@@ -24,6 +24,7 @@ import 'history_screen.dart';
 import 'login_screen.dart';
 import 'main_screen.dart';
 import 'all_attendance_history_screen.dart';
+import 'rekening_screen.dart';
 
 class HomeTab extends StatefulWidget {
   final VoidCallback onNavigateToAccount;
@@ -680,6 +681,13 @@ class _HomeTabState extends State<HomeTab> {
                       children: [
                         _buildHeaderInfo(),
                         const SizedBox(height: 8),
+                        // Pengingat isi rekening gaji (meeting klien 2026-09-20):
+                        // hilang sendiri begitu ketiga isiannya terisi.
+                        if (AppSession.staff != null &&
+                            !AppSession.staff!.rekeningLengkap) ...[
+                          _buildRekeningBanner(),
+                          const SizedBox(height: 8),
+                        ],
                         // Penanda MODE TESTING — hilang sendiri begitu
                         // TestingConfig.enabled dikembalikan ke false.
                         if (TestingConfig.enabled) ...[
@@ -974,6 +982,58 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   // ── Header Info ───────────────────────────────────────────────
+  Widget _buildRekeningBanner() {
+    return Material(
+      color: const Color(0xFFFFF7ED),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () async {
+          final saved = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(builder: (_) => const RekeningScreen()),
+          );
+          if (saved == true && mounted) setState(() {});
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFDBA74)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.account_balance_wallet_outlined,
+                  size: 22, color: Color(0xFFC2410C)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Rekening gaji belum diisi',
+                        style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF9A3412))),
+                    const SizedBox(height: 2),
+                    Text(
+                        'Isi sekarang agar gaji Anda bisa ditransfer tepat waktu.',
+                        style: GoogleFonts.inter(
+                            fontSize: 11.5,
+                            height: 1.35,
+                            color: const Color(0xFF9A3412))),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: Color(0xFFC2410C)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeaderInfo() {
     final isLateAndNotCheckedIn =
         _status == AttendanceProviderStatus.notCheckedIn &&

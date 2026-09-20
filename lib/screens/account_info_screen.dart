@@ -7,6 +7,7 @@ import '../services/api_client.dart';
 import '../services/phone_change_service.dart';
 import '../services/session_service.dart';
 import 'onboarding_documents_screen.dart';
+import 'rekening_screen.dart';
 import 'otp_verification_screen.dart';
 
 class AccountInfoScreen extends StatefulWidget {
@@ -34,6 +35,50 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     super.dispose();
+  }
+
+  Widget _buildRekeningCard() {
+    final staff = AppSession.staff;
+    final lengkap = staff?.rekeningLengkap ?? false;
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (lengkap) ...[
+            InfoTile(
+              icon: Icons.account_balance_outlined,
+              label: staff!.namaBank,
+              value: '${staff.nomorRekeningMasked}  •  ${staff.namaPemilikRekening}',
+            ),
+          ] else
+            Text(
+              'Belum diisi. Isi rekening supaya gaji Anda bisa ditransfer.',
+              style: GoogleFonts.inter(fontSize: 12.5, color: AppColors.slate600),
+            ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                final saved = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const RekeningScreen()),
+                );
+                if (saved == true && mounted) setState(() {});
+              },
+              icon: Icon(lengkap ? Icons.edit_outlined : Icons.add_card_outlined,
+                  size: 16),
+              label: Text(lengkap ? 'Ubah Rekening' : 'Isi Rekening'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.brandNavy,
+                side: const BorderSide(color: AppColors.slate300),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ============================================================
@@ -333,6 +378,21 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 20),
+
+                // Rekening gaji (meeting klien 2026-09-20): staff mengisi
+                // sendiri; perubahan diberitahukan ke HRD oleh server.
+                Text(
+                  'Rekening Gaji',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.brandNavy,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildRekeningCard(),
                 const SizedBox(height: 20),
 
                 // Read-only Information Section
