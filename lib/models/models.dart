@@ -566,6 +566,18 @@ class LeaveRequest {
   final List<AllowanceType> allowances;
   final DateTime submittedAt;
 
+  /// Jumlah hari sebenarnya dari server (`LeaveRequest.jumlahHari` --
+  /// `lib/leave-days.ts`, dihitung dari hari kerja shift staff dan TIDAK
+  /// menghitung hari libur). Null hanya untuk baris lama/tanpa nilai ini.
+  ///
+  /// BUG DIPERBAIKI 2026-09-22: [dayCount] di bawah sebelumnya SELALU
+  /// menghitung mentah dari tanggal (`endDate - startDate + 1`), yang ikut
+  /// menghitung hari libur -- untuk pengajuan yang menyeberangi hari libur,
+  /// durasi di detail app jadi lebih besar dari yang sebenarnya, berbeda
+  /// dari web (sudah benar sejak F0, membaca `jumlahHari` server) dan dari
+  /// `sisaCuti` yang benar-benar dipotong.
+  final int? jumlahHari;
+
   const LeaveRequest({
     required this.id,
     required this.type,
@@ -578,9 +590,13 @@ class LeaveRequest {
     this.allowances = const [],
     this.employeeName,
     required this.submittedAt,
+    this.jumlahHari,
   });
 
-  int get dayCount => endDate.difference(startDate).inDays + 1;
+  /// Durasi yang ditampilkan: `jumlahHari` server bila ada (sudah
+  /// mengecualikan hari libur), kalau tidak jatuh ke hitungan tanggal mentah
+  /// (kalender lama pra-F0, atau data lokal sebelum sinkron ke server).
+  int get dayCount => jumlahHari ?? (endDate.difference(startDate).inDays + 1);
 
   /// Bangun dari JSON backend (/api/mobile/staff/:id/leave).
   /// Backend: `tipe` (Cuti|Izin|Sakit|Dinas), `subTipe`, `alasan`,
@@ -635,6 +651,7 @@ class LeaveRequest {
       reason: (j['alasan'] ?? '').toString(),
       adminNote: tolak.isEmpty ? null : tolak,
       submittedAt: parseTs(j['diajukanPada']),
+      jumlahHari: (j['jumlahHari'] as num?)?.toInt(),
       // Fase 8: terisi ketika backend menyertakan relasi `staff` — yaitu
       // pada endpoint pengajuan BAWAHAN, di mana kartu harus menampilkan
       // nama pengaju. Untuk pengajuan sendiri relasi ini tidak dikirim dan
