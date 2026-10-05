@@ -91,6 +91,39 @@ class TodayHolidayStatus {
   }
 }
 
+/// Periode gaji yang sudah dihitung/dikunci untuk staff ini (spec Sprint 3
+/// §3.9). Pengajuan cuti/izin/lembur pada tanggal di dalamnya ditutup.
+/// [endExclusive] EKSKLUSIF: hari terakhir periode adalah `endExclusive - 1`.
+class PeriodeTertutup {
+  final String periode;
+  final DateTime start;
+  final DateTime endExclusive;
+
+  const PeriodeTertutup({
+    required this.periode,
+    required this.start,
+    required this.endExclusive,
+  });
+
+  /// Null bila tanggalnya tidak bisa dibaca (diabaikan, fail-open).
+  static PeriodeTertutup? tryParse(Object? raw) {
+    if (raw is! Map) return null;
+    final s = DateTime.tryParse((raw['start'] ?? '').toString());
+    final e = DateTime.tryParse((raw['endExclusive'] ?? '').toString());
+    if (s == null || e == null) return null;
+    return PeriodeTertutup(
+      periode: (raw['periode'] ?? '').toString(),
+      start: DateTime(s.year, s.month, s.day),
+      endExclusive: DateTime(e.year, e.month, e.day),
+    );
+  }
+
+  bool contains(DateTime d) {
+    final day = DateTime(d.year, d.month, d.day);
+    return !day.isBefore(start) && day.isBefore(endExclusive);
+  }
+}
+
 /// Kalender kerja staff: hari libur + hari kerja shift-nya.
 ///
 /// Fase 8 — inilah yang membuat date picker pengajuan cuti/izin/lembur tidak
@@ -133,6 +166,11 @@ class WorkCalendar {
   /// Status hari ini menurut server (lihat [TodayHolidayStatus]).
   final TodayHolidayStatus hariIni;
 
+  /// Periode gaji yang sudah tertutup untuk staff ini. Kosong bila server
+  /// versi lama tidak mengirim `periodeTertutup` (fail-open: server tetap
+  /// menolak pengajuannya).
+  final List<PeriodeTertutup> periodeTertutup;
+
   const WorkCalendar({
     required this.holidayByDate,
     required this.hariKerja,
@@ -144,7 +182,61 @@ class WorkCalendar {
     this.toleransiPulang = 0,
     this.jamPulangHariBerikutnya = false,
     this.hariIni = TodayHolidayStatus.unknown,
+    this.periodeTertutup = const [],
   });
+
+  /// Alasan yang ditampilkan di tempat pengajuan ditutup.
+  static const pesanPeriodeTertutup =
+      'Gaji periode ini sudah dihitung, pengajuan ditutup';
+
+  /// Parsing respons `GET /mobile/staff/:id/hari-libur`.
+  factory WorkCalendar.fromApi(Map<String, dynamic> data) {
+    final holidays = <String, String>{};
+    if (data['hariLibur'] is List) {
+      for (final raw in data['hariLibur'] as List) {
+        if (raw is! Map) continue;
+        final entry = HariLibur.fromApi(Map<String, dynamic>.from(raw));
+        holidays[(raw['tanggal'] ?? '').toString()] = entry.nama;
+      }
+    }
+
+    final shift = data['shift'] is Map
+        ? Map<String, dynamic>.from(data['shift'] as Map)
+        : <String, dynamic>{};
+
+    return WorkCalendar(
+      holidayByDate: holidays,
+      hariKerja: (data['hariKerja'] is List)
+          ? (data['hariKerja'] as List).map((e) => e.toString()).toList()
+          : const [],
+      shiftNama: (shift['nama'] ?? '').toString(),
+      jamMasuk: (shift['jamMasuk'] ?? '').toString(),
+      jamPulang: (shift['jamPulang'] ?? '').toString(),
+      jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
+      jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
+      toleransiPulang: (shift['toleransiPulang'] as num?)?.toInt() ?? 0,
+      jamPulangHariBerikutnya: shift['jamPulangHariBerikutnya'] == true,
+      hariIni: data['hariIni'] is Map
+          ? TodayHolidayStatus.fromApi(
+              Map<String, dynamic>.from(data['hariIni'] as Map))
+          : TodayHolidayStatus.unknown,
+      periodeTertutup: data['periodeTertutup'] is List
+          ? (data['periodeTertutup'] as List)
+              .map(PeriodeTertutup.tryParse)
+              .whereType<PeriodeTertutup>()
+              .toList()
+          : const [],
+    );
+  }
+
+  /// Tanggal [d] jatuh di periode gaji yang sudah tertutup (end eksklusif).
+  bool isPeriodeTertutup(DateTime d) => periodeTertutup.any((p) => p.contains(d));
+
+  /// Tanggal ini boleh dipilih untuk PENGAJUAN (cuti/izin/lembur hari
+  /// libur): hari kerja non-libur DAN periodenya belum tertutup. Berbeda dari
+  /// [isSelectable], yang juga dipakai untuk menghitung hari kerja/riwayat.
+  bool isSelectableForSubmission(DateTime d) =>
+      isSelectable(d) && !isPeriodeTertutup(d);
 
   /// Kalender kosong — dipakai sebagai fallback aman bila data belum termuat:
   /// tidak ada tanggal yang di-disable, jadi app tidak pernah memblokir staff
@@ -193,6 +285,31 @@ class WorkCalendar {
   /// Predikat untuk `showDatePicker(selectableDayPredicate: ...)`:
   /// tanggal bisa dipilih hanya bila hari kerja shift DAN bukan hari libur.
   bool isSelectable(DateTime d) => isShiftWorkday(d) && !isHoliday(d);
+
+  /// Ada minimal satu tanggal di [first]..[last] (inklusif) yang boleh dipilih
+  /// untuk pengajuan. Bila false, picker tidak boleh dibuka (tanpa predikat
+  /// semua tanggal akan jadi bisa dipilih).
+  bool hasSelectableForSubmission(DateTime first, DateTime last) {
+    final end = DateTime(last.year, last.month, last.day);
+    for (var d = DateTime(first.year, first.month, first.day);
+        !d.isAfter(end);
+        d = DateTime(d.year, d.month, d.day + 1)) {
+      if (isSelectableForSubmission(d)) return true;
+    }
+    return false;
+  }
+
+  /// Pesan bila [hasSelectableForSubmission] false: alasan periode tertutup
+  /// bila ada tanggal di rentang yang tertutup, selain itu pesan umum.
+  String noSelectableMessage(DateTime first, DateTime last) {
+    final end = DateTime(last.year, last.month, last.day);
+    for (var d = DateTime(first.year, first.month, first.day);
+        !d.isAfter(end);
+        d = DateTime(d.year, d.month, d.day + 1)) {
+      if (isPeriodeTertutup(d)) return pesanPeriodeTertutup;
+    }
+    return 'Tidak ada hari kerja yang bisa dipilih pada rentang tanggal ini.';
+  }
 
   /// Boleh check-in hari ini? Keputusan server ([TodayHolidayStatus]), bukan
   /// turunan dari [isHoliday], supaya pengecualian lembur-disetujui dan
@@ -256,36 +373,6 @@ class CalendarService {
       },
     );
 
-    final data = res.asMap;
-    final holidays = <String, String>{};
-    if (data['hariLibur'] is List) {
-      for (final raw in data['hariLibur'] as List) {
-        if (raw is! Map) continue;
-        final entry = HariLibur.fromApi(Map<String, dynamic>.from(raw));
-        holidays[(raw['tanggal'] ?? '').toString()] = entry.nama;
-      }
-    }
-
-    final shift = data['shift'] is Map
-        ? Map<String, dynamic>.from(data['shift'] as Map)
-        : <String, dynamic>{};
-
-    return WorkCalendar(
-      holidayByDate: holidays,
-      hariKerja: (data['hariKerja'] is List)
-          ? (data['hariKerja'] as List).map((e) => e.toString()).toList()
-          : const [],
-      shiftNama: (shift['nama'] ?? '').toString(),
-      jamMasuk: (shift['jamMasuk'] ?? '').toString(),
-      jamPulang: (shift['jamPulang'] ?? '').toString(),
-      jamIstirahatMulai: shift['jamIstirahatMulai']?.toString(),
-      jamIstirahatSelesai: shift['jamIstirahatSelesai']?.toString(),
-      toleransiPulang: (shift['toleransiPulang'] as num?)?.toInt() ?? 0,
-      jamPulangHariBerikutnya: shift['jamPulangHariBerikutnya'] == true,
-      hariIni: data['hariIni'] is Map
-          ? TodayHolidayStatus.fromApi(
-              Map<String, dynamic>.from(data['hariIni'] as Map))
-          : TodayHolidayStatus.unknown,
-    );
+    return WorkCalendar.fromApi(res.asMap);
   }
 }

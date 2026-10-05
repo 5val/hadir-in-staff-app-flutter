@@ -33,7 +33,7 @@ Future<DateTime?> showWorkDatePicker({
   DateTime normalize(DateTime d) => DateTime(d.year, d.month, d.day);
 
   bool selectable(DateTime d) =>
-      !blockHolidays || calendar.isSelectable(d);
+      !blockHolidays || calendar.isSelectableForSubmission(d);
 
   final first = normalize(firstDate);
   final last = normalize(lastDate);
@@ -45,6 +45,17 @@ Future<DateTime?> showWorkDatePicker({
   var initial = normalize(initialDate);
   if (initial.isBefore(first)) initial = first;
   if (initial.isAfter(last)) initial = last;
+
+  // Tidak ada satu pun tanggal yang boleh dipilih: jangan buka picker (tanpa
+  // predikat semua tanggal, termasuk yang tertutup, jadi bisa dipilih).
+  if (blockHolidays && !calendar.hasSelectableForSubmission(first, last)) {
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+          SnackBar(content: Text(calendar.noSelectableMessage(first, last))));
+    return null;
+  }
+
   if (blockHolidays && !selectable(initial)) {
     DateTime? found;
     for (var d = initial; !d.isAfter(last); d = d.add(const Duration(days: 1))) {
@@ -63,18 +74,8 @@ Future<DateTime?> showWorkDatePicker({
         }
       }
     }
-    // Tidak ada satu pun hari kerja di rentang ini — tampilkan picker tanpa
-    // predikat daripada crash; server tetap menolak tanggal libur.
-    if (found == null) {
-      return showDatePicker(
-        context: context,
-        initialDate: initial,
-        firstDate: first,
-        lastDate: last,
-        builder: _theme,
-      );
-    }
-    initial = found;
+    // Pasti ketemu: rentang tanpa tanggal terpilih sudah ditangani di atas.
+    if (found != null) initial = found;
   }
 
   return showDatePicker(
@@ -83,7 +84,11 @@ Future<DateTime?> showWorkDatePicker({
     firstDate: first,
     lastDate: last,
     selectableDayPredicate: blockHolidays ? selectable : null,
-    helpText: blockHolidays ? 'Pilih tanggal hari kerja' : null,
+    helpText: blockHolidays
+        ? (calendar.periodeTertutup.isEmpty
+            ? 'Pilih tanggal hari kerja'
+            : 'Pilih tanggal hari kerja. ${WorkCalendar.pesanPeriodeTertutup}')
+        : null,
     builder: _theme,
   );
 }

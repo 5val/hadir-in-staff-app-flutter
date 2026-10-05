@@ -13,6 +13,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hadirin_staff_app/models/models.dart';
+import 'package:hadirin_staff_app/services/api_client.dart';
+import 'package:hadirin_staff_app/services/salary_service.dart';
 
 /// Slip realistis: punya tunjangan bentuk barang, fasilitas, uang makan, DAN
 /// potongan BPJS staff — persis kombinasi yang dulu bikin angka client meleset.
@@ -81,7 +83,129 @@ Map<String, dynamic> _slipPayload() => {
       'permissionHistory': [],
     };
 
+// Sprint 3 payroll-flow rework: konfirmasi status comes from the server, and
+// the slip carries pencairan state.
+void _sprint3Tests() {
+  Map<String, dynamic> base({Map<String, dynamic> extra = const {}}) => {
+        'id': 's1',
+        'periode': '2026-09',
+        'gajiNetto': 1000000,
+        'statusSlip': 'terkunci',
+        'bisaUnduh': true,
+        ...extra,
+      };
+
+  group('KonfirmasiResult (server decides the status)', () {
+    final waiting = SalarySlip.fromApi(
+        base(extra: {'statusSlip': 'menunggu_konfirmasi', 'bisaUnduh': false}));
+
+    test('terkunci response makes the slip final and downloadable', () {
+      final r = KonfirmasiResult.fromApi({'statusSlip': 'terkunci', 'bisaUnduh': true});
+      final updated = r.applyTo(waiting);
+      expect(updated.statusSlip, 'terkunci');
+      expect(updated.terkunci, isTrue);
+      expect(updated.bisaUnduh, isTrue);
+    });
+
+    test('legacy response without statusSlip keeps the old dikonfirmasi behaviour', () {
+      final updated = KonfirmasiResult.fromApi({}).applyTo(waiting);
+      expect(updated.statusSlip, 'dikonfirmasi');
+      expect(updated.bisaUnduh, isFalse);
+    });
+
+    test('a non-terkunci server status is respected, not forced to dikonfirmasi', () {
+      final updated =
+          KonfirmasiResult.fromApi({'statusSlip': 'menunggu_konfirmasi'}).applyTo(waiting);
+      expect(updated.statusSlip, 'menunggu_konfirmasi');
+    });
+  });
+
+  group('A2: dikirimKonfirmasiAt round-trip', () {
+    const iso = '2026-10-03T08:15:30.123Z';
+
+    test('is kept verbatim from the payload (no re-formatting) and survives copyWith', () {
+      final s = SalarySlip.fromApi(
+          base(extra: {'statusSlip': 'menunggu_konfirmasi', 'dikirimKonfirmasiAt': iso}));
+      expect(s.dikirimKonfirmasiAt, iso);
+      expect(s.copyWith(bisaUnduh: false).dikirimKonfirmasiAt, iso);
+    });
+
+    test('missing / empty (old server) parses to null', () {
+      expect(SalarySlip.fromApi(base()).dikirimKonfirmasiAt, isNull);
+      expect(SalarySlip.fromApi(base(extra: {'dikirimKonfirmasiAt': ''})).dikirimKonfirmasiAt, isNull);
+    });
+
+    test('konfirmasi and tolak bodies carry the exact ISO string', () {
+      expect(SalaryService.konfirmasiBody(iso), {'dikirimKonfirmasiAt': iso});
+      expect(SalaryService.tolakBody('  salah hitung  ', iso),
+          {'alasan': 'salah hitung', 'dikirimKonfirmasiAt': iso});
+    });
+
+    test('without the field the bodies stay as the old app sent them', () {
+      expect(SalaryService.konfirmasiBody(null), isNull);
+      expect(SalaryService.tolakBody('salah hitung', null), {'alasan': 'salah hitung'});
+    });
+
+    test('only HTTP 409 counts as a stale-slip conflict', () {
+      expect(SalaryService.isSlipStaleConflict(ApiException('x', statusCode: 409)), isTrue);
+      expect(SalaryService.isSlipStaleConflict(ApiException('x', statusCode: 500)), isFalse);
+      expect(SalaryService.isSlipStaleConflict(ApiException('x')), isFalse);
+    });
+  });
+
+  group('A12: alasanTolak only while ditolak', () {
+    test('shown while the current status is ditolak', () {
+      final s = SalarySlip.fromApi(base(extra: {'statusSlip': 'ditolak', 'alasanTolak': 'Lembur kurang'}));
+      expect(s.alasanTolakTampil, 'Lembur kurang');
+    });
+
+    test('hidden once HR re-sent it (menunggu_konfirmasi) or it is locked, even if the server still returns the old reason', () {
+      for (final st in ['menunggu_konfirmasi', 'terkunci', 'dikonfirmasi']) {
+        final s = SalarySlip.fromApi(base(extra: {'statusSlip': st, 'alasanTolak': 'Lembur kurang'}));
+        expect(s.alasanTolakTampil, isNull, reason: st);
+      }
+    });
+  });
+
+  group('SalarySlip pencairan state', () {
+    test('no siapDicairkanAt and unpaid: no label', () {
+      final s = SalarySlip.fromApi(base(extra: {'statusBayar': 'unpaid'}));
+      expect(s.pencairanLabel, isNull);
+      expect(s.sedangDiprosesPencairan, isFalse);
+    });
+
+    test('siapDicairkanAt set and unpaid: Sedang diproses pencairan', () {
+      final s = SalarySlip.fromApi(base(extra: {
+        'siapDicairkanAt': '2026-10-01T03:00:00.000Z',
+        'statusBayar': 'unpaid',
+      }));
+      expect(s.siapDicairkanAt, isNotNull);
+      expect(s.sedangDiprosesPencairan, isTrue);
+      expect(s.pencairanLabel, 'Sedang diproses pencairan');
+    });
+
+    test('paid: Sudah dicairkan (wins over siapDicairkanAt)', () {
+      final s = SalarySlip.fromApi(base(extra: {
+        'siapDicairkanAt': '2026-10-01T03:00:00.000Z',
+        'statusBayar': 'paid',
+      }));
+      expect(s.sudahDicairkan, isTrue);
+      expect(s.sedangDiprosesPencairan, isFalse);
+      expect(s.pencairanLabel, 'Sudah dicairkan');
+    });
+
+    test('old server without the fields defaults safely; copyWith preserves them', () {
+      final old = SalarySlip.fromApi(base());
+      expect(old.siapDicairkanAt, isNull);
+      expect(old.statusBayar, 'unpaid');
+      final s = SalarySlip.fromApi(base(extra: {'statusBayar': 'paid'}));
+      expect(s.copyWith(statusSlip: 'terkunci').sudahDicairkan, isTrue);
+    });
+  });
+}
+
 void main() {
+  _sprint3Tests();
   group('SalarySlip.fromApi — Take Home Pay', () {
     test('takeHomePay & netSalary memakai gajiNetto server apa adanya', () {
       final slip = SalarySlip.fromApi(_slipPayload());

@@ -364,6 +364,15 @@ class _SalaryScreenState extends State<SalaryScreen> {
             // ── Mini summary row ──────────────────────────
             _miniStat('Ditransfer', DateFormat('dd MMM').format(slip.periodEnd),
                 AppColors.brandLime),
+            if (slip.pencairanLabel != null) ...[
+              const SizedBox(height: 6),
+              Text(slip.pencairanLabel!,
+                  key: const Key('slip-pencairan-label'),
+                  style: GoogleFonts.inter(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white.withOpacity(0.85))),
+            ],
             // Container(
             //   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             //   decoration: BoxDecoration(
@@ -731,14 +740,36 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
 
     setState(() => _busy = true);
     try {
-      await SalaryService.konfirmasi(slip.id);
+      final result = await SalaryService.konfirmasi(slip.id,
+          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt);
       if (!mounted) return;
-      setState(() => slip = slip.copyWith(statusSlip: 'dikonfirmasi'));
-      _snack('Slip dikonfirmasi. Menunggu HR mengunci slip.');
+      // Status datang dari server (sekarang `terkunci`), bukan hardcode.
+      final updated = result.applyTo(slip);
+      setState(() => slip = updated);
+      if (updated.bisaUnduh) {
+        _snack('Slip dikonfirmasi dan sudah final. Anda bisa mengunduhnya.');
+        // Sama seperti sinkron otomatis di daftar: simpan ke Drive di latar
+        // (diam bila akun Google belum tersambung).
+        SlipDriveSync.autoSyncLocked([updated]).then((_) async {
+          final saved = await SlipDriveSync.isSaved(updated.id);
+          if (mounted && saved) setState(() => _savedToDrive = true);
+        });
+      } else {
+        _snack('Slip dikonfirmasi. Menunggu HR mengunci slip.');
+      }
     } on ApiException catch (e) {
       _snack(e.message);
+      _reloadIfStale(e);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 409: slip sudah diperbarui HR. Tidak ada perubahan status lokal; tutup
+  /// layar detail agar daftar slip memuat ulang (lihat `_buildSalaryCard`).
+  void _reloadIfStale(ApiException e) {
+    if (SalaryService.isSlipStaleConflict(e) && mounted) {
+      Navigator.of(context).maybePop();
     }
   }
 
@@ -751,12 +782,14 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
 
     setState(() => _busy = true);
     try {
-      await SalaryService.tolak(slip.id, alasan);
+      await SalaryService.tolak(slip.id, alasan,
+          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt);
       if (!mounted) return;
       setState(() => slip = slip.copyWith(statusSlip: 'ditolak', alasanTolak: alasan.trim()));
       _snack('Slip ditolak. HR akan memeriksa dan merevisinya.');
     } on ApiException catch (e) {
       _snack(e.message);
+      _reloadIfStale(e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -793,7 +826,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         fg = const Color(0xFFB91C1C);
         title = 'Anda menolak slip ini';
         body = 'HR akan memeriksa dan merevisinya, lalu mengirim ulang untuk Anda konfirmasi.'
-            '${slip.alasanTolak != null ? '\n\nAlasan Anda: ${slip.alasanTolak}' : ''}';
+            '${slip.alasanTolakTampil != null ? '\n\nAlasan Anda: ${slip.alasanTolakTampil}' : ''}';
         break;
       default:
         // Banner "Slip final" (dengan tombol unduh) hanya untuk slip yang
@@ -802,6 +835,23 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         return slip.bisaUnduh ? _buildFinalBanner() : const SizedBox.shrink();
     }
     return _banner(icon, bg, fg, title, body);
+  }
+
+  /// Status pencairan: "Sedang diproses pencairan" setelah HR menyetujui cair,
+  /// "Sudah dicairkan" setelah dibayar. Tidak tampil bila belum ada kabar.
+  Widget _buildPencairanBanner() {
+    final label = slip.pencairanLabel;
+    if (label == null) return const SizedBox.shrink();
+    final paid = slip.sudahDicairkan;
+    return _banner(
+      paid ? Icons.payments_rounded : Icons.hourglass_top_rounded,
+      paid ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+      paid ? const Color(0xFF15803D) : const Color(0xFFB45309),
+      label,
+      paid
+          ? 'Gaji periode ini sudah ditransfer.'
+          : 'HR sudah menyetujui slip ini untuk dicairkan. Gaji akan segera ditransfer.',
+    );
   }
 
   Widget _buildFinalBanner() {
@@ -1007,6 +1057,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
                 children: [
                   _buildStatusBanner(),
+                  _buildPencairanBanner(),
                   _buildHeroCard(),
                   const SizedBox(height: 16),
                   _buildAttendanceInfo(context),

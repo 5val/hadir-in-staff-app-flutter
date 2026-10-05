@@ -9,7 +9,11 @@ import 'package:hadirin_staff_app/screens/rekening_screen.dart';
 import 'package:hadirin_staff_app/screens/salary_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-SalarySlip slipWith(String statusSlip, {bool? bisaUnduh, String? alasanTolak}) =>
+SalarySlip slipWith(String statusSlip,
+        {bool? bisaUnduh,
+        String? alasanTolak,
+        String statusBayar = 'unpaid',
+        String? siapDicairkanAt}) =>
     SalarySlip.fromApi({
       'id': 'slip-1',
       'staffId': 'staff-1',
@@ -17,7 +21,8 @@ SalarySlip slipWith(String statusSlip, {bool? bisaUnduh, String? alasanTolak}) =
       'gajiPokok': 5000000,
       'gajiNetto': 5000000,
       'statusSlip': statusSlip,
-      'statusBayar': 'unpaid',
+      'statusBayar': statusBayar,
+      if (siapDicairkanAt != null) 'siapDicairkanAt': siapDicairkanAt,
       'bisaUnduh': bisaUnduh ?? statusSlip == 'terkunci',
       if (alasanTolak != null) 'alasanTolak': alasanTolak,
     });
@@ -88,6 +93,31 @@ void main() {
     testWidgets('the server flag decides: a locked-looking status without bisaUnduh gets no download', (tester) async {
       await pumpDetail(tester, slipWith('terkunci', bisaUnduh: false));
       expect(find.text('Unduh PDF'), findsNothing);
+    });
+  });
+
+  group('SalaryDetailScreen -- pencairan state', () {
+    testWidgets('terkunci + siapDicairkanAt: "Sedang diproses pencairan"', (tester) async {
+      await pumpDetail(tester,
+          slipWith('terkunci', siapDicairkanAt: '2026-10-01T03:00:00.000Z'));
+      expect(find.text('Sedang diproses pencairan'), findsOneWidget);
+      expect(find.text('Sudah dicairkan'), findsNothing);
+      expect(find.text('Slip final'), findsOneWidget);
+    });
+
+    testWidgets('paid: "Sudah dicairkan"', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('terkunci',
+              statusBayar: 'paid', siapDicairkanAt: '2026-10-01T03:00:00.000Z'));
+      expect(find.text('Sudah dicairkan'), findsOneWidget);
+      expect(find.text('Sedang diproses pencairan'), findsNothing);
+    });
+
+    testWidgets('terkunci but not approved to pay: no pencairan banner', (tester) async {
+      await pumpDetail(tester, slipWith('terkunci'));
+      expect(find.text('Sedang diproses pencairan'), findsNothing);
+      expect(find.text('Sudah dicairkan'), findsNothing);
     });
   });
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
@@ -35,6 +36,19 @@ class SlipDriveSync {
     await prefs.setStringList(_prefsKey, ids.toList());
   }
 
+  /// Id slip yang sedang diunggah. Konfirmasi di layar detail dan sinkron
+  /// otomatis daftar (`_load(silent: true)`) bisa jalan bersamaan; tanpa
+  /// penjaga ini slip yang sama diunggah dua kali.
+  static final Set<String> _inFlight = <String>{};
+
+  /// True bila [slipId] berhasil diklaim (belum ada unggahan berjalan).
+  /// Pemanggil WAJIB memanggil [releaseUpload] di `finally`.
+  @visibleForTesting
+  static bool claimUpload(String slipId) => _inFlight.add(slipId);
+
+  @visibleForTesting
+  static void releaseUpload(String slipId) => _inFlight.remove(slipId);
+
   static String filenameFor(SalarySlip slip) =>
       'Slip-Gaji-${slip.periodeKey}.pdf';
 
@@ -45,17 +59,23 @@ class SlipDriveSync {
     if (!slip.bisaUnduh) {
       throw 'Slip baru bisa disimpan setelah dikunci oleh HR.';
     }
-    final bytes = await SalaryService.downloadPdf(slip.id);
-    final outcome = await GoogleDriveService.saveSlipPdf(
-      filename: filenameFor(slip),
-      bytes: bytes,
-      interactive: interactive,
-    );
-    if (outcome == DriveSaveOutcome.saved ||
-        outcome == DriveSaveOutcome.alreadySaved) {
-      await _markSaved(slip.id);
+    // Unggahan slip yang sama sedang berjalan: jangan unggah kedua kali.
+    if (!claimUpload(slip.id)) return DriveSaveOutcome.alreadySaved;
+    try {
+      final bytes = await SalaryService.downloadPdf(slip.id);
+      final outcome = await GoogleDriveService.saveSlipPdf(
+        filename: filenameFor(slip),
+        bytes: bytes,
+        interactive: interactive,
+      );
+      if (outcome == DriveSaveOutcome.saved ||
+          outcome == DriveSaveOutcome.alreadySaved) {
+        await _markSaved(slip.id);
+      }
+      return outcome;
+    } finally {
+      releaseUpload(slip.id);
     }
-    return outcome;
   }
 
   /// Menyimpan di latar semua slip terkunci yang belum tersimpan. Berurutan,

@@ -766,6 +766,17 @@ class SalarySlip {
   /// Alasan yang staff tulis saat menolak slip (hanya terisi setelah ditolak).
   final String? alasanTolak;
 
+  /// `slip_gaji.dikirimKonfirmasiAt` persis seperti dikirim server (string
+  /// ISO, TIDAK diparse ulang). Dikirim balik pada konfirmasi/tolak supaya
+  /// server bisa menolak (409) bila HR sudah memperbarui slip sejak staff
+  /// membukanya. Null di server lama.
+  final String? dikirimKonfirmasiAt;
+
+  /// Alasan tolak yang boleh ditampilkan: hanya selama status sekarang
+  /// `ditolak`. Setelah HR menghitung ulang/kirim ulang, alasan lama hanya
+  /// riwayat dan disembunyikan.
+  String? get alasanTolakTampil => statusSlip == 'ditolak' ? alasanTolak : null;
+
   /// Server: true hanya bila slip sudah `terkunci`. Selama false app HANYA
   /// boleh menampilkan -- tanpa tombol unduh/simpan (permintaan klien).
   final bool bisaUnduh;
@@ -796,11 +807,19 @@ class SalarySlip {
   /// `bentuk: "barang"`, Fasilitas, dan uang makan TIDAK termasuk di sini.
   final int totalTunjanganUang;
 
+  /// Kapan HR menyetujui slip ini untuk dicairkan (`slip_gaji.siapDicairkanAt`);
+  /// null bila belum / batal disetujui / server versi lama.
+  final DateTime? siapDicairkanAt;
+
+  /// `unpaid` | `paid` (`slip_gaji.statusBayar`). Default `unpaid`.
+  final String statusBayar;
+
   const SalarySlip({
     required this.id,
     required this.periodeKey,
     required this.statusSlip,
     required this.alasanTolak,
+    this.dikirimKonfirmasiAt,
     required this.bisaUnduh,
     required this.period,
     required this.periodStart,
@@ -817,6 +836,8 @@ class SalarySlip {
     required this.permissionHistory,
     required this.gajiNetto,
     required this.totalTunjanganUang,
+    this.siapDicairkanAt,
+    this.statusBayar = 'unpaid',
   });
 
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
@@ -961,6 +982,10 @@ class SalarySlip {
               (j['alasanTolak'] as String).trim().isNotEmpty)
           ? (j['alasanTolak'] as String)
           : null,
+      dikirimKonfirmasiAt: (j['dikirimKonfirmasiAt'] is String &&
+              (j['dikirimKonfirmasiAt'] as String).isNotEmpty)
+          ? j['dikirimKonfirmasiAt'] as String
+          : null,
       // Server yang memutuskan. Bila field tidak ada (backend lama) anggap
       // hanya slip terkunci yang boleh diunduh.
       bisaUnduh: j['bisaUnduh'] is bool
@@ -981,6 +1006,10 @@ class SalarySlip {
       permissionHistory: parseHistory('permissionHistory'),
       gajiNetto: gi('gajiNetto'),
       totalTunjanganUang: gi('totalTunjanganUang'),
+      siapDicairkanAt: j['siapDicairkanAt'] == null
+          ? null
+          : DateTime.tryParse(j['siapDicairkanAt'].toString()),
+      statusBayar: (j['statusBayar'] ?? 'unpaid').toString().toLowerCase(),
     );
   }
 
@@ -1071,12 +1100,19 @@ class SalarySlip {
 
   /// Salinan dengan status alur konfirmasi yang baru (dipakai setelah staff
   /// menekan Konfirmasi/Tolak, supaya layar langsung mengikuti tanpa muat ulang).
-  SalarySlip copyWith({String? statusSlip, String? alasanTolak, bool? bisaUnduh}) {
+  SalarySlip copyWith({
+    String? statusSlip,
+    String? alasanTolak,
+    bool? bisaUnduh,
+    DateTime? siapDicairkanAt,
+    String? statusBayar,
+  }) {
     return SalarySlip(
       id: id,
       periodeKey: periodeKey,
       statusSlip: statusSlip ?? this.statusSlip,
       alasanTolak: alasanTolak ?? this.alasanTolak,
+      dikirimKonfirmasiAt: dikirimKonfirmasiAt,
       bisaUnduh: bisaUnduh ?? this.bisaUnduh,
       period: period,
       periodStart: periodStart,
@@ -1093,7 +1129,22 @@ class SalarySlip {
       permissionHistory: permissionHistory,
       gajiNetto: gajiNetto,
       totalTunjanganUang: totalTunjanganUang,
+      siapDicairkanAt: siapDicairkanAt ?? this.siapDicairkanAt,
+      statusBayar: statusBayar ?? this.statusBayar,
     );
+  }
+
+  /// Slip sudah dicairkan (`statusBayar = paid`).
+  bool get sudahDicairkan => statusBayar == 'paid';
+
+  /// HR sudah menyetujui pencairan tetapi belum dibayar.
+  bool get sedangDiprosesPencairan => siapDicairkanAt != null && !sudahDicairkan;
+
+  /// Label pencairan untuk staff; null bila belum ada kabar pencairan.
+  String? get pencairanLabel {
+    if (sudahDicairkan) return 'Sudah dicairkan';
+    if (sedangDiprosesPencairan) return 'Sedang diproses pencairan';
+    return null;
   }
 
   int _sum(SalaryGroup group) => components

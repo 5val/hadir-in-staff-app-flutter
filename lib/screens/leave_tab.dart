@@ -910,8 +910,21 @@ class _LeaveTabState extends State<LeaveTab> {
   // libur harus diajukan dan disetujui SEBELUM harinya. Setelah disetujui,
   // check-in di hari itu dibuka dan seluruh jam kerjanya dihitung lembur.
 
-  /// Hari libur mendatang yang belum punya pengajuan aktif.
-  List<({DateTime tanggal, String nama})> _holidaysAvailableForOvertime() {
+  /// Hari libur mendatang yang belum punya pengajuan aktif dan periode
+  /// gajinya belum tertutup.
+  List<({DateTime tanggal, String nama})> _holidaysAvailableForOvertime() =>
+      _holidaysWithoutRequest()
+          .where((h) => !AppCalendar.instance.isPeriodeTertutup(h.tanggal))
+          .toList();
+
+  /// Hari libur mendatang tanpa pengajuan aktif, tetapi periode gajinya sudah
+  /// tertutup -- tidak ditawarkan; kartu menjelaskan alasannya.
+  List<({DateTime tanggal, String nama})> _holidaysClosedForOvertime() =>
+      _holidaysWithoutRequest()
+          .where((h) => AppCalendar.instance.isPeriodeTertutup(h.tanggal))
+          .toList();
+
+  List<({DateTime tanggal, String nama})> _holidaysWithoutRequest() {
     final taken = _myOvertime
         .where((r) => r.status != 'rejected')
         .map((r) => WorkCalendar.dateKey(r.tanggal))
@@ -924,6 +937,7 @@ class _LeaveTabState extends State<LeaveTab> {
 
   Widget _buildHolidayOvertimeCard() {
     final available = _holidaysAvailableForOvertime();
+    final closed = _holidaysClosedForOvertime();
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -950,6 +964,16 @@ class _LeaveTabState extends State<LeaveTab> {
             'dihitung lembur.',
             style: AppText.caption,
           ),
+          if (closed.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${WorkCalendar.pesanPeriodeTertutup} '
+              '(${closed.map((h) => h.nama).join(', ')}).',
+              key: const Key('holiday-overtime-closed-note'),
+              style: AppText.caption.copyWith(
+                  color: AppColors.danger, fontWeight: FontWeight.w600),
+            ),
+          ],
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -1559,6 +1583,15 @@ class _OvertimeHistoryTile extends StatelessWidget {
                 if (record.alasan.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(record.alasan, style: AppText.caption),
+                ],
+                if (record.status == 'rejected' &&
+                    record.alasanTolak != null) ...[
+                  const SizedBox(height: 2),
+                  Text('Alasan ditolak: ${record.alasanTolak}',
+                      key: const Key('lembur-alasan-tolak'),
+                      style: AppText.caption.copyWith(
+                          color: AppColors.danger,
+                          fontWeight: FontWeight.w600)),
                 ],
               ],
             ),
@@ -2894,6 +2927,9 @@ class _RequestHistoryTile extends StatelessWidget {
             _DetailRow('Tanggal Selesai', f.format(request.endDate)),
             _DetailRow('Durasi', '${request.dayCount} hari'),
             _DetailRow('Status', _statusLabel),
+            if (request.status == RequestStatus.rejected &&
+                request.adminNote != null)
+              _DetailRow('Alasan Ditolak', request.adminNote!),
             _DetailRow('Diajukan',
                 DateFormat('dd MMM yyyy, HH:mm').format(request.submittedAt)),
             const SizedBox(height: 20),

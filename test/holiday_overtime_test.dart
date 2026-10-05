@@ -12,6 +12,8 @@ WorkCalendar calendarWith(Map<String, String> holidays) => WorkCalendar(
       jamPulang: '17:00',
     );
 
+const Object _absent = Object();
+
 void main() {
   group('TodayHolidayStatus.fromApi', () {
     test('holiday worked under an approved overtime request', () {
@@ -68,6 +70,69 @@ void main() {
     });
   });
 
+  group('periodeTertutup (periode gaji sudah dihitung)', () {
+    Map<String, dynamic> payload({Object? tertutup = _absent}) => {
+          'hariLibur': [
+            {'tanggal': '2026-09-17', 'nama': 'Libur Uji', 'tipe': 'nasional'},
+          ],
+          'hariKerja': ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'],
+          'shift': {'nama': 'Reguler', 'jamMasuk': '08:00', 'jamPulang': '17:00'},
+          if (tertutup != _absent) 'periodeTertutup': tertutup,
+        };
+
+    final closed = [
+      {'periode': '2026-09', 'start': '2026-09-01', 'endExclusive': '2026-10-01'},
+    ];
+
+    test('parses the list from the hari-libur response', () {
+      final cal = WorkCalendar.fromApi(payload(tertutup: closed));
+      expect(cal.periodeTertutup, hasLength(1));
+      expect(cal.periodeTertutup.first.periode, '2026-09');
+      expect(cal.periodeTertutup.first.start, DateTime(2026, 9, 1));
+      expect(cal.periodeTertutup.first.endExclusive, DateTime(2026, 10, 1));
+    });
+
+    test('end is EXCLUSIVE: first and last day in, day before and endExclusive out', () {
+      final cal = WorkCalendar.fromApi(payload(tertutup: closed));
+      expect(cal.isPeriodeTertutup(DateTime(2026, 8, 31)), isFalse);
+      expect(cal.isPeriodeTertutup(DateTime(2026, 9, 1)), isTrue);
+      expect(cal.isPeriodeTertutup(DateTime(2026, 9, 30)), isTrue);
+      expect(cal.isPeriodeTertutup(DateTime(2026, 9, 30, 23, 59)), isTrue);
+      expect(cal.isPeriodeTertutup(DateTime(2026, 10, 1)), isFalse);
+    });
+
+    test('closed workdays are not selectable for submission, but stay workdays', () {
+      final cal = WorkCalendar.fromApi(payload(tertutup: closed));
+      final wed = DateTime(2026, 9, 16);
+      expect(cal.isSelectableForSubmission(wed), isFalse);
+      expect(cal.isSelectable(wed), isTrue);
+      expect(cal.isSelectableForSubmission(DateTime(2026, 10, 5)), isTrue);
+    });
+
+    test('missing field (old server) behaves as before: nothing closed', () {
+      final cal = WorkCalendar.fromApi(payload());
+      expect(cal.periodeTertutup, isEmpty);
+      expect(cal.isPeriodeTertutup(DateTime(2026, 9, 16)), isFalse);
+      expect(cal.isSelectableForSubmission(DateTime(2026, 9, 16)), isTrue);
+      expect(WorkCalendar.empty.isSelectableForSubmission(DateTime(2026, 9, 16)), isTrue);
+    });
+
+    test('malformed entries are ignored (fail-open)', () {
+      final cal = WorkCalendar.fromApi(payload(tertutup: [
+        'x',
+        {'periode': '2026-09', 'start': 'bogus', 'endExclusive': '2026-10-01'},
+        {'periode': '2026-08', 'start': '2026-08-01', 'endExclusive': '2026-09-01'},
+      ]));
+      expect(cal.periodeTertutup, hasLength(1));
+      expect(cal.isPeriodeTertutup(DateTime(2026, 9, 16)), isFalse);
+    });
+
+    test('the user-facing reason is the agreed copy', () {
+      expect(WorkCalendar.pesanPeriodeTertutup,
+          'Gaji periode ini sudah dihitung, pengajuan ditutup');
+    });
+  });
+
   group('OvertimeRequestRecord.fromApi', () {
     Map<String, dynamic> row({bool? isHariLibur}) => {
           'id': 'o1',
@@ -79,6 +144,17 @@ void main() {
           'durasiJam': 8,
           if (isHariLibur != null) 'isHariLibur': isHariLibur,
         };
+
+    test('A6: reads the rejection reason (incl. the system auto-reject text), null when blank', () {
+      final r = OvertimeRequestRecord.fromApi({
+        ...row(),
+        'status': 'rejected',
+        'alasanTolak': 'Tidak diproses: gaji periode ini sudah dihitung',
+      });
+      expect(r.alasanTolak, 'Tidak diproses: gaji periode ini sudah dihitung');
+      expect(OvertimeRequestRecord.fromApi(row()).alasanTolak, isNull);
+      expect(OvertimeRequestRecord.fromApi({...row(), 'alasanTolak': '  '}).alasanTolak, isNull);
+    });
 
     test('reads isHariLibur, defaults to false for old rows', () {
       expect(OvertimeRequestRecord.fromApi(row(isHariLibur: true)).isHariLibur, isTrue);

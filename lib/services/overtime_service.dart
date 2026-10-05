@@ -90,6 +90,10 @@ class OvertimeRequestRecord {
   /// jendela RENCANA, jam final baru diketahui setelah check-out).
   final bool isHariLibur;
 
+  /// Alasan penolakan (HR/atasan, atau sistem: "Tidak diproses: gaji periode
+  /// ini sudah dihitung"). Hanya bermakna bila [status] == rejected.
+  final String? alasanTolak;
+
   OvertimeRequestRecord({
     required this.id,
     required this.tanggal,
@@ -99,6 +103,7 @@ class OvertimeRequestRecord {
     required this.status,
     required this.durasiJam,
     this.isHariLibur = false,
+    this.alasanTolak,
   });
 
   factory OvertimeRequestRecord.fromApi(Map<String, dynamic> j) {
@@ -112,6 +117,9 @@ class OvertimeRequestRecord {
       status: (j['status'] ?? 'pending').toString(),
       durasiJam: (j['durasiJam'] as num?)?.toDouble() ?? 0,
       isHariLibur: j['isHariLibur'] == true,
+      alasanTolak: (j['alasanTolak'] ?? '').toString().trim().isEmpty
+          ? null
+          : j['alasanTolak'].toString(),
     );
   }
 }
