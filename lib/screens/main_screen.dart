@@ -286,7 +286,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   /// tetap memvalidasi ulang saat check-in.
   Future<void> _loadWorkCalendar() async {
     try {
-      final calendar = await CalendarService.load();
+      // joinDate datang dari profil (sudah dimuat sebelum kalender).
+      final calendar = (await CalendarService.load())
+          .withJoinDate(AppSession.staff?.joinDate);
       AppCalendar.set(calendar);
       AttendanceRules.hydrateFromShift(
         jamMasuk: calendar.jamMasuk,

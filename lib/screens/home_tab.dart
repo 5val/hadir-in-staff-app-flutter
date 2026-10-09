@@ -1597,6 +1597,32 @@ class _HomeTabState extends State<HomeTab> {
     );
   }
 
+  /// Kartu pengganti CTA check-in selama staff belum mulai bekerja (hari ini
+  /// sebelum `joinDate`).
+  Widget _buildBelumMulaiBekerjaCard() {
+    final mulai = AppCalendar.instance.hariIni.mulaiBekerja ??
+        AppCalendar.instance.joinDate;
+    final tanggal = mulai == null ? 'nanti' : WorkCalendar.formatTanggal(mulai);
+    return SectionCard(
+      color: AppColors.brandNavy.withOpacity(0.06),
+      borderColor: AppColors.brandNavy.withOpacity(0.2),
+      child: Column(
+        children: [
+          const Icon(Icons.event_rounded, color: AppColors.brandNavy, size: 36),
+          const SizedBox(height: 8),
+          Text('Belum Mulai Bekerja',
+              style: AppText.headline3.copyWith(color: AppColors.brandNavy),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 4),
+          Text(
+              'Anda mulai bekerja $tanggal. Absensi dibuka mulai tanggal itu.',
+              style: AppText.body2,
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAttendanceContent() {
     final canGpsAction =
         _locationOn && _locationChecked && _locationInRange;
@@ -1604,6 +1630,9 @@ class _HomeTabState extends State<HomeTab> {
     switch (_status) {
       // ── Belum check-in ────────────────────────────────────────
       case AttendanceProviderStatus.notCheckedIn:
+        if (AppCalendar.instance.hariIni.belumMulaiBekerja) {
+          return _buildBelumMulaiBekerjaCard();
+        }
         if (!_isWorkDay) {
           final nama = _holidayName;
           return SectionCard(

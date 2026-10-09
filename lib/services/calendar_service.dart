@@ -44,6 +44,14 @@ class TodayHolidayStatus {
 
   final bool dikecualikanLembur;
 
+  /// Staff belum mulai bekerja (hari ini sebelum `joinDate`). Server juga
+  /// mengirim `bolehAbsen: false` dalam kasus ini; flag-nya dipisah supaya UI
+  /// menampilkan kartu "mulai bekerja" alih-alih kartu hari libur.
+  final bool belumMulaiBekerja;
+
+  /// Tanggal mulai bekerja (tanggal saja), null bila server tidak mengirim.
+  final DateTime? mulaiBekerja;
+
   /// Jendela jam RENCANA pada pengajuan lembur hari libur yang disetujui untuk
   /// hari ini ("HH:mm"), null bila hari ini bukan kerja lembur hari libur.
   /// Dipakai popup konfirmasi sebelum check-in.
@@ -61,6 +69,8 @@ class TodayHolidayStatus {
     this.bolehAbsen = true,
     this.alasan,
     this.dikecualikanLembur = false,
+    this.belumMulaiBekerja = false,
+    this.mulaiBekerja,
     this.lemburJamMulai,
     this.lemburJamSelesai,
   });
@@ -75,14 +85,19 @@ class TodayHolidayStatus {
     final window = j['lemburHariLibur'] is Map
         ? Map<String, dynamic>.from(j['lemburHariLibur'] as Map)
         : const <String, dynamic>{};
+    // Fail-open: hanya `true` eksplisit yang menggerbang (server lama tidak
+    // mengirim field ini).
+    final belum = j['belumMulaiBekerja'] == true;
     return TodayHolidayStatus(
+      belumMulaiBekerja: belum,
+      mulaiBekerja: WorkCalendar.parseDateOnly(j['mulaiBekerja']),
       isLibur: j['isLibur'] == true,
       namaLibur: (j['namaLibur'] as Object?)?.toString(),
       tipeLibur: (j['tipeLibur'] as Object?)?.toString(),
       // Hanya `false` eksplisit yang memblokir; nilai hilang/aneh
       // diperlakukan sebagai boleh absen (fail-open, sama seperti
       // [unknown]).
-      bolehAbsen: j['bolehAbsen'] != false,
+      bolehAbsen: j['bolehAbsen'] != false && !belum,
       alasan: (j['alasan'] as Object?)?.toString(),
       dikecualikanLembur: j['dikecualikanLembur'] == true,
       lemburJamMulai: window['jamMulai']?.toString(),
@@ -181,6 +196,11 @@ class WorkCalendar {
   /// (aturan lama server tersebut).
   final List<PeriodeTertutup> periodeLemburTertutup;
 
+  /// Tanggal mulai bekerja staff (`joinDate` profil, tanggal saja). Tanggal
+  /// sebelum ini tidak boleh dipilih untuk cuti/izin/lembur. Null = tidak
+  /// diketahui (fail-open; server tetap menolak dengan HTTP 400).
+  final DateTime? joinDate;
+
   const WorkCalendar({
     required this.holidayByDate,
     required this.hariKerja,
@@ -194,7 +214,54 @@ class WorkCalendar {
     this.hariIni = TodayHolidayStatus.unknown,
     this.periodeTertutup = const [],
     this.periodeLemburTertutup = const [],
+    this.joinDate,
   });
+
+  /// Salinan dengan [joinDate] diisi (profil dimuat terpisah dari kalender).
+  WorkCalendar withJoinDate(DateTime? joinDate) => WorkCalendar(
+        holidayByDate: holidayByDate,
+        hariKerja: hariKerja,
+        shiftNama: shiftNama,
+        jamMasuk: jamMasuk,
+        jamPulang: jamPulang,
+        jamIstirahatMulai: jamIstirahatMulai,
+        jamIstirahatSelesai: jamIstirahatSelesai,
+        toleransiPulang: toleransiPulang,
+        jamPulangHariBerikutnya: jamPulangHariBerikutnya,
+        hariIni: hariIni,
+        periodeTertutup: periodeTertutup,
+        periodeLemburTertutup: periodeLemburTertutup,
+        joinDate: joinDate == null
+            ? null
+            : DateTime(joinDate.year, joinDate.month, joinDate.day),
+      );
+
+  /// Parse "YYYY-MM-DD" / ISO ke tanggal lokal tanpa jam; null bila tidak
+  /// terbaca. Bagian tanggal diambil apa adanya dari string (tanpa konversi
+  /// zona waktu) supaya "2026-10-12T00:00:00Z" tetap 12 Oktober.
+  static DateTime? parseDateOnly(Object? raw) {
+    final str = raw?.toString() ?? '';
+    final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(str);
+    if (m == null) return null;
+    return DateTime(
+        int.parse(m.group(1)!), int.parse(m.group(2)!), int.parse(m.group(3)!));
+  }
+
+  static const _bulan = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+  ];
+
+  /// "dd MMM yyyy", mis. "12 Okt 2026".
+  static String formatTanggal(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')} ${_bulan[d.month - 1]} ${d.year}';
+
+  /// [d] jatuh sebelum tanggal mulai bekerja.
+  bool isBeforeJoinDate(DateTime d) {
+    final j = joinDate;
+    if (j == null) return false;
+    return DateTime(d.year, d.month, d.day).isBefore(j);
+  }
 
   /// Alasan yang ditampilkan di tempat pengajuan cuti/izin ditutup.
   static const pesanPeriodeTertutup =
@@ -259,7 +326,7 @@ class WorkCalendar {
   /// non-libur DAN gaji periodenya belum dihitung. Berbeda dari
   /// [isSelectable], yang juga dipakai untuk menghitung hari kerja/riwayat.
   bool isSelectableForSubmission(DateTime d) =>
-      isSelectable(d) && !isPeriodeTertutup(d);
+      isSelectable(d) && !isPeriodeTertutup(d) && !isBeforeJoinDate(d);
 
   /// Kalender kosong — dipakai sebagai fallback aman bila data belum termuat:
   /// tidak ada tanggal yang di-disable, jadi app tidak pernah memblokir staff
@@ -292,6 +359,7 @@ class WorkCalendar {
     holidayByDate.forEach((key, nama) {
       if (key.compareTo(todayKey) < 0) return;
       final d = DateTime.tryParse(key);
+      if (d != null && isBeforeJoinDate(d)) return;
       if (d != null) result.add((tanggal: d, nama: nama));
     });
     result.sort((a, b) => a.tanggal.compareTo(b.tanggal));
@@ -330,6 +398,10 @@ class WorkCalendar {
         !d.isAfter(end);
         d = DateTime(d.year, d.month, d.day + 1)) {
       if (isPeriodeTertutup(d)) return pesanPeriodeTertutup;
+    }
+    final j = joinDate;
+    if (j != null && isBeforeJoinDate(first)) {
+      return 'Anda baru bisa mengajukan mulai ${formatTanggal(j)}.';
     }
     return 'Tidak ada hari kerja yang bisa dipilih pada rentang tanggal ini.';
   }

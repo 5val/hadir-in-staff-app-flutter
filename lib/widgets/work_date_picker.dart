@@ -85,9 +85,13 @@ Future<DateTime?> showWorkDatePicker({
     lastDate: last,
     selectableDayPredicate: blockHolidays ? selectable : null,
     helpText: blockHolidays
-        ? (calendar.periodeTertutup.isEmpty
-            ? 'Pilih tanggal hari kerja'
-            : 'Pilih tanggal hari kerja. ${WorkCalendar.pesanPeriodeTertutup}')
+        ? [
+            'Pilih tanggal hari kerja',
+            if (calendar.joinDate != null)
+              'mulai ${WorkCalendar.formatTanggal(calendar.joinDate!)}',
+            if (calendar.periodeTertutup.isNotEmpty)
+              WorkCalendar.pesanPeriodeTertutup,
+          ].join('. ')
         : null,
     builder: _theme,
   );

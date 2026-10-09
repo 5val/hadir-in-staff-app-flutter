@@ -1805,6 +1805,10 @@ class StaffProfile {
   // bila HRD belum mengisinya di Portal Office.
   final String kontakAdminPhone;
 
+  /// Tanggal mulai bekerja (`joinDate`, tanggal saja). Null bila server lama
+  /// tidak mengirimnya (fail-open: tidak ada pembatasan di client).
+  final DateTime? joinDate;
+
   const StaffProfile({
     required this.id,
     required this.nama,
@@ -1834,6 +1838,7 @@ class StaffProfile {
     this.lokasiLongitude,
     this.lokasiRadius = 100,
     this.kontakAdminPhone = '',
+    this.joinDate,
   });
 
   factory StaffProfile.fromJson(Map<String, dynamic> j) {
@@ -1875,7 +1880,17 @@ class StaffProfile {
       lokasiLongitude: (lokasi['longitude'] as num?)?.toDouble(),
       lokasiRadius: asInt(lokasi['radius']) == 0 ? 100 : asInt(lokasi['radius']),
       kontakAdminPhone: (office['kontakAdminPhone'] ?? '').toString(),
+      joinDate: parseJoinDate(j['joinDate']),
     );
+  }
+
+  /// "YYYY-MM-DD"/ISO -> tanggal tanpa jam (bagian tanggal diambil apa adanya,
+  /// tanpa konversi zona waktu). Null bila tidak terbaca.
+  static DateTime? parseJoinDate(Object? raw) {
+    final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw?.toString() ?? '');
+    if (m == null) return null;
+    return DateTime(
+        int.parse(m.group(1)!), int.parse(m.group(2)!), int.parse(m.group(3)!));
   }
 
   /// Rekening gaji sudah terisi lengkap (bank, nomor, dan nama pemilik).
@@ -1931,6 +1946,7 @@ class StaffProfile {
       lokasiLongitude: lokasiLongitude,
       lokasiRadius: lokasiRadius,
       kontakAdminPhone: kontakAdminPhone,
+      joinDate: joinDate,
     );
   }
 
