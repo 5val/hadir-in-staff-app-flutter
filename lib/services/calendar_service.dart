@@ -91,8 +91,10 @@ class TodayHolidayStatus {
   }
 }
 
-/// Periode gaji yang sudah dihitung/dikunci untuk staff ini (spec Sprint 3
-/// §3.9). Pengajuan cuti/izin/lembur pada tanggal di dalamnya ditutup.
+/// Periode gaji yang sudah tertutup untuk staff ini (spec Sprint 3 §3.9).
+/// Dipakai untuk dua daftar di [WorkCalendar]: [WorkCalendar.periodeTertutup]
+/// (cuti/izin -- tertutup begitu gaji dihitung) dan
+/// [WorkCalendar.periodeLemburTertutup] (lembur -- tertutup begitu dikunci).
 /// [endExclusive] EKSKLUSIF: hari terakhir periode adalah `endExclusive - 1`.
 class PeriodeTertutup {
   final String periode;
@@ -166,10 +168,18 @@ class WorkCalendar {
   /// Status hari ini menurut server (lihat [TodayHolidayStatus]).
   final TodayHolidayStatus hariIni;
 
-  /// Periode gaji yang sudah tertutup untuk staff ini. Kosong bila server
-  /// versi lama tidak mengirim `periodeTertutup` (fail-open: server tetap
-  /// menolak pengajuannya).
+  /// Periode gaji yang sudah DIHITUNG admin untuk staff ini (slip ada dalam
+  /// status apa pun, meski belum dikunci) -- tertutup untuk pengajuan
+  /// CUTI/IZIN. Kosong bila server versi lama tidak mengirim
+  /// `periodeTertutup` (fail-open: server tetap menolak pengajuannya).
   final List<PeriodeTertutup> periodeTertutup;
+
+  /// 2026-10-09 -- periode gaji yang sudah DIKUNCI (atau dibayar) -- baru
+  /// tertutup untuk pengajuan LEMBUR. Selama gaji baru dihitung dan belum
+  /// dikunci, staff masih boleh mengajukan lembur yang belum diajukan.
+  /// Server lama tanpa `periodeLemburTertutup` -> jatuh ke [periodeTertutup]
+  /// (aturan lama server tersebut).
+  final List<PeriodeTertutup> periodeLemburTertutup;
 
   const WorkCalendar({
     required this.holidayByDate,
@@ -183,11 +193,20 @@ class WorkCalendar {
     this.jamPulangHariBerikutnya = false,
     this.hariIni = TodayHolidayStatus.unknown,
     this.periodeTertutup = const [],
+    this.periodeLemburTertutup = const [],
   });
 
-  /// Alasan yang ditampilkan di tempat pengajuan ditutup.
+  /// Alasan yang ditampilkan di tempat pengajuan cuti/izin ditutup.
   static const pesanPeriodeTertutup =
       'Gaji periode ini sudah dihitung, pengajuan ditutup';
+
+  /// Alasan yang ditampilkan di tempat pengajuan lembur ditutup.
+  static const pesanPeriodeLemburTertutup =
+      'Gaji periode ini sudah dikunci, pengajuan lembur ditutup';
+
+  static List<PeriodeTertutup> _parsePeriodeList(Object? raw) => raw is List
+      ? raw.map(PeriodeTertutup.tryParse).whereType<PeriodeTertutup>().toList()
+      : const [];
 
   /// Parsing respons `GET /mobile/staff/:id/hari-libur`.
   factory WorkCalendar.fromApi(Map<String, dynamic> data) {
@@ -220,20 +239,24 @@ class WorkCalendar {
           ? TodayHolidayStatus.fromApi(
               Map<String, dynamic>.from(data['hariIni'] as Map))
           : TodayHolidayStatus.unknown,
-      periodeTertutup: data['periodeTertutup'] is List
-          ? (data['periodeTertutup'] as List)
-              .map(PeriodeTertutup.tryParse)
-              .whereType<PeriodeTertutup>()
-              .toList()
-          : const [],
+      periodeTertutup: _parsePeriodeList(data['periodeTertutup']),
+      periodeLemburTertutup: data.containsKey('periodeLemburTertutup')
+          ? _parsePeriodeList(data['periodeLemburTertutup'])
+          : _parsePeriodeList(data['periodeTertutup']),
     );
   }
 
-  /// Tanggal [d] jatuh di periode gaji yang sudah tertutup (end eksklusif).
+  /// Tanggal [d] jatuh di periode gaji yang sudah dihitung -- tertutup untuk
+  /// cuti/izin (end eksklusif).
   bool isPeriodeTertutup(DateTime d) => periodeTertutup.any((p) => p.contains(d));
 
-  /// Tanggal ini boleh dipilih untuk PENGAJUAN (cuti/izin/lembur hari
-  /// libur): hari kerja non-libur DAN periodenya belum tertutup. Berbeda dari
+  /// Tanggal [d] jatuh di periode gaji yang sudah dikunci -- tertutup untuk
+  /// lembur (end eksklusif).
+  bool isPeriodeLemburTertutup(DateTime d) =>
+      periodeLemburTertutup.any((p) => p.contains(d));
+
+  /// Tanggal ini boleh dipilih untuk PENGAJUAN cuti/izin: hari kerja
+  /// non-libur DAN gaji periodenya belum dihitung. Berbeda dari
   /// [isSelectable], yang juga dipakai untuk menghitung hari kerja/riwayat.
   bool isSelectableForSubmission(DateTime d) =>
       isSelectable(d) && !isPeriodeTertutup(d);

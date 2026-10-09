@@ -130,6 +130,42 @@ void main() {
     test('the user-facing reason is the agreed copy', () {
       expect(WorkCalendar.pesanPeriodeTertutup,
           'Gaji periode ini sudah dihitung, pengajuan ditutup');
+      expect(WorkCalendar.pesanPeriodeLemburTertutup,
+          'Gaji periode ini sudah dikunci, pengajuan lembur ditutup');
+    });
+  });
+
+  group('periodeLemburTertutup (periode gaji sudah dikunci)', () {
+    final closed = [
+      {'periode': '2026-09', 'start': '2026-09-01', 'endExclusive': '2026-10-01'},
+    ];
+    Map<String, dynamic> payload(Map<String, Object?> extra) => {
+          'hariKerja': ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat'],
+          'shift': {'nama': 'Reguler', 'jamMasuk': '08:00', 'jamPulang': '17:00'},
+          ...extra,
+        };
+
+    test('calculated but not locked: closed for cuti/izin, open for lembur', () {
+      final cal = WorkCalendar.fromApi(
+          payload({'periodeTertutup': closed, 'periodeLemburTertutup': []}));
+      final wed = DateTime(2026, 9, 16);
+      expect(cal.isPeriodeTertutup(wed), isTrue);
+      expect(cal.isSelectableForSubmission(wed), isFalse);
+      expect(cal.isPeriodeLemburTertutup(wed), isFalse);
+    });
+
+    test('locked: closed for lembur too', () {
+      final cal = WorkCalendar.fromApi(
+          payload({'periodeTertutup': closed, 'periodeLemburTertutup': closed}));
+      expect(cal.isPeriodeLemburTertutup(DateTime(2026, 9, 16)), isTrue);
+      expect(cal.isPeriodeLemburTertutup(DateTime(2026, 10, 1)), isFalse);
+    });
+
+    test('old server without the field falls back to periodeTertutup', () {
+      final cal = WorkCalendar.fromApi(payload({'periodeTertutup': closed}));
+      expect(cal.isPeriodeLemburTertutup(DateTime(2026, 9, 16)), isTrue);
+      expect(WorkCalendar.empty.isPeriodeLemburTertutup(DateTime(2026, 9, 16)),
+          isFalse);
     });
   });
 

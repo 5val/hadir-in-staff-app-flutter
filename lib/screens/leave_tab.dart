@@ -629,7 +629,10 @@ class _LeaveTabState extends State<LeaveTab> {
   //   2. akhir pekan & tanggal merah tetap dilewati — bukan karena kalender
   //      yang menentukan daftarnya, tapi karena endpoint POST menolak
   //      tanggal di luar hari kerja shift;
-  //   3. tidak bisa diajukan bila gaji periode tersebut sudah ditutup.
+  //   3. tidak bisa diajukan bila gaji periode tersebut sudah DIKUNCI
+  //      (2026-10-09). Selama gaji baru dihitung dan belum dikunci, lembur
+  //      yang belum diajukan masih bisa diajukan -- beda dengan cuti/izin,
+  //      yang sudah tertutup begitu gaji dihitung.
   //
   // Sub-tab "Riwayat Pengajuan Lembur" juga dihapus dari sini — riwayatnya
   // digabung ke tab "Riwayat" bersama cuti & izin.
@@ -911,17 +914,17 @@ class _LeaveTabState extends State<LeaveTab> {
   // check-in di hari itu dibuka dan seluruh jam kerjanya dihitung lembur.
 
   /// Hari libur mendatang yang belum punya pengajuan aktif dan periode
-  /// gajinya belum tertutup.
+  /// gajinya belum dikunci.
   List<({DateTime tanggal, String nama})> _holidaysAvailableForOvertime() =>
       _holidaysWithoutRequest()
-          .where((h) => !AppCalendar.instance.isPeriodeTertutup(h.tanggal))
+          .where((h) => !AppCalendar.instance.isPeriodeLemburTertutup(h.tanggal))
           .toList();
 
   /// Hari libur mendatang tanpa pengajuan aktif, tetapi periode gajinya sudah
-  /// tertutup -- tidak ditawarkan; kartu menjelaskan alasannya.
+  /// dikunci -- tidak ditawarkan; kartu menjelaskan alasannya.
   List<({DateTime tanggal, String nama})> _holidaysClosedForOvertime() =>
       _holidaysWithoutRequest()
-          .where((h) => AppCalendar.instance.isPeriodeTertutup(h.tanggal))
+          .where((h) => AppCalendar.instance.isPeriodeLemburTertutup(h.tanggal))
           .toList();
 
   List<({DateTime tanggal, String nama})> _holidaysWithoutRequest() {
@@ -967,7 +970,7 @@ class _LeaveTabState extends State<LeaveTab> {
           if (closed.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              '${WorkCalendar.pesanPeriodeTertutup} '
+              '${WorkCalendar.pesanPeriodeLemburTertutup} '
               '(${closed.map((h) => h.nama).join(', ')}).',
               key: const Key('holiday-overtime-closed-note'),
               style: AppText.caption.copyWith(
