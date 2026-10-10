@@ -96,6 +96,34 @@ void main() {
     });
   });
 
+  group('SalaryDetailScreen -- tolak dialog with per-part checkboxes', () {
+    testWidgets('lists slip parts, submit disabled until a part is checked or a note is typed', (tester) async {
+      await pumpDetail(tester, slipWith('menunggu_konfirmasi'));
+      await tester.tap(find.text('Ada yang salah'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Apa yang salah?'), findsOneWidget);
+      expect(find.text('Data kehadiran / absensi'), findsOneWidget);
+      expect(find.text('Total / Take Home Pay'), findsOneWidget);
+      expect(find.byType(CheckboxListTile), findsWidgets);
+
+      FilledButton send() => tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Kirim ke HR'));
+      expect(send().onPressed, isNull);
+
+      await tester.tap(find.text('Data kehadiran / absensi'));
+      await tester.pump();
+      expect(send().onPressed, isNotNull);
+
+      await tester.tap(find.text('Data kehadiran / absensi'));
+      await tester.pump();
+      expect(send().onPressed, isNull);
+
+      await tester.enterText(find.byKey(const Key('tolak-catatan')), 'salah hitung');
+      await tester.pump();
+      expect(send().onPressed, isNotNull);
+    });
+  });
+
   group('SalaryDetailScreen -- pencairan state', () {
     testWidgets('terkunci + siapDicairkanAt: "Sedang diproses pencairan"', (tester) async {
       await pumpDetail(tester,

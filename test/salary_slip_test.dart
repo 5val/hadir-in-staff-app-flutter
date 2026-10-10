@@ -141,6 +141,22 @@ void _sprint3Tests() {
           {'alasan': 'salah hitung', 'dikirimKonfirmasiAt': iso});
     });
 
+    test('susunAlasanTolak lists the checked parts, then the note', () {
+      expect(
+          SalaryService.susunAlasanTolak(
+              ['Pendapatan Pokok: Lembur', 'Potongan: Alpha'], ' kurang 2 jam '),
+          'Bagian yang salah: Pendapatan Pokok: Lembur; Potongan: Alpha. Catatan: kurang 2 jam');
+      expect(SalaryService.susunAlasanTolak(['Umum: Data kehadiran / absensi'], ''),
+          'Bagian yang salah: Umum: Data kehadiran / absensi.');
+      expect(SalaryService.susunAlasanTolak([], 'salah hitung'), 'salah hitung');
+    });
+
+    test('susunAlasanTolak never exceeds the 500-char server limit', () {
+      final long = SalaryService.susunAlasanTolak(
+          List.generate(40, (i) => 'Tunjangan: Komponen panjang nomor $i'), 'x' * 300);
+      expect(long.length, SalaryService.tolakAlasanMax);
+    });
+
     test('without the field the bodies stay as the old app sent them', () {
       expect(SalaryService.konfirmasiBody(null), isNull);
       expect(SalaryService.tolakBody('salah hitung', null), {'alasan': 'salah hitung'});

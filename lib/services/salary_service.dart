@@ -93,6 +93,26 @@ class SalaryService {
           ? null
           : {'dikirimKonfirmasiAt': dikirimKonfirmasiAt};
 
+  /// Batas panjang alasan di server (`slipTolakSchema`: 5-500 karakter).
+  static const tolakAlasanMax = 500;
+
+  /// Susun alasan tolak dari bagian slip yang dicentang staff ([bagian],
+  /// mis. "Tunjangan: Transport Harian") dan catatan bebas ([catatan]).
+  /// Hasilnya satu string -- itulah yang dibaca admin/manajer di tabel slip
+  /// dan notifikasi, jadi server tidak perlu field baru. Dipotong ke
+  /// [tolakAlasanMax] bila kepanjangan.
+  static String susunAlasanTolak(List<String> bagian, String catatan) {
+    final note = catatan.trim();
+    final parts = <String>[
+      if (bagian.isNotEmpty) 'Bagian yang salah: ${bagian.join('; ')}.',
+      if (note.isNotEmpty) bagian.isEmpty ? note : 'Catatan: $note',
+    ];
+    final text = parts.join(' ');
+    return text.length <= tolakAlasanMax
+        ? text
+        : '${text.substring(0, tolakAlasanMax - 1)}…';
+  }
+
   static Map<String, dynamic> tolakBody(
           String alasan, String? dikirimKonfirmasiAt) =>
       {

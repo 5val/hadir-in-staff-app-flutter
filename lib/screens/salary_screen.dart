@@ -773,10 +773,41 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     }
   }
 
+  /// Bagian slip yang bisa dicentang staff saat menolak: data kehadiran, tiap
+  /// baris rincian (dikelompokkan seperti di layar), lalu total THP.
+  List<_TolakItem> _tolakItems() {
+    String sectionOf(SalaryGroup g) {
+      switch (g) {
+        case SalaryGroup.pendapatanPokok:
+          return 'Pendapatan Pokok';
+        case SalaryGroup.pajak:
+          return 'Pajak';
+        case SalaryGroup.tunjangan:
+          return 'Tunjangan';
+        case SalaryGroup.potongan:
+          return 'Potongan';
+      }
+    }
+
+    return [
+      const _TolakItem(section: 'Umum', label: 'Data kehadiran / absensi'),
+      for (final g in const [
+        SalaryGroup.pendapatanPokok,
+        SalaryGroup.pajak,
+        SalaryGroup.tunjangan,
+        SalaryGroup.potongan,
+      ])
+        for (final c in slip.components.where((c) => c.group == g))
+          _TolakItem(
+              section: sectionOf(g), label: c.label, amount: _fmt(c.amount)),
+      const _TolakItem(section: 'Umum', label: 'Total / Take Home Pay'),
+    ];
+  }
+
   Future<void> _tolak() async {
     final alasan = await showDialog<String>(
       context: context,
-      builder: (ctx) => const _TolakSlipDialog(),
+      builder: (ctx) => _TolakSlipDialog(items: _tolakItems()),
     );
     if (alasan == null || _busy) return;
 
@@ -1971,8 +2002,20 @@ class _SummaryRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 // DIALOG: alasan menolak slip
 // ─────────────────────────────────────────────────────────────────────────────
+/// Satu baris yang bisa dicentang di dialog tolak.
+class _TolakItem {
+  final String section;
+  final String label;
+  final String? amount;
+  const _TolakItem({required this.section, required this.label, this.amount});
+
+  /// Teks yang dikirim ke HR, mis. "Tunjangan: Transport Harian".
+  String get text => '$section: $label';
+}
+
 class _TolakSlipDialog extends StatefulWidget {
-  const _TolakSlipDialog();
+  final List<_TolakItem> items;
+  const _TolakSlipDialog({required this.items});
 
   @override
   State<_TolakSlipDialog> createState() => _TolakSlipDialogState();
@@ -1980,6 +2023,7 @@ class _TolakSlipDialog extends StatefulWidget {
 
 class _TolakSlipDialogState extends State<_TolakSlipDialog> {
   final _controller = TextEditingController();
+  final _checked = <int>{};
   static const _min = 5;
 
   @override
@@ -1988,36 +2032,99 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
     super.dispose();
   }
 
+  List<String> get _bagian => [
+        for (var i = 0; i < widget.items.length; i++)
+          if (_checked.contains(i)) widget.items[i].text,
+      ];
+
+  /// Valid bila ada bagian yang dicentang ATAU catatan cukup panjang.
+  bool get _valid =>
+      _checked.isNotEmpty || _controller.text.trim().length >= _min;
+
   @override
   Widget build(BuildContext context) {
-    final valid = _controller.text.trim().length >= _min;
+    final sections = <String>[];
+    for (final i in widget.items) {
+      if (!sections.contains(i.section)) sections.add(i.section);
+    }
+    final maxHeight = MediaQuery.of(context).size.height * 0.4;
+
     return AlertDialog(
       title: const Text('Apa yang salah?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-              'Tulis bagian yang tidak sesuai supaya HR bisa memperbaikinya, '
-              'mis. "Lembur saya kurang 2 jam".'),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            maxLines: 3,
-            maxLength: 500,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'Alasan (minimal 5 karakter)',
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Centang bagian slip yang tidak sesuai supaya HR tahu apa yang '
+                'harus diperbaiki. Catatan tambahan boleh diisi.'),
+            const SizedBox(height: 8),
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final section in sections) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 2),
+                        child: Text(section,
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.slate600)),
+                      ),
+                      for (var i = 0; i < widget.items.length; i++)
+                        if (widget.items[i].section == section)
+                          CheckboxListTile(
+                            key: ValueKey('tolak-item-$i'),
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: _checked.contains(i),
+                            onChanged: (v) => setState(() {
+                              v == true ? _checked.add(i) : _checked.remove(i);
+                            }),
+                            title: Text(widget.items[i].label,
+                                style: GoogleFonts.inter(fontSize: 13)),
+                            secondary: widget.items[i].amount == null
+                                ? null
+                                : Text(widget.items[i].amount!,
+                                    style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: AppColors.slate700)),
+                          ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('tolak-catatan'),
+              controller: _controller,
+              maxLines: 2,
+              maxLength: 300,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                hintText: _checked.isEmpty
+                    ? 'Catatan (minimal 5 karakter bila tidak ada yang dicentang)'
+                    : 'Catatan tambahan (opsional), mis. "kurang 2 jam"',
+              ),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
         FilledButton(
-          onPressed: valid ? () => Navigator.pop(context, _controller.text.trim()) : null,
+          onPressed: _valid
+              ? () => Navigator.pop(context,
+                  SalaryService.susunAlasanTolak(_bagian, _controller.text))
+              : null,
           child: const Text('Kirim ke HR'),
         ),
       ],
