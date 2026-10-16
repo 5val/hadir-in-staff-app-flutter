@@ -413,6 +413,7 @@ void main() {
       final slip = SalarySlip.fromApi(_slipPayload()
         ..['id'] = 'slip-9'
         ..['statusSlip'] = 'ditolak'
+        ..['statusBayar'] = 'unpaid'
         ..['alasanTolak'] = 'Lembur saya kurang 2 jam'
         ..['bisaUnduh'] = false);
 
@@ -420,7 +421,7 @@ void main() {
       expect(slip.ditolak, isTrue);
       expect(slip.alasanTolak, 'Lembur saya kurang 2 jam');
       expect(slip.bisaUnduh, isFalse);
-      expect(slip.statusLabel, contains('menunggu revisi'));
+      expect(slip.statusLabel, contains('menunggu perbaikan HR'));
     });
 
     test('slip menunggu konfirmasi: bisa dikonfirmasi tapi TIDAK boleh diunduh', () {

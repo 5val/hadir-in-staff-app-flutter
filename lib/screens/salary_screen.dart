@@ -1,13 +1,212 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
+import '../models/slip_filter.dart';
+import 'slip_bukti_screen.dart';
 import '../services/salary_service.dart';
 import '../services/api_client.dart';
 import '../services/google_drive_service.dart';
 import '../services/slip_drive_sync.dart';
+import '../services/slip_deep_link.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ATTENTION PULSE -- animasi perhatian singkat pada kartu yang butuh tindakan
+// ─────────────────────────────────────────────────────────────────────────────
+/// Menskalakan [child] 1.0 -> 1.08 -> 1.0 sebanyak [pulses] kali (total
+/// [duration], <= 3 s) lalu diam. Animasi baru DIMULAI saat kartu benar-benar
+/// terlihat: tab-nya aktif (`TickerMode.of`, false selagi disembunyikan
+/// IndexedStack) DAN kartu berada di dalam viewport scroll (diperiksa ulang
+/// saat di-scroll). Hanya sekali per instance; [onPlayed] dipanggil saat
+/// animasi dimulai supaya pemanggil bisa mencatat "sudah tampil".
+/// Dilewati bila [play] false atau sistem meminta animasi dimatikan.
+class AttentionPulse extends StatefulWidget {
+  const AttentionPulse({
+    super.key,
+    required this.child,
+    this.play = true,
+    this.onPlayed,
+    this.pulses = 2,
+    this.duration = const Duration(milliseconds: 2400),
+    this.peakScale = 1.08,
+  });
+
+  final Widget child;
+  final bool play;
+  final VoidCallback? onPlayed;
+  final int pulses;
+  final Duration duration;
+  final double peakScale;
+
+  @override
+  State<AttentionPulse> createState() => _AttentionPulseState();
+}
+
+class _AttentionPulseState extends State<AttentionPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: widget.duration);
+  late final Animation<double> _scale = TweenSequence<double>([
+    for (var i = 0; i < widget.pulses; i++) ...[
+      TweenSequenceItem(
+          tween: Tween(begin: 1.0, end: widget.peakScale)
+              .chain(CurveTween(curve: Curves.easeOut)),
+          weight: 1),
+      TweenSequenceItem(
+          tween: Tween(begin: widget.peakScale, end: 1.0)
+              .chain(CurveTween(curve: Curves.easeIn)),
+          weight: 1),
+    ]
+  ]).animate(_c);
+  bool _done = false;
+  ScrollPosition? _pos;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final pos = Scrollable.maybeOf(context)?.position;
+    if (pos != _pos) {
+      _pos?.removeListener(_tryStart);
+      _pos = pos;
+      _pos?.addListener(_tryStart);
+    }
+    // TickerMode.of (di build) mendaftarkan dependensi: method ini dipanggil
+    // lagi saat tab menjadi aktif.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tryStart());
+  }
+
+  bool _isOnScreen() {
+    final ro = context.findRenderObject();
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return false;
+    final rect = ro.localToGlobal(Offset.zero) & ro.size;
+    final sro = Scrollable.maybeOf(context)?.context.findRenderObject();
+    final Rect bounds = (sro is RenderBox && sro.attached && sro.hasSize)
+        ? sro.localToGlobal(Offset.zero) & sro.size
+        : Offset.zero & MediaQuery.of(context).size;
+    final inter = rect.intersect(bounds);
+    return inter.width > 0 && inter.height >= rect.height * 0.5;
+  }
+
+  void _tryStart() {
+    if (_done || !mounted || !widget.play) return;
+    if (!TickerMode.of(context)) return; // tab tersembunyi
+    if (!_isOnScreen()) return;
+    _done = true;
+    _pos?.removeListener(_tryStart);
+    if (MediaQuery.of(context).disableAnimations) return;
+    widget.onPlayed?.call();
+    _c.forward();
+  }
+
+  @override
+  void dispose() {
+    _pos?.removeListener(_tryStart);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    TickerMode.of(context); // pastikan dependensi terdaftar
+    return ScaleTransition(scale: _scale, child: widget.child);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BATAL SETUJU DIALOG
+// ─────────────────────────────────────────────────────────────────────────────
+/// Dialog alasan pembatalan persetujuan. Mengembalikan alasan (trim) lewat
+/// `Navigator.pop`; tombol aktif bila panjang alasan 5-300 karakter (batas
+/// server).
+class BatalSetujuDialog extends StatefulWidget {
+  const BatalSetujuDialog({super.key});
+
+  @override
+  State<BatalSetujuDialog> createState() => _BatalSetujuDialogState();
+}
+
+class _BatalSetujuDialogState extends State<BatalSetujuDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Panjang dihitung dalam unit UTF-16 (Dart `String.length`) -- sama
+    // dengan `.length` JS di server -- bukan jumlah grapheme.
+    final len = _ctrl.text.trim().length;
+    final ok = len >= SalaryService.batalAlasanMin &&
+        len <= SalaryService.batalAlasanMax;
+    return AlertDialog(
+      title: const Text('Batalkan persetujuan?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+              'Slip akan dikembalikan ke HR untuk diperbaiki. Tulis alasannya.'),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('batal-alasan'),
+            controller: _ctrl,
+            maxLines: 3,
+            inputFormatters: [
+              Utf16LengthLimitingFormatter(SalaryService.batalAlasanMax),
+            ],
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText:
+                  'Alasan (minimal ${SalaryService.batalAlasanMin} karakter)',
+              border: const OutlineInputBorder(),
+              // Hitungan sama persis dengan yang divalidasi server.
+              counterText: '$len/${SalaryService.batalAlasanMax}',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Kembali')),
+        FilledButton(
+          key: const Key('batal-kirim'),
+          onPressed: ok ? () => Navigator.pop(context, _ctrl.text.trim()) : null,
+          child: const Text('Batalkan persetujuan'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Membatasi panjang input dalam unit UTF-16 (bukan grapheme seperti
+/// `LengthLimitingTextInputFormatter`), cocok dengan validasi JS `.length`
+/// di server. Pemotongan tidak pernah memisahkan pasangan surrogate.
+class Utf16LengthLimitingFormatter extends TextInputFormatter {
+  Utf16LengthLimitingFormatter(this.max);
+  final int max;
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final t = newValue.text;
+    if (t.length <= max) return newValue;
+    var cut = max;
+    final last = t.codeUnitAt(cut - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) cut--; // jangan belah surrogate
+    return TextEditingValue(
+      text: t.substring(0, cut),
+      selection: TextSelection.collapsed(offset: cut),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY SCREEN
@@ -28,15 +227,50 @@ class _SalaryScreenState extends State<SalaryScreen> {
   bool _loading = true;
   String? _error;
 
-  // Filter: 1 = 1 bulan terakhir, 2 = 2 bulan terakhir, 3 = 3 bulan terakhir
-  int _filterMonths = 1;
+  // Filter periode: null = "Semua periode"; selain itu `periodeKey` slip.
+  String? _periodeKey;
 
-  List<SalarySlip> get _filteredSlips => _slips.take(_filterMonths).toList();
+  // Slip yang kartunya sudah pernah memainkan animasi perhatian: animasi
+  // hanya jalan pada build PERTAMA kartu itu (bukan tiap scroll/muat ulang).
+  // Statis: sekali per slip per sesi app (bukan per layar/rebuild).
+  static final Set<String> _pulsedIds = <String>{};
+
+  List<SalarySlip> get _filteredSlips => SlipFilter.apply(_slips, _periodeKey);
 
   @override
   void initState() {
     super.initState();
+    SlipDeepLink.pending.addListener(_onDeepLink);
     _load();
+  }
+
+  @override
+  void dispose() {
+    SlipDeepLink.pending.removeListener(_onDeepLink);
+    super.dispose();
+  }
+
+  /// Notifikasi slip diketuk: muat ulang diam-diam (slip baru mungkin belum
+  /// ada di daftar), lalu buka detailnya. Tidak ketemu -> tetap di daftar.
+  Future<void> _onDeepLink() async {
+    if (SlipDeepLink.pending.value == null) return;
+    await _load(silent: true);
+    _openPendingSlip();
+  }
+
+  void _openPendingSlip() {
+    final id = SlipDeepLink.pending.value;
+    if (id == null || !mounted || _loading) return;
+    SlipDeepLink.pending.value = null; // dikonsumsi
+    final slip = SlipDeepLink.resolve(_slips, id);
+    if (slip == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => SalaryDetailScreen(slip: slip, user: user)),
+    ).then((_) {
+      if (mounted) _load(silent: true);
+    });
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -53,12 +287,21 @@ class _SalaryScreenState extends State<SalaryScreen> {
         _slips = list;
         _loading = false;
         _error = null;
+        // Periode yang dipilih bisa hilang setelah muat ulang -> kembali ke semua.
+        if (_periodeKey != null &&
+            !list.any((e) => e.periodeKey == _periodeKey)) {
+          _periodeKey = null;
+        }
       });
       // Slip yang sudah terkunci disimpan ke Google Drive staff di latar
       // (hanya bila akun Google sudah tersambung; tidak pernah memunculkan
       // dialog login). Tombol manual ada di layar detail.
       SlipDriveSync.autoSyncLocked(list);
+      if (!silent) _openPendingSlip(); // permintaan yang datang sebelum daftar siap
     } on ApiException catch (e) {
+      // Gagal memuat: permintaan buka-slip lama tidak boleh menggantung dan
+      // terbuka pada muat ulang lain yang tidak berkaitan.
+      SlipDeepLink.pending.value = null;
       if (silent) return; // muat ulang diam-diam tidak boleh menimpa daftar
 
       if (!mounted) return;
@@ -194,11 +437,14 @@ class _SalaryScreenState extends State<SalaryScreen> {
   }
 
   // ── Filter Chips ────────────────────────────────────────────
+  // "Semua periode" + daftar periode sesuai tipe penggajian staff saat ini
+  // (Harian / Mingguan / Bulanan). Slip bertipe lama tetap terjangkau lewat
+  // "Semua periode".
   Widget _buildFilterChips() {
-    final options = [
-      (1, '1 Bulan Terakhir'),
-      (2, '2 Bulan Terakhir'),
-      (3, '3 Bulan Terakhir'),
+    final options = <(String?, String)>[
+      (null, 'Semua periode'),
+      ...SlipFilter.periodeOptions(_slips,
+          profileType: AppSession.staff?.jabatanPeriodeGaji).map((o) => (o.key, o.label)),
     ];
 
     return Column(
@@ -210,11 +456,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
           scrollDirection: Axis.horizontal,
           child: Row(
             children: options.map((opt) {
-              final isSelected = _filterMonths == opt.$1;
+              final isSelected = _periodeKey == opt.$1;
               return Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: GestureDetector(
-                  onTap: () => setState(() => _filterMonths = opt.$1),
+                  key: Key('slip-filter-${opt.$1 ?? 'semua'}'),
+                  onTap: () => setState(() => _periodeKey = opt.$1),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding:
@@ -270,6 +517,17 @@ class _SalaryScreenState extends State<SalaryScreen> {
 
   // ── Salary Card (clickable, no Lihat Detail button) ──────────
   Widget _buildSalaryCard(SalarySlip slip) {
+    final card = _buildSalaryCardBody(slip);
+    if (!slip.perluAksi) return card;
+    return AttentionPulse(
+      key: ValueKey('pulse-${slip.id}'),
+      play: !_pulsedIds.contains(slip.id),
+      onPlayed: () => _pulsedIds.add(slip.id),
+      child: card,
+    );
+  }
+
+  Widget _buildSalaryCardBody(SalarySlip slip) {
     return GestureDetector(
       onTap: () async {
         await Navigator.push(
@@ -310,14 +568,15 @@ class _SalaryScreenState extends State<SalaryScreen> {
                     color: Colors.white.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(slip.period,
+                  child: Text(slip.periodeLabel,
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                         color: Colors.white.withOpacity(0.9),
                       )),
                 ),
-                _statusChip(slip),
+                const SizedBox(width: 8),
+                Flexible(child: _statusChip(slip)),
                 // Tap hint — subtle, no dedicated button
                 // Row(
                 //   children: [
@@ -364,15 +623,6 @@ class _SalaryScreenState extends State<SalaryScreen> {
             // ── Mini summary row ──────────────────────────
             _miniStat('Ditransfer', DateFormat('dd MMM').format(slip.periodEnd),
                 AppColors.brandLime),
-            if (slip.pencairanLabel != null) ...[
-              const SizedBox(height: 6),
-              Text(slip.pencairanLabel!,
-                  key: const Key('slip-pencairan-label'),
-                  style: GoogleFonts.inter(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white.withOpacity(0.85))),
-            ],
             // Container(
             //   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             //   decoration: BoxDecoration(
@@ -410,7 +660,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
   /// Status alur konfirmasi di kartu. Slip yang menunggu konfirmasi dibuat
   /// menonjol (lime) supaya staff tahu ada yang harus dilakukan.
   Widget _statusChip(SalarySlip slip) {
-    final needsAction = slip.perluKonfirmasi;
+    final needsAction = slip.perluAksi;
     final Color bg;
     final Color fg;
     switch (slip.statusSlip) {
@@ -427,6 +677,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
         fg = Colors.white.withOpacity(0.9);
     }
     return Container(
+      key: const Key('slip-status-chip'),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Row(
@@ -436,9 +687,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
             Icon(Icons.notifications_active_rounded, size: 12, color: fg),
             const SizedBox(width: 4),
           ],
-          Text(slip.statusLabel,
-              style: GoogleFonts.inter(
-                  fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
+          Flexible(
+            child: Text(slip.statusLabel,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                    fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
+          ),
         ],
       ),
     );
@@ -645,10 +899,17 @@ class SalaryDetailScreen extends StatefulWidget {
     super.key,
     required this.slip,
     required this.user,
+    this.batalSetujuCall,
+    this.slipLoader,
   });
 
   final SalarySlip slip;
   final UserProfile user;
+
+  /// Hanya untuk test: pengganti `SalaryService.batalSetuju` / `slipById`.
+  final Future<void> Function(String slipId, String alasan,
+      {String? dikirimKonfirmasiAt})? batalSetujuCall;
+  final Future<SalarySlip> Function(String slipId)? slipLoader;
 
   @override
   State<SalaryDetailScreen> createState() => _SalaryDetailScreenState();
@@ -765,6 +1026,91 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     }
   }
 
+  // ── Batalkan persetujuan (D1) ─────────────────────────────
+  Future<void> _batalSetuju() async {
+    final alasan = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const BatalSetujuDialog(),
+    );
+    if (alasan == null || _busy) return;
+
+    setState(() => _busy = true);
+    try {
+      await (widget.batalSetujuCall ?? SalaryService.batalSetuju)(slip.id, alasan,
+          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt);
+      if (!mounted) return;
+      setState(() => slip = slip.copyWith(
+            statusSlip: 'ditolak',
+            alasanTolak: 'Persetujuan dibatalkan staff: ${alasan.trim()}',
+            bisaUnduh: false,
+            bisaBatalSetuju: false,
+            perluAksiServer: false,
+          ));
+      _snack('Persetujuan dibatalkan. HR akan memperbaiki dan mengirim ulang slip.');
+    } on ApiException catch (e) {
+      // Pesan server (mis. 409 "sudah disetujui untuk dicairkan") apa adanya.
+      // TIDAK menutup layar: tetap di sini dan segarkan status slip dari
+      // server (yang mungkin sudah siap cair/dibayar) agar tombol hilang.
+      _snack(e.message);
+      if (e.statusCode == 409) await _refreshSlip();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _refreshSlip() async {
+    try {
+      final fresh = await (widget.slipLoader ?? SalaryService.slipById)(slip.id);
+      if (mounted) setState(() => slip = fresh);
+    } catch (_) {
+      // Gagal menyegarkan: biarkan tampilan apa adanya.
+    }
+  }
+
+  Widget _buildBatalSetujuCard() {
+    if (!slip.bisaBatalSetujuEfektif) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slate200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Ada yang keliru? Selama HR belum menyetujui pencairan, Anda bisa '
+            'membatalkan persetujuan. Slip kembali ke HR untuk diperbaiki.',
+            style: GoogleFonts.inter(
+                fontSize: 12, height: 1.45, color: AppColors.slate600),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            key: const Key('btn-batal-setuju'),
+            onPressed: _busy ? null : _batalSetuju,
+            icon: const Icon(Icons.undo_rounded, size: 18),
+            label: const Text('Batalkan persetujuan'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFB91C1C),
+              side: const BorderSide(color: Color(0xFFFCA5A5)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _bukaBukti() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SlipBuktiScreen(
+        title: 'Bukti pembayaran - ${slip.periodeLabel}',
+        loader: () => SalaryService.buktiBayar(slip.id),
+      ),
+    ));
+  }
+
   /// 409: slip sudah diperbarui HR. Tidak ada perubahan status lokal; tutup
   /// layar detail agar daftar slip memuat ulang (lihat `_buildSalaryCard`).
   void _reloadIfStale(ApiException e) {
@@ -845,11 +1191,12 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
             'Slip baru bisa diunduh setelah dikunci HR.';
         break;
       case 'dikonfirmasi':
-        icon = Icons.hourglass_top_rounded;
+        // Legacy: sama dengan kartu & slip terkunci -> "Disetujui".
+        icon = Icons.verified_rounded;
         bg = const Color(0xFFECFDF5);
         fg = const Color(0xFF047857);
-        title = 'Sudah Anda konfirmasi';
-        body = 'Menunggu HR mengunci slip. Setelah dikunci slip bisa diunduh.';
+        title = 'Disetujui';
+        body = 'Anda sudah menyetujui slip ini.';
         break;
       case 'ditolak':
         icon = Icons.report_gmailerrorred_rounded;
@@ -882,6 +1229,19 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       paid
           ? 'Gaji periode ini sudah ditransfer.'
           : 'HR sudah menyetujui slip ini untuk dicairkan. Gaji akan segera ditransfer.',
+      action: slip.tampilCatatanBuktiGabungan
+          ? Text('Bukti transfer gabungan disimpan oleh HR',
+              key: const Key('bukti-gabungan-note'),
+              style: GoogleFonts.inter(
+                  fontSize: 11.5, fontStyle: FontStyle.italic, color: AppColors.slate600))
+          : (paid && slip.adaBuktiBayar)
+          ? OutlinedButton.icon(
+              key: const Key('btn-lihat-bukti'),
+              onPressed: _bukaBukti,
+              icon: const Icon(Icons.receipt_long_rounded, size: 18),
+              label: const Text('Lihat bukti pembayaran'),
+            )
+          : null,
     );
   }
 
@@ -1088,6 +1448,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
                 children: [
                   _buildStatusBanner(),
+                  _buildBatalSetujuCard(),
                   _buildPencairanBanner(),
                   _buildHeroCard(),
                   const SizedBox(height: 16),

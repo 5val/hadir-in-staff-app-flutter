@@ -59,7 +59,7 @@ void main() {
 
     testWidgets('dikonfirmasi: waiting-for-lock banner, no action bar, no download', (tester) async {
       await pumpDetail(tester, slipWith('dikonfirmasi'));
-      expect(find.text('Sudah Anda konfirmasi'), findsOneWidget);
+      expect(find.text('Disetujui'), findsOneWidget);
       expect(find.text('Konfirmasi, sudah benar'), findsNothing);
       expect(find.text('Unduh PDF'), findsNothing);
     });
