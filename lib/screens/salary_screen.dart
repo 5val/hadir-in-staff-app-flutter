@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +10,23 @@ import '../services/salary_service.dart';
 import '../services/api_client.dart';
 import '../services/google_drive_service.dart';
 import '../services/slip_drive_sync.dart';
+
+/// Urutkan slip terbaru dulu (akhir periode, lalu awal periode) dan batasi ke
+/// [months] bulan terakhir dihitung dari [now]. Slip `menunggu_konfirmasi`
+/// selalu ikut. Server mengurutkan memakai teks `periode`, yang menaruh
+/// "2026-W40" selalu di atas "2026-10", jadi urutan harus dibuat ulang di sini.
+List<SalarySlip> filterSlipsByMonths(List<SalarySlip> slips, int months,
+    {DateTime? now}) {
+  final today = now ?? DateTime.now();
+  final cutoff = DateTime(today.year, today.month - months, today.day);
+  final sorted = [...slips]..sort((a, b) {
+      final byEnd = b.periodEnd.compareTo(a.periodEnd);
+      return byEnd != 0 ? byEnd : b.periodStart.compareTo(a.periodStart);
+    });
+  return sorted
+      .where((s) => s.perluKonfirmasi || !s.periodEnd.isBefore(cutoff))
+      .toList();
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY SCREEN
@@ -31,7 +50,12 @@ class _SalaryScreenState extends State<SalaryScreen> {
   // Filter: 1 = 1 bulan terakhir, 2 = 2 bulan terakhir, 3 = 3 bulan terakhir
   int _filterMonths = 1;
 
-  List<SalarySlip> get _filteredSlips => _slips.take(_filterMonths).toList();
+  /// Slip dalam [_filterMonths] bulan terakhir (menurut akhir periode slip),
+  /// terbaru di atas. Dulu `take(_filterMonths)` -- itu N SLIP teratas, bukan
+  /// N bulan, sehingga slip mingguan (mis. W35 & W36) hilang dari filter
+  /// 3 bulan. Slip yang masih menunggu konfirmasi staff selalu tampil, apa
+  /// pun filternya, karena ada aksi yang harus dilakukan.
+  List<SalarySlip> get _filteredSlips => filterSlipsByMonths(_slips, _filterMonths);
 
   @override
   void initState() {
@@ -360,18 +384,21 @@ class _SalaryScreenState extends State<SalaryScreen> {
                 letterSpacing: -0.5,
               ),
             ),
-            const SizedBox(height: 10),
-            // ── Mini summary row ──────────────────────────
-            _miniStat('Ditransfer', DateFormat('dd MMM').format(slip.periodEnd),
-                AppColors.brandLime),
-            if (slip.pencairanLabel != null) ...[
-              const SizedBox(height: 6),
-              Text(slip.pencairanLabel!,
+            // Info pencairan hanya bila memang ada: tanggal & nama admin
+            // setelah dicairkan, atau "sedang diproses" setelah disetujui
+            // cair. Sebelumnya selalu tampil "Ditransfer <akhir periode>"
+            // walau gaji belum dicairkan.
+            if (slip.pencairanDetail != null || slip.pencairanLabel != null) ...[
+              const SizedBox(height: 10),
+              Text(slip.pencairanDetail ?? slip.pencairanLabel!,
                   key: const Key('slip-pencairan-label'),
+                  textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
-                      fontSize: 11.5,
+                      fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: Colors.white.withOpacity(0.85))),
+                      color: slip.sudahDicairkan
+                          ? AppColors.brandLime
+                          : Colors.white.withOpacity(0.85))),
             ],
             // Container(
             //   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -419,6 +446,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
         fg = AppColors.brandNavy;
         break;
       case 'ditolak':
+      case 'draft':
         bg = const Color(0xFFFCA5A5);
         fg = const Color(0xFF7F1D1D);
         break;
@@ -426,38 +454,31 @@ class _SalaryScreenState extends State<SalaryScreen> {
         bg = Colors.white.withOpacity(0.12);
         fg = Colors.white.withOpacity(0.9);
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (needsAction) ...[
-            Icon(Icons.notifications_active_rounded, size: 12, color: fg),
-            const SizedBox(width: 4),
-          ],
-          Text(slip.statusLabel,
-              style: GoogleFonts.inter(
-                  fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniStat(String label, String value, Color valueColor) {
-    return Column(
-      children: [
-        Text('$label $value',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: valueColor,
-            )),
-        // const SizedBox(height: 2),
-        // Text(label,
-        //     style: GoogleFonts.inter(
-        //         fontSize: 13, color: Colors.white.withOpacity(0.55))),
-      ],
+    Widget chip(Color background) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+              color: background, borderRadius: BorderRadius.circular(20)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (needsAction) ...[
+                Icon(Icons.notifications_active_rounded, size: 12, color: fg),
+                const SizedBox(width: 4),
+              ],
+              Text(slip.statusLabel,
+                  style: GoogleFonts.inter(
+                      fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
+            ],
+          ),
+        );
+    // Menunggu konfirmasi: warna chip berkedip 3x saat kartu tampil supaya
+    // staff sadar ada yang harus dilakukan.
+    if (!needsAction) return chip(bg);
+    return _BlinkThrice(
+      key: const Key('slip-status-blink'),
+      from: bg,
+      to: Colors.white,
+      builder: chip,
     );
   }
 
@@ -790,7 +811,8 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     }
 
     return [
-      const _TolakItem(section: 'Umum', label: 'Data kehadiran / absensi'),
+      const _TolakItem(
+          key: 'umum:kehadiran', section: 'Umum', label: 'Data kehadiran / absensi'),
       for (final g in const [
         SalaryGroup.pendapatanPokok,
         SalaryGroup.pajak,
@@ -799,24 +821,36 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       ])
         for (final c in slip.components.where((c) => c.group == g))
           _TolakItem(
-              section: sectionOf(g), label: c.label, amount: _fmt(c.amount)),
-      const _TolakItem(section: 'Umum', label: 'Total / Take Home Pay'),
+              key: c.key,
+              section: sectionOf(g),
+              label: c.label,
+              amount: _fmt(c.amount)),
+      const _TolakItem(
+          key: 'umum:thp', section: 'Umum', label: 'Total / Take Home Pay'),
     ];
   }
 
   Future<void> _tolak() async {
-    final alasan = await showDialog<String>(
+    if (!slip.bisaTolak) return;
+    final hasil = await showDialog<({String alasan, List<String> bagian})>(
       context: context,
       builder: (ctx) => _TolakSlipDialog(items: _tolakItems()),
     );
-    if (alasan == null || _busy) return;
+    if (hasil == null || _busy) return;
+    final alasan = hasil.alasan;
 
     setState(() => _busy = true);
     try {
       await SalaryService.tolak(slip.id, alasan,
-          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt);
+          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt, bagian: hasil.bagian);
       if (!mounted) return;
-      setState(() => slip = slip.copyWith(statusSlip: 'ditolak', alasanTolak: alasan.trim()));
+      setState(() => slip = slip.copyWith(
+            statusSlip: 'ditolak',
+            alasanTolak: alasan.trim(),
+            bisaTolak: false,
+            ditolakAt: DateTime.now(),
+            bagianTolak: hasil.bagian,
+          ));
       _snack('Slip ditolak. HR akan memeriksa dan merevisinya.');
     } on ApiException catch (e) {
       _snack(e.message);
@@ -834,15 +868,29 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     final Color fg;
     final String title;
     final String body;
+    Widget? action;
     switch (slip.statusSlip) {
+      case 'menunggu_konfirmasi' when slip.pernahDitolak:
+        icon = Icons.published_with_changes_rounded;
+        bg = const Color(0xFFECFDF5);
+        fg = const Color(0xFF047857);
+        title = 'Slip sudah direvisi HR';
+        body = 'HR sudah memeriksa penolakan Anda dan mengirim ulang slip ini. '
+            'Ikon ⓘ merah = bagian yang Anda tolak, ikon ⓘ hijau = hasil revisi '
+            'admin/manajer (ketuk untuk melihat detailnya).\n\n'
+            'Penolakan hanya bisa dilakukan sekali. Jika masih ada yang tidak '
+            'sesuai, hubungi HR secara langsung.';
+        action = _buildRevisiList();
+        break;
       case 'menunggu_konfirmasi':
         icon = Icons.fact_check_outlined;
         bg = const Color(0xFFEFF6FF);
         fg = const Color(0xFF1D4ED8);
         title = 'Mohon periksa slip ini';
         body = 'HR meminta Anda memeriksa angka di bawah. Jika sudah benar tekan '
-            '"Konfirmasi". Jika ada yang salah tekan "Ada yang salah" dan tulis alasannya. '
-            'Slip baru bisa diunduh setelah dikunci HR.';
+            '"Konfirmasi". Jika ada yang salah tekan "Ada yang salah", centang '
+            'bagiannya dan tulis alasannya. Penolakan hanya bisa dilakukan sekali. '
+            'Slip baru bisa diunduh setelah Anda konfirmasi.';
         break;
       case 'dikonfirmasi':
         icon = Icons.hourglass_top_rounded;
@@ -852,20 +900,164 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         body = 'Menunggu HR mengunci slip. Setelah dikunci slip bisa diunduh.';
         break;
       case 'ditolak':
+      case 'draft':
         icon = Icons.report_gmailerrorred_rounded;
         bg = const Color(0xFFFEF2F2);
         fg = const Color(0xFFB91C1C);
-        title = 'Anda menolak slip ini';
-        body = 'HR akan memeriksa dan merevisinya, lalu mengirim ulang untuk Anda konfirmasi.'
+        title = slip.sedangDirevisi
+            ? 'Anda menolak slip ini, HR sedang merevisi'
+            : 'Anda menolak slip ini';
+        body = 'HR akan memeriksa dan merevisinya, lalu mengirim ulang untuk Anda konfirmasi. '
+            'Bagian yang Anda tolak ditandai ikon ⓘ merah.'
             '${slip.alasanTolakTampil != null ? '\n\nAlasan Anda: ${slip.alasanTolakTampil}' : ''}';
         break;
       default:
-        // Banner "Slip final" (dengan tombol unduh) hanya untuk slip yang
-        // memang boleh diunduh menurut server; status lain yang tak dikenal
-        // tidak menampilkan apa pun ketimbang tombol yang tidak berfungsi.
+        // Banner "Anda menyetujui" (dengan tombol unduh) hanya untuk slip
+        // yang memang boleh diunduh menurut server; status lain yang tak
+        // dikenal tidak menampilkan apa pun ketimbang tombol yang tidak
+        // berfungsi.
         return slip.bisaUnduh ? _buildFinalBanner() : const SizedBox.shrink();
     }
-    return _banner(icon, bg, fg, title, body);
+    return _banner(icon, bg, fg, title, body, action: action);
+  }
+
+  /// Daftar semua perubahan HR sejak staff menolak -- juga mencakup baris
+  /// yang tidak punya tempat di tabel (mis. tunjangan yang dihapus jadi Rp0).
+  Widget? _buildRevisiList() {
+    if (slip.revisi.isEmpty) return null;
+    return Container(
+      key: const Key('slip-revisi-list'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFA7F3D0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final r in slip.revisi.values)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(Icons.info_rounded,
+                        size: 14, color: _InfoMarker.revisiColor),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        '${r.label}: ${_fmt(r.sebelum)} → ${_fmt(r.sesudah)}',
+                        style: GoogleFonts.inter(
+                            fontSize: 11.5, color: AppColors.slate800)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Tanda ⓘ: bagian yang ditolak staff (merah) / direvisi HR (hijau) ──
+  List<Widget> _markers(List<String> keys) {
+    final ditolak = keys.any(slip.ditolakBagian);
+    SlipLineRevision? revisi;
+    for (final k in keys) {
+      revisi ??= slip.revisi[k];
+    }
+    // Satu ikon saja per baris: hijau bila sudah direvisi (menang atas
+    // merah), merah bila hanya ditolak.
+    if (revisi != null) {
+      final r = revisi;
+      return [
+        _InfoMarker(
+          key: ValueKey('marker-revisi-${keys.first}'),
+          color: _InfoMarker.revisiColor,
+          tooltip: 'Direvisi admin/manajer',
+          onTap: () => _showRevisiInfo(r, sebelumnyaDitolak: ditolak),
+        ),
+      ];
+    }
+    if (ditolak) {
+      return [
+        _InfoMarker(
+          key: ValueKey('marker-tolak-${keys.first}'),
+          color: _InfoMarker.tolakColor,
+          tooltip: 'Bagian yang Anda tolak',
+          onTap: _showTolakInfo,
+        ),
+      ];
+    }
+    return const [];
+  }
+
+  void _showTolakInfo() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.info_rounded, color: _InfoMarker.tolakColor),
+        title: const Text('Bagian yang Anda tolak'),
+        content: Text([
+          if (slip.ditolakAt != null)
+            'Anda menolak slip ini pada ${formatTanggalJam(slip.ditolakAt!)}.',
+          if (slip.alasanTolak != null) 'Alasan Anda: ${slip.alasanTolak}',
+        ].join('\n\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup')),
+        ],
+      ),
+    );
+  }
+
+  void _showRevisiInfo(SlipLineRevision r, {bool sebelumnyaDitolak = false}) {
+    final naik = r.sesudah > r.sebelum;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.info_rounded, color: _InfoMarker.revisiColor),
+        title: Text('Direvisi: ${r.label}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Sebelum: ${_fmt(r.sebelum)}',
+                style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppColors.slate600,
+                    decoration: TextDecoration.lineThrough)),
+            const SizedBox(height: 4),
+            Text('Sesudah: ${_fmt(r.sesudah)}',
+                style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.slate900)),
+            Text(
+                '${naik ? '+' : '−'} ${_fmt((r.sesudah - r.sebelum).abs())}',
+                style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: naik ? _InfoMarker.revisiColor : AppColors.danger)),
+            const SizedBox(height: 12),
+            Text(
+                [
+                  'Diubah${r.oleh != null ? ' oleh ${r.oleh}' : ''}'
+                      '${r.pada != null ? ' pada ${formatTanggalJam(r.pada!)}' : ''}.',
+                  if (r.alasan != null) 'Keterangan: ${r.alasan}',
+                  if (sebelumnyaDitolak) 'Bagian ini sebelumnya Anda tolak.',
+                ].join('\n'),
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.slate700)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup')),
+        ],
+      ),
+    );
   }
 
   /// Status pencairan: "Sedang diproses pencairan" setelah HR menyetujui cair,
@@ -880,9 +1072,45 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       paid ? const Color(0xFF15803D) : const Color(0xFFB45309),
       label,
       paid
-          ? 'Gaji periode ini sudah ditransfer.'
+          ? [
+              'Gaji periode ini sudah ditransfer ke rekening Anda.',
+              if (slip.paidAt != null) 'Waktu: ${formatTanggalJam(slip.paidAt!)}',
+              if (slip.paidOleh != null) 'Dicairkan oleh: ${slip.paidOleh}',
+            ].join('\n')
           : 'HR sudah menyetujui slip ini untuk dicairkan. Gaji akan segera ditransfer.',
+      action: paid && slip.adaBuktiBayar
+          ? OutlinedButton.icon(
+              key: const Key('slip-lihat-bukti'),
+              onPressed: _busy ? null : _lihatBukti,
+              icon: const Icon(Icons.receipt_long_rounded, size: 18),
+              label: const Text('Lihat Bukti Transfer'),
+            )
+          : null,
     );
+  }
+
+  /// Bukti transfer yang diunggah admin saat mencairkan (web): gambar dibuka
+  /// di penampil yang bisa di-zoom, PDF di pratinjau PDF.
+  Future<void> _lihatBukti() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final bytes = await SalaryService.downloadBukti(slip.id);
+      if (!mounted) return;
+      final title = 'Bukti Transfer ${slip.period}';
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SalaryService.isPdf(bytes)
+              ? _BuktiPdfScreen(title: title, bytes: bytes)
+              : _BuktiImageScreen(title: title, bytes: bytes),
+        ),
+      );
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Widget _buildFinalBanner() {
@@ -891,8 +1119,8 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       Icons.verified_rounded,
       const Color(0xFFF0FDF4),
       const Color(0xFF15803D),
-      'Slip final',
-      'Slip ini sudah dikunci HR dan bisa diunduh.',
+      'Anda menyetujui slip ini',
+      'Slip sudah terkunci dan bisa diunduh.',
       // Wrap, bukan Row: dua tombol berdampingan tidak muat di layar sempit
       // (overflow 100+ px di HP 360dp) dan harus turun ke baris berikutnya.
       action: Wrap(
@@ -957,18 +1185,23 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         ),
         child: Row(
           children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _busy ? null : _tolak,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFB91C1C),
-                  side: const BorderSide(color: Color(0xFFFCA5A5)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            // Penolakan hanya boleh sekali (server: `bisaTolak`). Setelah HR
+            // merevisi & mengirim ulang, staff hanya bisa mengonfirmasi.
+            if (slip.bisaTolak) ...[
+              Expanded(
+                child: OutlinedButton(
+                  key: const Key('slip-tolak-button'),
+                  onPressed: _busy ? null : _tolak,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFB91C1C),
+                    side: const BorderSide(color: Color(0xFFFCA5A5)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Ada yang salah'),
                 ),
-                child: const Text('Ada yang salah'),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               flex: 2,
               child: FilledButton(
@@ -1037,9 +1270,31 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                               color: AppColors.white,
                               letterSpacing: 1.2,
                             )),
-                        Text('Detail Salary',
-                            style: AppText.headline2
-                                .copyWith(color: AppColors.white)),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text('Detail Salary',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.headline2
+                                      .copyWith(color: AppColors.white)),
+                            ),
+                            const SizedBox(width: 2),
+                            // Legend tahapan, menyorot posisi SLIP INI.
+                            IconButton(
+                              key: const Key('slip-status-help'),
+                              tooltip: 'Tahapan status slip gaji',
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints(
+                                  minWidth: 36, minHeight: 36),
+                              padding: EdgeInsets.zero,
+                              icon: const Icon(Icons.help_outline_rounded,
+                                  color: AppColors.white, size: 20),
+                              onPressed: () =>
+                                  showSlipStatusGuide(context, slip),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -1249,24 +1504,35 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                 color: Colors.white,
                 letterSpacing: -0.5,
               )),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(
-                    color: AppColors.brandLime, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Ditransfer ${DateFormat("dd MMMM yyyy").format(slip.periodEnd)}',
-                style: GoogleFonts.inter(
-                    fontSize: 12, color: Colors.white.withOpacity(0.75)),
-              ),
-            ],
-          ),
+          // Hanya bila sudah ada kabar pencairan (dulu selalu "Ditransfer
+          // <akhir periode>", walau belum dicairkan).
+          if (slip.pencairanDetail != null || slip.pencairanLabel != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                      color: slip.sudahDicairkan
+                          ? AppColors.brandLime
+                          : const Color(0xFFFBBF24),
+                      shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    slip.pencairanDetail ?? slip.pencairanLabel!,
+                    key: const Key('slip-hero-pencairan'),
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: Colors.white.withOpacity(0.75)),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1329,6 +1595,20 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (slip.ditolakBagian('umum:kehadiran'))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  ..._markers(const ['umum:kehadiran']),
+                  Text('Data kehadiran',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.slate800)),
+                ],
+              ),
+            ),
           // ── Main attendance row ────────────────────────
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -1682,8 +1962,8 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         borderRadius: BorderRadius.circular(14),
         child: Table(
           columnWidths: const {
-            0: FlexColumnWidth(3),
-            1: FlexColumnWidth(4),
+            0: FlexColumnWidth(4),
+            1: FlexColumnWidth(3),
             2: FlexColumnWidth(4),
           },
           children: [
@@ -1709,7 +1989,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                               BorderSide(color: AppColors.slate100, width: 1)),
                 ),
                 children: [
-                  _td(comp.label, isBold: true),
+                  _tdLabel(comp),
                   _tdNote(comp),
                   _td(
                     isDeduction ? '- ${_fmt(comp.amount)}' : _fmt(comp.amount),
@@ -1736,6 +2016,31 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
               color: Colors.white,
             )),
       );
+
+  /// Kolom "Komponen": nama baris + tanda ⓘ merah (ditolak staff) / hijau
+  /// (direvisi admin/manajer).
+  Widget _tdLabel(SalaryComponent comp) {
+    final markers = comp.key.isEmpty ? const <Widget>[] : _markers([comp.key]);
+    if (markers.isEmpty) return _td(comp.label, isBold: true);
+    // Ikon ⓘ di KIRI teks (bukan di bawahnya).
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 3, 8, 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ...markers,
+          Flexible(
+            child: Text(comp.label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.slate800,
+                )),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Kolom "Keterangan": teks catatan + badge kalau komponen ini TIDAK ikut
   /// menambah Take Home Pay (tunjangan barang, fasilitas, uang makan).
@@ -1865,19 +2170,8 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
           //     ),
           //   ),
           _divider(),
-          _summaryRow('Take Home Pay', _fmt(slip.netSalary), isTotal: true),
-
-          // BERUBAH: Menambahkan info ditransfer menggunakan apa di bawah gaji bersih
-          const SizedBox(height: 10),
-          Text(
-            'Ditransfer via ${slip.transferBy}',
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Colors.white.withOpacity(0.65),
-              fontStyle: FontStyle.italic,
-            ),
-          ),
+          _summaryRow('Take Home Pay', _fmt(slip.netSalary),
+              isTotal: true, markers: _markers(const ['umum:thp', 'col:gajiNetto'])),
         ],
       ),
     );
@@ -1895,16 +2189,23 @@ Widget _summaryRow(
   String amount, {
   bool isDeduction = false,
   bool isTotal = false,
+  List<Widget> markers = const [],
 }) {
   return Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
-      Text(label,
-          style: GoogleFonts.inter(
-            fontSize: isTotal ? 13 : 12,
-            fontWeight: isTotal ? FontWeight.w700 : FontWeight.w400,
-            color: Colors.white,
-          )),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...markers, // ikon ⓘ di kiri teks
+          Text(label,
+              style: GoogleFonts.inter(
+                fontSize: isTotal ? 13 : 12,
+                fontWeight: isTotal ? FontWeight.w700 : FontWeight.w400,
+                color: Colors.white,
+              )),
+        ],
+      ),
       Text(amount,
           style: GoogleFonts.inter(
             fontSize: isTotal ? 18 : 14,
@@ -2004,10 +2305,16 @@ class _SummaryRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 /// Satu baris yang bisa dicentang di dialog tolak.
 class _TolakItem {
+  /// Kunci baris (lihat [SalaryComponent.key]) yang dikirim sebagai `bagian`.
+  final String key;
   final String section;
   final String label;
   final String? amount;
-  const _TolakItem({required this.section, required this.label, this.amount});
+  const _TolakItem(
+      {required this.key,
+      required this.section,
+      required this.label,
+      this.amount});
 
   /// Teks yang dikirim ke HR, mis. "Tunjangan: Transport Harian".
   String get text => '$section: $label';
@@ -2059,7 +2366,9 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
           children: [
             const Text(
                 'Centang bagian slip yang tidak sesuai supaya HR tahu apa yang '
-                'harus diperbaiki. Catatan tambahan boleh diisi.'),
+                'harus diperbaiki. Catatan tambahan boleh diisi.\n\n'
+                'Penolakan hanya bisa dilakukan sekali, jadi pastikan semua '
+                'bagian yang salah sudah dicentang.'),
             const SizedBox(height: 8),
             Flexible(
               child: ConstrainedBox(
@@ -2122,12 +2431,388 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
         FilledButton(
           onPressed: _valid
-              ? () => Navigator.pop(context,
-                  SalaryService.susunAlasanTolak(_bagian, _controller.text))
+              ? () => Navigator.pop(context, (
+                    alasan: SalaryService.susunAlasanTolak(
+                        _bagian, _controller.text),
+                    bagian: [
+                      for (var i = 0; i < widget.items.length; i++)
+                        if (_checked.contains(i)) widget.items[i].key,
+                    ],
+                  ))
               : null,
           child: const Text('Kirim ke HR'),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TANDA ⓘ & KEDIP STATUS
+// ─────────────────────────────────────────────────────────────────────────────
+/// Ikon ⓘ kecil di samping baris slip: merah = bagian yang ditolak staff,
+/// hijau = hasil revisi admin/manajer. Ketuk untuk detailnya.
+class _InfoMarker extends StatelessWidget {
+  static const tolakColor = Color(0xFFDC2626);
+  static const revisiColor = Color(0xFF16A34A);
+
+  final Color color;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _InfoMarker({
+    super.key,
+    required this.color,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkResponse(
+        onTap: onTap,
+        radius: 18,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+          child: Container(
+            decoration: const BoxDecoration(
+                color: Colors.white, shape: BoxShape.circle),
+            child: Icon(Icons.info_rounded, size: 16, color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mengedipkan warna latar [builder] dari [from] ke [to] tiga kali saat
+/// pertama tampil, lalu berhenti di [from].
+class _BlinkThrice extends StatefulWidget {
+  final Color from;
+  final Color to;
+  final Widget Function(Color background) builder;
+
+  const _BlinkThrice({
+    super.key,
+    required this.from,
+    required this.to,
+    required this.builder,
+  });
+
+  @override
+  State<_BlinkThrice> createState() => _BlinkThriceState();
+}
+
+class _BlinkThriceState extends State<_BlinkThrice>
+    with SingleTickerProviderStateMixin {
+  static const _blinks = 3;
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500 * _blinks),
+  )..forward();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, __) {
+        // 0 -> 1 -> 0 per kedipan.
+        final phase = (_controller.value * _blinks) % 1.0;
+        final t = _controller.isCompleted ? 0.0 : 1 - (2 * phase - 1).abs();
+        return widget.builder(Color.lerp(widget.from, widget.to, t)!);
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POPUP TAHAPAN STATUS SLIP
+// ─────────────────────────────────────────────────────────────────────────────
+/// Satu tahap di popup bantuan.
+class _SlipStep {
+  final IconData icon;
+  final String title;
+  final String body;
+  const _SlipStep(this.icon, this.title, this.body);
+}
+
+const _slipSteps = [
+  _SlipStep(Icons.calculate_outlined, 'HR menghitung & mengirim slip',
+      'Admin/manajer menghitung gaji periode ini lalu mengirim slip ke Anda untuk diperiksa.'),
+  _SlipStep(Icons.fact_check_outlined, 'Menunggu konfirmasi Anda',
+      'Periksa angka di slip. Tekan "Konfirmasi" jika sudah benar, atau "Ada yang salah" jika tidak sesuai.'),
+  _SlipStep(
+      Icons.published_with_changes_rounded,
+      'Ditolak & direvisi HR (bila ada)',
+      'Bila Anda menolak, HR memperbaiki lalu mengirim ulang. Penolakan hanya bisa sekali. '
+          'Ikon ⓘ merah = bagian yang Anda tolak, ⓘ hijau = hasil revisi admin/manajer.'),
+  _SlipStep(Icons.verified_rounded, 'Staff menyetujui',
+      'Anda menyetujui slip, slip terkunci dan bisa diunduh.'),
+  _SlipStep(Icons.hourglass_top_rounded, 'Disetujui untuk dicairkan',
+      'HR menyetujui slip untuk dicairkan. Gaji segera ditransfer.'),
+  _SlipStep(Icons.payments_rounded, 'Gaji dicairkan',
+      'Gaji sudah ditransfer. Tanggal, nama admin yang mencairkan dan bukti transfer ada di detail slip.'),
+];
+
+/// Tahap [_slipSteps] tempat [slip] berada sekarang; null bila tidak ada slip.
+int? slipCurrentStep(SalarySlip? slip) {
+  if (slip == null) return null;
+  if (slip.sudahDicairkan) return 5;
+  if (slip.sedangDiprosesPencairan) return 4;
+  switch (slip.statusSlip) {
+    case 'menunggu_konfirmasi':
+      return 1;
+    case 'ditolak':
+    case 'draft': // hanya terlihat bila pernah ditolak staff
+      return 2;
+    case 'dikonfirmasi':
+    case 'terkunci':
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+/// Popup legend tahapan status slip gaji, menyorot posisi [slip] (slip
+/// terbaru) sekarang.
+Future<void> showSlipStatusGuide(BuildContext context, SalarySlip? slip) {
+  final current = slipCurrentStep(slip);
+  // Tahap revisi hanya "dilalui" bila slip memang pernah ditolak.
+  final revisiDilalui = slip?.pernahDitolak ?? false;
+
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (ctx) => Container(
+      key: const Key('slip-status-guide'),
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+      decoration: const BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.slate200,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('Tahapan Slip Gaji',
+                style: AppText.headline3.copyWith(color: AppColors.slate900)),
+            const SizedBox(height: 4),
+            Text(
+                slip == null
+                    ? 'Belum ada slip gaji.'
+                    : 'Posisi slip ${slip.period} ditandai "Sekarang".',
+                style: AppText.body2),
+            const SizedBox(height: 14),
+            for (var i = 0; i < _slipSteps.length; i++)
+              _buildGuideStep(
+                index: i,
+                step: _slipSteps[i],
+                isCurrent: i == current,
+                isDone: current != null &&
+                    i < current &&
+                    (i != 2 || revisiDilalui),
+                isSkipped:
+                    current != null && i == 2 && i < current && !revisiDilalui,
+                isLast: i == _slipSteps.length - 1,
+              ),
+            const SizedBox(height: 8),
+            _guideLegend(_InfoMarker.tolakColor, 'Bagian yang Anda tolak'),
+            const SizedBox(height: 6),
+            _guideLegend(_InfoMarker.revisiColor, 'Hasil revisi admin/manajer'),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _guideLegend(Color color, String text) => Row(
+      children: [
+        Icon(Icons.info_rounded, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+            child: Text(text,
+                style:
+                    GoogleFonts.inter(fontSize: 12, color: AppColors.slate700))),
+      ],
+    );
+
+Widget _buildGuideStep({
+  required int index,
+  required _SlipStep step,
+  required bool isCurrent,
+  required bool isDone,
+  required bool isSkipped,
+  required bool isLast,
+}) {
+  final Color color = isCurrent
+      ? AppColors.brandNavy
+      : isDone
+          ? _InfoMarker.revisiColor
+          : AppColors.slate400;
+  return IntrinsicHeight(
+    key: ValueKey('slip-step-$index${isCurrent ? '-current' : ''}'),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color:
+                    isCurrent ? AppColors.brandNavy : color.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(isDone ? Icons.check_rounded : step.icon,
+                  size: 16, color: isCurrent ? AppColors.brandLime : color),
+            ),
+            if (!isLast)
+              Expanded(
+                child: Container(
+                  width: 2,
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  color: isDone ? _InfoMarker.revisiColor : AppColors.slate200,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('${index + 1}. ${step.title}',
+                        style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight:
+                                isCurrent ? FontWeight.w800 : FontWeight.w600,
+                            color: isCurrent
+                                ? AppColors.brandNavy
+                                : AppColors.slate800)),
+                    if (isCurrent)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: AppColors.brandLime,
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text('Sekarang',
+                            style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.brandNavy)),
+                      ),
+                    if (isSkipped)
+                      Text('(tidak ada)',
+                          style: GoogleFonts.inter(
+                              fontSize: 11, color: AppColors.slate400)),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(step.body,
+                    style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        height: 1.4,
+                        color: AppColors.slate600)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUKTI TRANSFER
+// ─────────────────────────────────────────────────────────────────────────────
+class _BuktiImageScreen extends StatelessWidget {
+  final String title;
+  final Uint8List bytes;
+  const _BuktiImageScreen({required this.title, required this.bytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(title, style: GoogleFonts.inter(fontSize: 15)),
+      ),
+      body: InteractiveViewer(
+        maxScale: 5,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Format bukti transfer tidak bisa ditampilkan di HP ini.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.white70),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BuktiPdfScreen extends StatelessWidget {
+  final String title;
+  final Uint8List bytes;
+  const _BuktiPdfScreen({required this.title, required this.bytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: AppColors.brandNavy,
+        foregroundColor: Colors.white,
+        title: Text(title, style: GoogleFonts.inter(fontSize: 15)),
+      ),
+      body: PdfPreview(
+        build: (_) async => bytes,
+        canChangePageFormat: false,
+        canChangeOrientation: false,
+        canDebug: false,
+        allowPrinting: false,
+        pdfFileName: '${title.replaceAll(' ', '-')}.pdf',
+      ),
     );
   }
 }

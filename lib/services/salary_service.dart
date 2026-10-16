@@ -77,12 +77,15 @@ class SalaryService {
   /// POST: staff menolak slip beserta alasannya
   /// (`menunggu_konfirmasi` -> `ditolak`). Alasan wajib, 5-500 karakter --
   /// itulah yang dibaca HR di tabel slip untuk tahu apa yang harus diperbaiki.
+  /// [bagian] = kunci baris yang dicentang (lihat `SalaryComponent.key`),
+  /// disimpan server supaya baris itu bisa ditandai di slip. Penolakan hanya
+  /// boleh SEKALI per slip: server membalas 409 untuk penolakan kedua.
   static Future<void> tolak(String slipId, String alasan,
-      {String? dikirimKonfirmasiAt}) async {
+      {String? dikirimKonfirmasiAt, List<String> bagian = const []}) async {
     final id = await _staffId();
     await ApiClient.instance.post(
       '/mobile/staff/$id/gaji/slip/$slipId/tolak',
-      body: tolakBody(alasan, dikirimKonfirmasiAt),
+      body: tolakBody(alasan, dikirimKonfirmasiAt, bagian: bagian),
     );
   }
 
@@ -114,11 +117,13 @@ class SalaryService {
   }
 
   static Map<String, dynamic> tolakBody(
-          String alasan, String? dikirimKonfirmasiAt) =>
+          String alasan, String? dikirimKonfirmasiAt,
+          {List<String> bagian = const []}) =>
       {
         'alasan': alasan.trim(),
         if (dikirimKonfirmasiAt != null)
           'dikirimKonfirmasiAt': dikirimKonfirmasiAt,
+        if (bagian.isNotEmpty) 'bagian': bagian,
       };
 
   /// 409 = slip sudah berubah di server (HR memperbarui / menariknya). App
@@ -132,4 +137,21 @@ class SalaryService {
     final id = await _staffId();
     return ApiClient.instance.getBytes('/mobile/staff/$id/gaji/slip/$slipId/pdf');
   }
+
+  /// GET bukti transfer yang diunggah admin saat mencairkan (gambar atau PDF).
+  /// Disimpan privat di Drive kantor, jadi selalu lewat server. 404 bila
+  /// belum dicairkan / tidak ada bukti.
+  static Future<Uint8List> downloadBukti(String slipId) async {
+    final id = await _staffId();
+    return ApiClient.instance
+        .getBytes('/mobile/staff/$id/gaji/slip/$slipId/bukti');
+  }
+
+  /// Bukti berupa PDF (diperiksa dari magic bytes "%PDF").
+  static bool isPdf(Uint8List bytes) =>
+      bytes.length >= 4 &&
+      bytes[0] == 0x25 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x44 &&
+      bytes[3] == 0x46;
 }
