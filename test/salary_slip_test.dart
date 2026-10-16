@@ -1,4 +1,4 @@
-// Sprint 2 EPIC 9 — mengunci perilaku SalarySlip.fromApi terhadap bentuk data
+// Sprint 2 EPIC 9 â€” mengunci perilaku SalarySlip.fromApi terhadap bentuk data
 // asli dari DB.
 //
 // Payload di bawah menyalin kolom tabel `slip_gaji` (lihat
@@ -17,12 +17,12 @@ import 'package:hadirin_staff_app/services/api_client.dart';
 import 'package:hadirin_staff_app/services/salary_service.dart';
 
 /// Slip realistis: punya tunjangan bentuk barang, fasilitas, uang makan, DAN
-/// potongan BPJS staff — persis kombinasi yang dulu bikin angka client meleset.
+/// potongan BPJS staff â€” persis kombinasi yang dulu bikin angka client meleset.
 ///
 /// Rekonstruksi angka server (payroll-calc.ts):
 ///   grossForTax     = 5.000.000 + 200.000 + 250.000 + 450.000 + 0 = 5.900.000
 ///   totalPotongan   = 100.000 + 50.000 + 250.000 + 150.000        =   550.000
-///   totalPendapatan = 5.900.000 − 550.000                         = 5.350.000
+///   totalPendapatan = 5.900.000 âˆ’ 550.000                         = 5.350.000
 ///   gajiNetto       = 5.350.000 + 500.000 (tunjangan uang saja)   = 5.850.000
 Map<String, dynamic> _slipPayload() => {
       'id': 'clslip0001',
@@ -31,7 +31,7 @@ Map<String, dynamic> _slipPayload() => {
       'gajiPokok': 5000000,
       'bonusTepat': 200000,
       'bonusKehadiran': 250000,
-      // Kolom lama yang backend tandai DEPRECATED — selalu 0.
+      // Kolom lama yang backend tandai DEPRECATED â€” selalu 0.
       'tunjanganTransport': 0,
       'tunjanganMakan': 0,
       'tunjanganKesehatan': 0,
@@ -69,7 +69,7 @@ Map<String, dynamic> _slipPayload() => {
       'gajiNetto': 5850000,
       'statusSlip': 'terkunci',  // 'sent' diganti nama jadi 'terkunci' (2026-09-19)
       'statusBayar': 'paid',
-      // ── statistik yang di-merge routes/mobile/gaji.ts ──
+      // â”€â”€ statistik yang di-merge routes/mobile/gaji.ts â”€â”€
       'workingDays': 22,
       'presentDays': 20,
       'lateDays': 2,
@@ -222,7 +222,7 @@ void _sprint3Tests() {
 
 void main() {
   _sprint3Tests();
-  group('SalarySlip.fromApi — Take Home Pay', () {
+  group('SalarySlip.fromApi â€” Take Home Pay', () {
     test('takeHomePay & netSalary memakai gajiNetto server apa adanya', () {
       final slip = SalarySlip.fromApi(_slipPayload());
 
@@ -234,8 +234,8 @@ void main() {
     test('TIDAK memakai hitungan lama yang menjumlah komponen non-tunai', () {
       final slip = SalarySlip.fromApi(_slipPayload());
 
-      // Formula lama: gajiBersih + totalTunjangan(tampilan) − totalPotongan
-      //             = 5.650.000 + 1.150.000 − 300.000 = 6.500.000
+      // Formula lama: gajiBersih + totalTunjangan(tampilan) âˆ’ totalPotongan
+      //             = 5.650.000 + 1.150.000 âˆ’ 300.000 = 6.500.000
       // yaitu 650.000 LEBIH BESAR dari yang benar-benar ditransfer.
       final formulaLama =
           slip.gajiBersih + slip.totalTunjangan - slip.totalPotongan;
@@ -247,7 +247,7 @@ void main() {
       final slip = SalarySlip.fromApi(_slipPayload());
 
       // Identitas yang ditampilkan kartu ringkasan:
-      //   Pendapatan Pokok − Total Potongan + Tunjangan Tunai = Take Home Pay
+      //   Pendapatan Pokok âˆ’ Total Potongan + Tunjangan Tunai = Take Home Pay
       expect(slip.pendapatanPokok, 5900000); // == grossForTax server
       expect(slip.totalDeduction, 550000); // == totalPotongan server
       expect(slip.totalTunjanganUang, 500000);
@@ -263,7 +263,7 @@ void main() {
     });
   });
 
-  group('SalarySlip.fromApi — komponen di luar THP', () {
+  group('SalarySlip.fromApi â€” komponen di luar THP', () {
     test('tunjangan bentuk barang tetap tampil dan ditandai', () {
       final slip = SalarySlip.fromApi(_slipPayload());
       final barang =
@@ -322,7 +322,7 @@ void main() {
     });
   });
 
-  group('SalarySlip.fromApi — potongan BPJS (EPIC 9c)', () {
+  group('SalarySlip.fromApi â€” potongan BPJS (EPIC 9c)', () {
     test('baris potongan BPJS muncul saat nilainya nonzero', () {
       final slip = SalarySlip.fromApi(_slipPayload());
       final bpjs = slip.components
@@ -353,7 +353,7 @@ void main() {
     });
   });
 
-  group('SalarySlip.fromApi — statistik kehadiran', () {
+  group('SalarySlip.fromApi â€” statistik kehadiran', () {
     test('periode & rincian hari dibaca dari respons server', () {
       final slip = SalarySlip.fromApi(_slipPayload());
 
@@ -363,12 +363,12 @@ void main() {
       expect(slip.workDays, 22);
       expect(slip.presentDays, 20);
       expect(slip.lateDays, 2);
-      // 22 hari kerja − 20 hadir − 1 cuti − 1 izin = 0 alpha
+      // 22 hari kerja âˆ’ 20 hadir âˆ’ 1 cuti âˆ’ 1 izin = 0 alpha
       expect(slip.absentDays, 0);
     });
   });
 
-  group('SalarySlip.fromApi — periode Bulanan/Mingguan/Harian', () {
+  group('SalarySlip.fromApi â€” periode Bulanan/Mingguan/Harian', () {
     test('slip Mingguan memakai label minggu ISO, bukan "Januari 2026"', () {
       final slip = SalarySlip.fromApi(_slipPayload()..['periode'] = '2026-W37');
 
@@ -408,7 +408,7 @@ void main() {
     });
   });
 
-  group('SalarySlip.fromApi — alur konfirmasi slip', () {
+  group('SalarySlip.fromApi â€” alur konfirmasi slip', () {
     test('status dan alasan tolak dibaca dari server', () {
       final slip = SalarySlip.fromApi(_slipPayload()
         ..['id'] = 'slip-9'
@@ -456,6 +456,89 @@ void main() {
       expect(after.components.length, slip.components.length);
       expect(after.period, slip.period);
       expect(after.id, slip.id);
+    });
+  });
+
+  group('SalarySlip.fromApi â€” penolakan sekali, revisi & pencairan', () {
+    test('label chip: terkunci = Disetujui, ditolak/draft = Anda menolak', () {
+      Map<String, dynamic> unpaid(String st) => _slipPayload()
+        ..['statusSlip'] = st
+        ..['statusBayar'] = 'unpaid';
+      expect(SalarySlip.fromApi(unpaid('terkunci')).statusLabel, 'Disetujui');
+      expect(SalarySlip.fromApi(unpaid('ditolak')).statusLabel,
+          'Anda menolak — menunggu perbaikan HR');
+    });
+
+    test('bisaTolak dari server; fallback: menunggu & belum pernah ditolak', () {
+      final p = _slipPayload()..['statusSlip'] = 'menunggu_konfirmasi';
+      expect(SalarySlip.fromApi(p).bisaTolak, isTrue);
+      expect(SalarySlip.fromApi({...p, 'ditolakAt': '2026-09-02T03:00:00.000Z'}).bisaTolak,
+          isFalse);
+      expect(SalarySlip.fromApi({...p, 'bisaTolak': false}).bisaTolak, isFalse);
+    });
+
+    test('baris punya kunci yang sama dengan server', () {
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['tunjanganBreakdown'] = [
+          {'nama': 'Transport', 'jumlah': 300000, 'bentuk': 'uang'}
+        ]);
+      final keys = slip.components.map((c) => c.key).toList();
+      expect(keys, contains('col:gajiPokok'));
+      expect(keys, contains('tunjangan:Transport'));
+    });
+
+    test('revisi: hanya setelah ditolak, digabung per baris, sebelum dari revisi pertama', () {
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['statusSlip'] = 'menunggu_konfirmasi'
+        ..['ditolakAt'] = '2026-09-02T03:00:00.000Z'
+        ..['bagianTolak'] = ['col:gajiPokok']
+        ..['revisions'] = [
+          {
+            'editedAt': '2026-09-01T03:00:00.000Z', // sebelum ditolak: diabaikan
+            'perubahan': [
+              {'key': 'col:bonusTepat', 'label': 'Bonus Tepat Waktu', 'sebelum': 0, 'sesudah': 1}
+            ],
+          },
+          {
+            'editedAt': '2026-09-03T03:00:00.000Z',
+            'editedBy': 'Office Admin',
+            'editedByNama': 'Rina',
+            'reason': 'Gaji pokok salah input',
+            'perubahan': [
+              {'key': 'col:gajiPokok', 'label': 'Gaji Pokok', 'sebelum': 5000000, 'sesudah': 5200000},
+              {'key': 'tunjangan:Pulsa', 'label': 'Pulsa', 'sebelum': 0, 'sesudah': 50000},
+            ],
+          },
+          {
+            'editedAt': '2026-09-04T03:00:00.000Z',
+            'editedByNama': 'Budi',
+            'perubahan': [
+              {'key': 'col:gajiPokok', 'label': 'Gaji Pokok', 'sebelum': 5200000, 'sesudah': 5500000},
+              {'key': 'tunjangan:Pulsa', 'label': 'Pulsa', 'sebelum': 50000, 'sesudah': 0},
+            ],
+          },
+        ]);
+
+      expect(slip.ditolakBagian('col:gajiPokok'), isTrue);
+      expect(slip.revisi.keys, ['col:gajiPokok']); // Pulsa kembali ke 0 -> tidak ditandai
+      final r = slip.revisi['col:gajiPokok']!;
+      expect(r.sebelum, 5000000);
+      expect(r.sesudah, 5500000);
+      expect(r.oleh, 'Budi');
+    });
+
+    test('pencairan: tanggal & nama admin', () {
+      final slip = SalarySlip.fromApi(_slipPayload()
+        ..['statusSlip'] = 'terkunci'
+        ..['statusBayar'] = 'paid'
+        ..['paidAt'] = '2026-10-12T07:05:00.000Z'
+        ..['paidOleh'] = 'Rina Admin'
+        ..['adaBuktiBayar'] = true);
+      expect(slip.adaBuktiBayar, isTrue);
+      expect(slip.pencairanDetail, startsWith('Dicairkan '));
+      expect(slip.pencairanDetail, endsWith(' oleh Rina Admin'));
+      expect(SalarySlip.fromApi(_slipPayload()..['statusBayar'] = 'unpaid').pencairanDetail,
+          isNull);
     });
   });
 }

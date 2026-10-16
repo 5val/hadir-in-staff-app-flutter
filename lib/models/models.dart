@@ -3,6 +3,7 @@
 // ============================================================
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class AppSession {
   static UserProfile? _currentUser;
@@ -696,6 +697,10 @@ enum SalaryGroup {
 }
 
 class SalaryComponent {
+  /// Kunci baris yang sama dengan server (`lib/slip-revision-diff.ts`):
+  /// `col:<kolom>`, `tunjangan:<nama>`, `fasilitas:<kategori>`. Dipakai untuk
+  /// mencocokkan baris dengan bagian yang ditolak staff dan revisi HR.
+  final String key;
   final String label;
   final String note;
   final int amount;
@@ -713,6 +718,7 @@ class SalaryComponent {
   final bool excludedFromThp;
 
   const SalaryComponent({
+    this.key = '',
     required this.label,
     this.note = '',
     required this.amount,
@@ -748,6 +754,72 @@ class LeaveRecord {
     required this.totalDays,
     required this.status,
   });
+}
+
+/// "12 Okt 2026, 14.05" (locale id_ID; locale default bila belum
+/// di-inisialisasi, mis. di test).
+String formatTanggalJam(DateTime d) {
+  try {
+    return DateFormat('dd MMM yyyy, HH.mm', 'id_ID').format(d);
+  } catch (_) {
+    return DateFormat('dd MMM yyyy, HH.mm').format(d);
+  }
+}
+
+/// Satu baris slip yang diubah admin/manajer setelah staff menolak (dari
+/// `slip_gaji.revisions[].perubahan`, lihat backend lib/slip-revision-diff.ts).
+class SlipLineRevision {
+  final String key;
+  final String label;
+  final int sebelum;
+  final int sesudah;
+  final String? oleh;
+  final DateTime? pada;
+  final String? alasan;
+
+  const SlipLineRevision({
+    required this.key,
+    required this.label,
+    required this.sebelum,
+    required this.sesudah,
+    this.oleh,
+    this.pada,
+    this.alasan,
+  });
+
+  /// Gabungkan semua revisi SETELAH [ditolakAt] per kunci baris: `sebelum`
+  /// dari revisi pertama, `sesudah`/oleh/pada dari yang terakhir. Baris yang
+  /// akhirnya kembali ke angka semula tidak ditandai. Revisi sebelum staff
+  /// menolak tidak relevan (staff tidak pernah melihat angka lamanya).
+  static Map<String, SlipLineRevision> sinceRejection(
+      Object? raw, DateTime? ditolakAt) {
+    if (ditolakAt == null || raw is! List) return const {};
+    final out = <String, SlipLineRevision>{};
+    for (final rev in raw.whereType<Map>()) {
+      final at = DateTime.tryParse((rev['editedAt'] ?? '').toString())?.toLocal();
+      if (at == null || !at.isAfter(ditolakAt)) continue;
+      final changes = rev['perubahan'];
+      if (changes is! List) continue;
+      final nama = (rev['editedByNama'] ?? rev['editedBy'] ?? '').toString().trim();
+      final alasan = (rev['reason'] ?? '').toString().trim();
+      for (final c in changes.whereType<Map>()) {
+        final key = (c['key'] ?? '').toString();
+        if (key.isEmpty) continue;
+        final prev = out[key];
+        out[key] = SlipLineRevision(
+          key: key,
+          label: (c['label'] ?? key).toString(),
+          sebelum: prev?.sebelum ?? (c['sebelum'] as num?)?.toInt() ?? 0,
+          sesudah: (c['sesudah'] as num?)?.toInt() ?? 0,
+          oleh: nama.isEmpty ? null : nama,
+          pada: at,
+          alasan: alasan.isEmpty ? null : alasan,
+        );
+      }
+    }
+    out.removeWhere((_, r) => r.sebelum == r.sesudah);
+    return out;
+  }
 }
 
 class SalarySlip {
@@ -822,8 +894,9 @@ class SalarySlip {
   /// tidak ada diturunkan dari bentuk kunci periode (lihat [inferPeriodeType]).
   final String periodeType;
 
-  /// Kapan slip dibayar (`slip_gaji.paidAt`); null bila belum / server lama.
+  /// Kapan & oleh siapa (nama admin) gaji dicairkan (`paidAt`/`paidOleh`).
   final DateTime? paidAt;
+  final String? paidOleh;
 
   /// Flag server: staff masih boleh membatalkan persetujuannya. Null = server
   /// lama tidak mengirim -> diturunkan di [bisaBatalSetujuEfektif].
@@ -838,6 +911,22 @@ class SalarySlip {
   /// Bukti transfer milik batch pencairan gabungan (lebih dari satu slip):
   /// disimpan HR, staff tidak boleh melihatnya. Absen = false.
   final bool buktiGabungan;
+
+  /// Server: staff masih boleh menolak. Penolakan hanya boleh SEKALI per slip;
+  /// slip yang sudah pernah ditolak lalu dikirim ulang HR hanya bisa dikonfirmasi.
+  final bool bisaTolak;
+
+  /// Kapan staff menolak (bertahan setelah HR mengirim ulang). Null = belum
+  /// pernah ditolak. Batal-setuju juga mengisinya (slip menjadi `ditolak`).
+  final DateTime? ditolakAt;
+
+  /// Kunci baris yang dicentang staff saat menolak (lihat [SalaryComponent.key];
+  /// plus `umum:kehadiran` / `umum:thp`).
+  final List<String> bagianTolak;
+
+  /// Revisi HR SETELAH staff menolak, per kunci baris (sebelum -> sesudah
+  /// digabung dari semua revisi sejak penolakan).
+  final Map<String, SlipLineRevision> revisi;
 
   const SalarySlip({
     required this.id,
@@ -866,11 +955,17 @@ class SalarySlip {
     this.statusBayar = 'unpaid',
     this.periodeType = 'bulanan',
     this.paidAt,
+    this.paidOleh,
     this.bisaBatalSetuju,
     this.perluAksiServer,
     this.adaBuktiBayarServer,
     this.buktiGabungan = false,
-  });
+    bool? bisaTolak,
+    this.ditolakAt,
+    this.bagianTolak = const [],
+    this.revisi = const {},
+  }) : bisaTolak = bisaTolak ??
+            (statusSlip == 'menunggu_konfirmasi' && ditolakAt == null);
 
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
   int get workDays => workingDays;
@@ -922,10 +1017,12 @@ class SalarySlip {
     final end = periode.end;
 
     final components = <SalaryComponent>[];
-    void add(SalaryGroup group, String label, String note, int amount,
+    void add(SalaryGroup group, String key, String label, String note,
+        int amount,
         {bool excludedFromThp = false}) {
       if (amount != 0) {
         components.add(SalaryComponent(
+          key: key,
           label: label,
           note: note,
           amount: amount,
@@ -936,14 +1033,14 @@ class SalarySlip {
     }
 
     // ── Pendapatan pokok ──────────────────────────────────────
-    add(SalaryGroup.pendapatanPokok, 'Gaji Pokok', '', gi('gajiPokok'));
-    add(SalaryGroup.pendapatanPokok, 'Bonus Tepat Waktu',
+    add(SalaryGroup.pendapatanPokok, 'col:gajiPokok', 'Gaji Pokok', '', gi('gajiPokok'));
+    add(SalaryGroup.pendapatanPokok, 'col:bonusTepat', 'Bonus Tepat Waktu',
         'Per hari check-in tepat waktu', gi('bonusTepat'));
-    add(SalaryGroup.pendapatanPokok, 'Bonus Kehadiran',
+    add(SalaryGroup.pendapatanPokok, 'col:bonusKehadiran', 'Bonus Kehadiran',
         'Hadir penuh (hari izin tidak membatalkan)', gi('bonusKehadiran'));
-    add(SalaryGroup.pendapatanPokok, 'Lembur', '${gi('lemburJam')} jam',
+    add(SalaryGroup.pendapatanPokok, 'col:lemburTotal', 'Lembur', '${gi('lemburJam')} jam',
         gi('lemburTotal'));
-    add(SalaryGroup.pendapatanPokok, 'THR', '', gi('thrAmount'));
+    add(SalaryGroup.pendapatanPokok, 'col:thrAmount', 'THR', '', gi('thrAmount'));
 
     // ── Tunjangan (dinamis dari DB) ───────────────────────────
     //
@@ -968,7 +1065,7 @@ class SalarySlip {
           if (periode == 'harian') 'Dibayar per hari hadir',
           if (isBarang) 'Berbentuk barang',
         ].join(', ');
-        add(SalaryGroup.tunjangan, nama, note, jumlah,
+        add(SalaryGroup.tunjangan, 'tunjangan:$nama', nama, note, jumlah,
             excludedFromThp: isBarang);
       }
     }
@@ -981,7 +1078,8 @@ class SalarySlip {
       for (final item in fasilitasRaw.whereType<Map>()) {
         final kategori = (item['kategori'] ?? 'Fasilitas').toString();
         final nominal = (item['nominal'] as num?)?.toInt() ?? 0;
-        add(SalaryGroup.tunjangan, kategori, 'Fasilitas (natura)', nominal,
+        add(SalaryGroup.tunjangan, 'fasilitas:$kategori', kategori,
+            'Fasilitas (natura)', nominal,
             excludedFromThp: true);
       }
     }
@@ -991,20 +1089,26 @@ class SalarySlip {
     // (PMK 66/2023: tunjangan berbentuk uang adalah objek PPh21, kena pajak
     // dan ikut Take Home Pay, sama seperti Tunjangan tunai lainnya) — jadi
     // TIDAK ditandai excludedFromThp lagi.
-    add(SalaryGroup.tunjangan, 'Uang Makan',
+    add(SalaryGroup.tunjangan, 'col:uangMakan', 'Uang Makan',
         '${gi('uangMakanDays')} hari memenuhi syarat', gi('uangMakan'));
 
     // ── Pajak & potongan ──────────────────────────────────────
-    add(SalaryGroup.pajak, 'PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
-    add(SalaryGroup.potongan, 'Denda Keterlambatan', '', gi('dendaTerlambat'));
-    add(SalaryGroup.potongan, 'Potongan Alpha', '', gi('potonganAlpha'));
+    add(SalaryGroup.pajak, 'col:pajakPPh21', 'PPh 21', 'Pajak penghasilan', gi('pajakPPh21'));
+    add(SalaryGroup.potongan, 'col:dendaTerlambat', 'Denda Keterlambatan', '', gi('dendaTerlambat'));
+    add(SalaryGroup.potongan, 'col:potonganAlpha', 'Potongan Alpha', '', gi('potonganAlpha'));
     // Sprint 2 EPIC 9c: `potonganBPJS` sekarang BISA nonzero (BPJS skema split
     // — sebagian ditanggung perusahaan, sebagian dipotong dari gaji staff).
     // Dulu selalu 0 sehingga baris ini praktis tidak pernah tampil.
-    add(SalaryGroup.potongan, 'Potongan BPJS',
+    add(SalaryGroup.potongan, 'col:potonganBPJS', 'Potongan BPJS',
         'BPJS bagian staff (dipotong dari gaji)', gi('potonganBPJS'));
 
     final bank = AppSession.staff?.namaBank ?? '';
+
+    DateTime? date(String k) =>
+        j[k] == null ? null : DateTime.tryParse(j[k].toString())?.toLocal();
+    final ditolakAt = date('ditolakAt');
+    final bagianRaw = j['bagianTolak'];
+    final paidOleh = (j['paidOleh'] ?? '').toString().trim();
 
     return SalarySlip(
       id: (j['id'] ?? '').toString(),
@@ -1044,11 +1148,18 @@ class SalarySlip {
           : DateTime.tryParse(j['siapDicairkanAt'].toString()),
       statusBayar: (j['statusBayar'] ?? 'unpaid').toString().toLowerCase(),
       periodeType: normalizePeriodeType(j['periodeType']?.toString(), periodeRaw),
-      paidAt: j['paidAt'] == null ? null : DateTime.tryParse(j['paidAt'].toString()),
+      paidAt: date('paidAt'),
+      paidOleh: paidOleh.isEmpty ? null : paidOleh,
       bisaBatalSetuju: j['bisaBatalSetuju'] is bool ? j['bisaBatalSetuju'] as bool : null,
       perluAksiServer: j['perluAksi'] is bool ? j['perluAksi'] as bool : null,
       adaBuktiBayarServer: j['adaBuktiBayar'] is bool ? j['adaBuktiBayar'] as bool : null,
       buktiGabungan: j['buktiGabungan'] == true,
+      bisaTolak: j['bisaTolak'] is bool ? j['bisaTolak'] as bool : null,
+      ditolakAt: ditolakAt,
+      bagianTolak: bagianRaw is List
+          ? bagianRaw.map((e) => e.toString()).toList()
+          : const [],
+      revisi: SlipLineRevision.sinceRejection(j['revisions'], ditolakAt),
     );
   }
 
@@ -1188,6 +1299,10 @@ class SalarySlip {
   bool get perluKonfirmasi => statusSlip == 'menunggu_konfirmasi';
   bool get sudahDikonfirmasi => statusSlip == 'dikonfirmasi';
   bool get ditolak => statusSlip == 'ditolak';
+
+  /// Slip yang sudah ditolak staff lalu dikembalikan HR ke `draft` untuk
+  /// direvisi (server hanya mengirim draft bila pernah ditolak).
+  bool get sedangDirevisi => statusSlip == 'draft';
   bool get terkunci => statusSlip == 'terkunci';
 
   /// Teks status di kartu untuk staff, benar untuk setiap keadaan:
@@ -1198,7 +1313,10 @@ class SalarySlip {
     // Dibayar menang atas status slip apa pun (baris legacy).
     if (sudahDicairkan) return 'Sudah dicairkan';
     if (statusSlip == 'menunggu_konfirmasi') return 'Perlu konfirmasi Anda';
-    if (statusSlip == 'ditolak') return 'Anda menolak — menunggu perbaikan HR';
+    // `draft` = dikembalikan HR untuk direvisi setelah staff menolak.
+    if (statusSlip == 'ditolak' || statusSlip == 'draft') {
+      return 'Anda menolak — menunggu perbaikan HR';
+    }
     if (sedangDiprosesPencairan) return 'Sedang diproses pencairan';
     if (statusSlip == 'terkunci' || statusSlip == 'dikonfirmasi') return 'Disetujui';
     return statusSlip;
@@ -1216,6 +1334,9 @@ class SalarySlip {
     bool? perluAksiServer,
     bool? adaBuktiBayarServer,
     DateTime? paidAt,
+    bool? bisaTolak,
+    DateTime? ditolakAt,
+    List<String>? bagianTolak,
   }) {
     return SalarySlip(
       id: id,
@@ -1244,10 +1365,15 @@ class SalarySlip {
       statusBayar: statusBayar ?? this.statusBayar,
       periodeType: periodeType,
       paidAt: paidAt ?? this.paidAt,
+      paidOleh: paidOleh,
       bisaBatalSetuju: bisaBatalSetuju ?? this.bisaBatalSetuju,
       perluAksiServer: perluAksiServer ?? this.perluAksiServer,
       adaBuktiBayarServer: adaBuktiBayarServer ?? this.adaBuktiBayarServer,
       buktiGabungan: buktiGabungan,
+      bisaTolak: bisaTolak ?? this.bisaTolak,
+      ditolakAt: ditolakAt ?? this.ditolakAt,
+      bagianTolak: bagianTolak ?? this.bagianTolak,
+      revisi: revisi,
     );
   }
 
@@ -1256,6 +1382,21 @@ class SalarySlip {
 
   /// HR sudah menyetujui pencairan tetapi belum dibayar.
   bool get sedangDiprosesPencairan => siapDicairkanAt != null && !sudahDicairkan;
+
+  /// Pernah ditolak staff (alasan & bagian yang ditolak tetap ditampilkan
+  /// setelah HR merevisi / mengirim ulang).
+  bool get pernahDitolak => ditolakAt != null || alasanTolak != null;
+
+  /// Baris [key] termasuk bagian yang dicentang staff saat menolak.
+  bool ditolakBagian(String key) => bagianTolak.contains(key);
+
+  /// "Dicairkan 12 Okt 2026, 14.05 oleh Budi" -- null bila belum dicairkan.
+  String? get pencairanDetail {
+    if (!sudahDicairkan) return null;
+    final when = paidAt == null ? '' : ' ${formatTanggalJam(paidAt!)}';
+    final who = paidOleh == null ? '' : ' oleh $paidOleh';
+    return 'Dicairkan$when$who';
+  }
 
   /// Label pencairan untuk staff; null bila belum ada kabar pencairan.
   String? get pencairanLabel {

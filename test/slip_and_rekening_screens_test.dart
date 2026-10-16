@@ -13,7 +13,8 @@ SalarySlip slipWith(String statusSlip,
         {bool? bisaUnduh,
         String? alasanTolak,
         String statusBayar = 'unpaid',
-        String? siapDicairkanAt}) =>
+        String? siapDicairkanAt,
+        Map<String, dynamic> extra = const {}}) =>
     SalarySlip.fromApi({
       'id': 'slip-1',
       'staffId': 'staff-1',
@@ -25,6 +26,7 @@ SalarySlip slipWith(String statusSlip,
       if (siapDicairkanAt != null) 'siapDicairkanAt': siapDicairkanAt,
       'bisaUnduh': bisaUnduh ?? statusSlip == 'terkunci',
       if (alasanTolak != null) 'alasanTolak': alasanTolak,
+      ...extra,
     });
 
 Future<void> pumpDetail(WidgetTester tester, SalarySlip slip) async {
@@ -73,7 +75,7 @@ void main() {
 
     testWidgets('terkunci: download + Google Drive available, no confirm bar', (tester) async {
       await pumpDetail(tester, slipWith('terkunci'));
-      expect(find.text('Slip final'), findsOneWidget);
+      expect(find.text('Anda menyetujui slip ini'), findsOneWidget);
       expect(find.text('Unduh PDF'), findsOneWidget);
       expect(find.text('Simpan ke Google Drive'), findsOneWidget);
       expect(find.text('Konfirmasi, sudah benar'), findsNothing);
@@ -128,9 +130,10 @@ void main() {
     testWidgets('terkunci + siapDicairkanAt: "Sedang diproses pencairan"', (tester) async {
       await pumpDetail(tester,
           slipWith('terkunci', siapDicairkanAt: '2026-10-01T03:00:00.000Z'));
-      expect(find.text('Sedang diproses pencairan'), findsOneWidget);
+      // Banner + baris di kartu atas.
+      expect(find.text('Sedang diproses pencairan'), findsNWidgets(2));
       expect(find.text('Sudah dicairkan'), findsNothing);
-      expect(find.text('Slip final'), findsOneWidget);
+      expect(find.text('Anda menyetujui slip ini'), findsOneWidget);
     });
 
     testWidgets('paid: "Sudah dicairkan"', (tester) async {
@@ -246,6 +249,204 @@ void main() {
       await tester.pump();
       final bank = find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == 'mis. BCA');
       expect(tester.widget<TextField>(bank).controller!.text, 'Mandiri');
+    });
+  });
+
+  group('SalaryDetailScreen -- penolakan sekali, tanda revisi, pencairan', () {
+    testWidgets('slip yang sudah pernah ditolak & dikirim ulang: tidak bisa ditolak lagi', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('menunggu_konfirmasi', alasanTolak: 'Gaji pokok salah', extra: {
+            'ditolakAt': '2026-09-02T03:00:00.000Z',
+            'bisaTolak': false,
+          }));
+      expect(find.text('Konfirmasi, sudah benar'), findsOneWidget);
+      expect(find.text('Ada yang salah'), findsNothing);
+      expect(find.text('Slip sudah direvisi HR'), findsOneWidget);
+    });
+
+    testWidgets('ikon merah di bagian yang ditolak, hijau di hasil revisi', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('menunggu_konfirmasi', alasanTolak: 'Gaji pokok salah', extra: {
+            'ditolakAt': '2026-09-02T03:00:00.000Z',
+            'bisaTolak': false,
+            'bagianTolak': ['col:gajiPokok'],
+            'revisions': [
+              {
+                'editedAt': '2026-09-03T03:00:00.000Z',
+                'editedByNama': 'Rina',
+                'perubahan': [
+                  {'key': 'col:gajiPokok', 'label': 'Gaji Pokok', 'sebelum': 4800000, 'sesudah': 5000000}
+                ],
+              }
+            ],
+          }));
+      // Baris yang ditolak SEKALIGUS direvisi: satu ikon saja, hijau.
+      expect(find.byKey(const ValueKey('marker-revisi-col:gajiPokok')), findsOneWidget);
+      expect(find.byKey(const ValueKey('marker-tolak-col:gajiPokok')), findsNothing);
+      expect(find.byKey(const Key('slip-revisi-list')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('marker-revisi-col:gajiPokok')));
+      await tester.pumpAndSettle();
+      expect(find.text('Direvisi: Gaji Pokok'), findsOneWidget);
+      expect(find.textContaining('oleh Rina'), findsOneWidget);
+      expect(find.textContaining('sebelumnya Anda tolak'), findsOneWidget);
+    });
+
+    testWidgets('sudah dicairkan: nama admin, waktu & tombol bukti transfer', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('terkunci', statusBayar: 'paid', extra: {
+            'paidAt': '2026-10-12T07:05:00.000Z',
+            'paidOleh': 'Rina Admin',
+            'adaBuktiBayar': true,
+          }));
+      expect(find.textContaining('Dicairkan oleh: Rina Admin'), findsOneWidget);
+      expect(find.byKey(const Key('btn-lihat-bukti')), findsOneWidget);
+      expect(find.textContaining('Ditransfer via'), findsNothing);
+    });
+
+    testWidgets('belum dicairkan: tidak ada tulisan "Ditransfer"/pencairan', (tester) async {
+      await pumpDetail(tester, slipWith('menunggu_konfirmasi'));
+      expect(find.textContaining('Ditransfer'), findsNothing);
+      expect(find.byKey(const Key('slip-hero-pencairan')), findsNothing);
+      expect(find.byKey(const Key('btn-lihat-bukti')), findsNothing);
+    });
+  });
+
+  group('Popup tahapan status slip', () {
+    test('posisi tahap mengikuti status slip', () {
+      expect(slipCurrentStep(null), isNull);
+      expect(slipCurrentStep(slipWith('menunggu_konfirmasi')), 1);
+      expect(slipCurrentStep(slipWith('ditolak')), 2);
+      expect(slipCurrentStep(slipWith('terkunci')), 3);
+      expect(slipCurrentStep(slipWith('terkunci', siapDicairkanAt: '2026-10-01T03:00:00.000Z')), 4);
+      expect(slipCurrentStep(slipWith('terkunci', statusBayar: 'paid')), 5);
+    });
+
+    testWidgets('menampilkan semua tahap dengan tahap sekarang disorot', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showSlipStatusGuide(context, slipWith('menunggu_konfirmasi')),
+            child: const Text('help'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('help'));
+      await tester.pumpAndSettle();
+      expect(find.text('Tahapan Slip Gaji'), findsOneWidget);
+      expect(find.byKey(const ValueKey('slip-step-1-current')), findsOneWidget);
+      expect(find.text('Sekarang'), findsOneWidget);
+    });
+  });
+
+  group('filterSlipsByMonths', () {
+    SalarySlip weekly(String key, String status) => SalarySlip.fromApi({
+          'id': key,
+          'periode': key,
+          'gajiNetto': 1,
+          'statusSlip': status,
+        });
+    SalarySlip monthly(String key, String status) => SalarySlip.fromApi({
+          'id': key,
+          'periode': key,
+          'gajiNetto': 1,
+          'statusSlip': status,
+        });
+
+    test('filter 3 bulan menampilkan W35 & W36 walau ada slip yang lebih baru', () {
+      final slips = [
+        weekly('2026-W40', 'terkunci'),
+        weekly('2026-W38', 'terkunci'),
+        weekly('2026-W37', 'terkunci'),
+        weekly('2026-W36', 'menunggu_konfirmasi'),
+        weekly('2026-W35', 'menunggu_konfirmasi'),
+        weekly('2026-W32', 'terkunci'),
+      ];
+      final ids = filterSlipsByMonths(slips, 3, now: DateTime(2026, 10, 16))
+          .map((s) => s.id)
+          .toList();
+      expect(ids, ['2026-W40', '2026-W38', '2026-W37', '2026-W36', '2026-W35', '2026-W32']);
+    });
+
+    test('N bulan memotong berdasarkan tanggal, bukan jumlah slip', () {
+      final slips = [
+        weekly('2026-W40', 'terkunci'),
+        weekly('2026-W35', 'terkunci'),
+        weekly('2026-W32', 'terkunci'),
+      ];
+      final ids = filterSlipsByMonths(slips, 1, now: DateTime(2026, 10, 16))
+          .map((s) => s.id)
+          .toList();
+      expect(ids, ['2026-W40']);
+    });
+
+    test('urutan: bulanan baru di atas mingguan lama; menunggu konfirmasi selalu ikut', () {
+      final slips = [
+        weekly('2026-W32', 'menunggu_konfirmasi'),
+        weekly('2026-W40', 'terkunci'),
+        monthly('2026-10', 'terkunci'),
+      ];
+      final ids = filterSlipsByMonths(slips, 1, now: DateTime(2026, 10, 16))
+          .map((s) => s.id)
+          .toList();
+      expect(ids.first, '2026-10');
+      expect(ids, contains('2026-W32'));
+    });
+  });
+
+  group('Tombol bantuan di detail slip', () {
+    testWidgets('membuka legend dengan tahap sesuai status slip yang dibuka', (tester) async {
+      await pumpDetail(tester, slipWith('ditolak', alasanTolak: 'Gaji pokok salah'));
+      await tester.tap(find.byKey(const Key('slip-status-help')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('slip-status-guide')), findsOneWidget);
+      expect(find.byKey(const ValueKey('slip-step-2-current')), findsOneWidget);
+    });
+
+    testWidgets('slip terkunci & sudah dicairkan menyorot tahap terakhir', (tester) async {
+      await pumpDetail(tester, slipWith('terkunci', statusBayar: 'paid'));
+      await tester.tap(find.byKey(const Key('slip-status-help')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('slip-step-5-current')), findsOneWidget);
+    });
+  });
+
+  group('Slip ditolak lalu direvisi HR (draft) & posisi ikon', () {
+    testWidgets('draft setelah ditolak: banner "HR sedang merevisi", tanpa tombol aksi', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('draft', alasanTolak: 'Gaji pokok salah', extra: {
+            'ditolakAt': '2026-09-02T03:00:00.000Z',
+            'bagianTolak': ['col:gajiPokok'],
+          }));
+      expect(find.text('Anda menolak slip ini, HR sedang merevisi'), findsOneWidget);
+      expect(find.text('Konfirmasi, sudah benar'), findsNothing);
+      expect(find.text('Ada yang salah'), findsNothing);
+      expect(find.byKey(const ValueKey('marker-tolak-col:gajiPokok')), findsOneWidget);
+    });
+
+    test('draft yang pernah ditolak berlabel "Anda menolak" dan di tahap 3', () {
+      final s = slipWith('draft', extra: {'ditolakAt': '2026-09-02T03:00:00.000Z'});
+      expect(s.statusLabel, 'Anda menolak — menunggu perbaikan HR');
+      expect(s.bisaTolak, isFalse);
+      expect(slipCurrentStep(s), 2);
+    });
+
+    testWidgets('ikon ⓘ berada di sebelah KIRI teks komponen, sejajar vertikal', (tester) async {
+      await pumpDetail(
+          tester,
+          slipWith('menunggu_konfirmasi', extra: {
+            'ditolakAt': '2026-09-02T03:00:00.000Z',
+            'bisaTolak': false,
+            'bagianTolak': ['col:gajiPokok'],
+          }));
+      final marker = tester.getRect(find.byKey(const ValueKey('marker-tolak-col:gajiPokok')));
+      final label = tester.getRect(find.text('Gaji Pokok').first);
+      expect(marker.right, lessThanOrEqualTo(label.left + 0.5));
+      expect((marker.center.dy - label.center.dy).abs(), lessThan(marker.height));
     });
   });
 }
