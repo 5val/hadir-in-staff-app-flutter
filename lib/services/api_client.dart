@@ -110,13 +110,20 @@ class ApiClient {
   /// GET untuk respons biner (mis. PDF slip gaji). Non-2xx dipetakan ke
   /// [ApiException] dengan pesan dari server, sama seperti request JSON.
   Future<Uint8List> getBytes(String path,
+          {Map<String, dynamic>? query, bool auth = true}) async =>
+      (await getFile(path, query: query, auth: auth)).bytes;
+
+  /// Seperti [getBytes] tetapi juga mengembalikan header `content-type`.
+  Future<({Uint8List bytes, String? contentType})> getFile(String path,
       {Map<String, dynamic>? query, bool auth = true}) async {
     final res = await _execute(() async {
       final headers = await _headers(auth: auth);
       headers['Accept'] = '*/*';
       return http.get(_uri(path, query), headers: headers);
     });
-    if (res.statusCode >= 200 && res.statusCode < 300) return res.bodyBytes;
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return (bytes: res.bodyBytes, contentType: res.headers['content-type']);
+    }
 
     dynamic decoded;
     try {

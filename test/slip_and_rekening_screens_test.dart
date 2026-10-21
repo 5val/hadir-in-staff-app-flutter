@@ -61,7 +61,7 @@ void main() {
 
     testWidgets('dikonfirmasi: waiting-for-lock banner, no action bar, no download', (tester) async {
       await pumpDetail(tester, slipWith('dikonfirmasi'));
-      expect(find.text('Sudah Anda konfirmasi'), findsOneWidget);
+      expect(find.text('Disetujui'), findsOneWidget);
       expect(find.text('Konfirmasi, sudah benar'), findsNothing);
       expect(find.text('Unduh PDF'), findsNothing);
     });
@@ -303,7 +303,7 @@ void main() {
             'adaBuktiBayar': true,
           }));
       expect(find.textContaining('Dicairkan oleh: Rina Admin'), findsOneWidget);
-      expect(find.byKey(const Key('slip-lihat-bukti')), findsOneWidget);
+      expect(find.byKey(const Key('btn-lihat-bukti')), findsOneWidget);
       expect(find.textContaining('Ditransfer via'), findsNothing);
     });
 
@@ -311,7 +311,7 @@ void main() {
       await pumpDetail(tester, slipWith('menunggu_konfirmasi'));
       expect(find.textContaining('Ditransfer'), findsNothing);
       expect(find.byKey(const Key('slip-hero-pencairan')), findsNothing);
-      expect(find.byKey(const Key('slip-lihat-bukti')), findsNothing);
+      expect(find.byKey(const Key('btn-lihat-bukti')), findsNothing);
     });
   });
 
@@ -428,9 +428,9 @@ void main() {
       expect(find.byKey(const ValueKey('marker-tolak-col:gajiPokok')), findsOneWidget);
     });
 
-    test('draft yang pernah ditolak berlabel "Staff menolak" dan di tahap 3', () {
+    test('draft yang pernah ditolak berlabel "Anda menolak" dan di tahap 3', () {
       final s = slipWith('draft', extra: {'ditolakAt': '2026-09-02T03:00:00.000Z'});
-      expect(s.statusLabel, 'Staff menolak');
+      expect(s.statusLabel, 'Anda menolak — menunggu perbaikan HR');
       expect(s.bisaTolak, isFalse);
       expect(slipCurrentStep(s), 2);
     });

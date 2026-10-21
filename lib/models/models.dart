@@ -844,6 +844,10 @@ class SalarySlip {
   /// membukanya. Null di server lama.
   final String? dikirimKonfirmasiAt;
 
+  /// `slip_gaji.createdAt` (null di server lama). Dipakai menentukan tipe
+  /// periode terkini bila `dikirimKonfirmasiAt` kosong.
+  final DateTime? createdAt;
+
   /// Alasan tolak yang boleh ditampilkan: hanya selama status sekarang
   /// `ditolak`. Setelah HR menghitung ulang/kirim ulang, alasan lama hanya
   /// riwayat dan disembunyikan.
@@ -886,20 +890,34 @@ class SalarySlip {
   /// `unpaid` | `paid` (`slip_gaji.statusBayar`). Default `unpaid`.
   final String statusBayar;
 
+  /// `harian` | `mingguan` | `bulanan`. Dari server (`periodeType`); bila
+  /// tidak ada diturunkan dari bentuk kunci periode (lihat [inferPeriodeType]).
+  final String periodeType;
+
   /// Kapan & oleh siapa (nama admin) gaji dicairkan (`paidAt`/`paidOleh`).
   final DateTime? paidAt;
   final String? paidOleh;
 
-  /// Server: ada bukti transfer yang diunggah admin saat mencairkan
-  /// (diambil lewat `SalaryService.downloadBukti`).
-  final bool adaBuktiBayar;
+  /// Flag server: staff masih boleh membatalkan persetujuannya. Null = server
+  /// lama tidak mengirim -> diturunkan di [bisaBatalSetujuEfektif].
+  final bool? bisaBatalSetuju;
+
+  /// Flag server: slip ini menunggu tindakan staff. Null = turunan status.
+  final bool? perluAksiServer;
+
+  /// Flag server: bukti pembayaran tersedia. Null = turunan status bayar.
+  final bool? adaBuktiBayarServer;
+
+  /// Bukti transfer milik batch pencairan gabungan (lebih dari satu slip):
+  /// disimpan HR, staff tidak boleh melihatnya. Absen = false.
+  final bool buktiGabungan;
 
   /// Server: staff masih boleh menolak. Penolakan hanya boleh SEKALI per slip;
   /// slip yang sudah pernah ditolak lalu dikirim ulang HR hanya bisa dikonfirmasi.
   final bool bisaTolak;
 
   /// Kapan staff menolak (bertahan setelah HR mengirim ulang). Null = belum
-  /// pernah ditolak.
+  /// pernah ditolak. Batal-setuju juga mengisinya (slip menjadi `ditolak`).
   final DateTime? ditolakAt;
 
   /// Kunci baris yang dicentang staff saat menolak (lihat [SalaryComponent.key];
@@ -916,6 +934,7 @@ class SalarySlip {
     required this.statusSlip,
     required this.alasanTolak,
     this.dikirimKonfirmasiAt,
+    this.createdAt,
     required this.bisaUnduh,
     required this.period,
     required this.periodStart,
@@ -934,9 +953,13 @@ class SalarySlip {
     required this.totalTunjanganUang,
     this.siapDicairkanAt,
     this.statusBayar = 'unpaid',
+    this.periodeType = 'bulanan',
     this.paidAt,
     this.paidOleh,
-    this.adaBuktiBayar = false,
+    this.bisaBatalSetuju,
+    this.perluAksiServer,
+    this.adaBuktiBayarServer,
+    this.buktiGabungan = false,
     bool? bisaTolak,
     this.ditolakAt,
     this.bagianTolak = const [],
@@ -1101,6 +1124,7 @@ class SalarySlip {
           : null,
       // Server yang memutuskan. Bila field tidak ada (backend lama) anggap
       // hanya slip terkunci yang boleh diunduh.
+      createdAt: j['createdAt'] == null ? null : DateTime.tryParse(j['createdAt'].toString()),
       bisaUnduh: j['bisaUnduh'] is bool
           ? j['bisaUnduh'] as bool
           : (j['statusSlip'] ?? 'terkunci') == 'terkunci',
@@ -1123,9 +1147,13 @@ class SalarySlip {
           ? null
           : DateTime.tryParse(j['siapDicairkanAt'].toString()),
       statusBayar: (j['statusBayar'] ?? 'unpaid').toString().toLowerCase(),
+      periodeType: normalizePeriodeType(j['periodeType']?.toString(), periodeRaw),
       paidAt: date('paidAt'),
       paidOleh: paidOleh.isEmpty ? null : paidOleh,
-      adaBuktiBayar: j['adaBuktiBayar'] == true,
+      bisaBatalSetuju: j['bisaBatalSetuju'] is bool ? j['bisaBatalSetuju'] as bool : null,
+      perluAksiServer: j['perluAksi'] is bool ? j['perluAksi'] as bool : null,
+      adaBuktiBayarServer: j['adaBuktiBayar'] is bool ? j['adaBuktiBayar'] as bool : null,
+      buktiGabungan: j['buktiGabungan'] == true,
       bisaTolak: j['bisaTolak'] is bool ? j['bisaTolak'] as bool : null,
       ditolakAt: ditolakAt,
       bagianTolak: bagianRaw is List
@@ -1134,6 +1162,75 @@ class SalarySlip {
       revisi: SlipLineRevision.sinceRejection(j['revisions'], ditolakAt),
     );
   }
+
+  /// Tipe periode dari kunci: `YYYY-Www` mingguan, `YYYY-MM-DD` harian,
+  /// selainnya (`YYYY-MM`) bulanan.
+  static String inferPeriodeType(String key) {
+    if (RegExp(r'^\d{4}-W\d{2}$').hasMatch(key)) return 'mingguan';
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key)) return 'harian';
+    return 'bulanan';
+  }
+
+  /// Nilai server dipakai bila valid; selain itu diturunkan dari [key].
+  static String normalizePeriodeType(String? raw, String key) {
+    final t = (raw ?? '').trim().toLowerCase();
+    if (t == 'harian' || t == 'mingguan' || t == 'bulanan') return t;
+    return inferPeriodeType(key);
+  }
+
+  static const _bulanPendek = [
+    '', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'
+  ];
+  static const _hari = [
+    '', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'
+  ];
+
+  /// Nomor minggu ISO dari kunci `YYYY-Www`; null bila bukan kunci mingguan.
+  static int? _isoWeek(String key) {
+    final m = RegExp(r'^\d{4}-W(\d{2})$').firstMatch(key);
+    return m == null ? null : int.parse(m.group(1)!);
+  }
+
+  /// Label periode untuk daftar & filter staff:
+  /// Harian "Senin, 5 Okt 2026"; Mingguan "Minggu 40 · 28 Sep–4 Okt";
+  /// Bulanan "Oktober 2026". Ditulis tanpa `intl` supaya tidak bergantung
+  /// pada inisialisasi locale.
+  String get periodeLabel {
+    switch (periodeType) {
+      case 'harian':
+        final d = periodStart;
+        return '${_hari[d.weekday]}, ${d.day} ${_bulanPendek[d.month]} ${d.year}';
+      case 'mingguan':
+        final week = _isoWeek(periodeKey);
+        final a = periodStart;
+        final b = periodEnd;
+        final range = '${a.day} ${_bulanPendek[a.month]}–${b.day} ${_bulanPendek[b.month]}';
+        return week == null ? range : 'Minggu $week · $range';
+      default:
+        return period;
+    }
+  }
+
+  /// Staff boleh membatalkan persetujuannya: server menentukan; bila tidak
+  /// mengirim flag, turunan dari aturan D1 (disetujui staff, belum siap cair,
+  /// belum dibayar). Server tetap memvalidasi (409).
+  bool get bisaBatalSetujuEfektif =>
+      bisaBatalSetuju ??
+      ((statusSlip == 'terkunci' || statusSlip == 'dikonfirmasi') &&
+          siapDicairkanAt == null &&
+          !sudahDicairkan);
+
+  /// Slip menunggu tindakan staff (alert + animasi perhatian).
+  bool get perluAksi => perluAksiServer ?? perluKonfirmasi;
+
+  /// Tombol "Lihat bukti pembayaran" tampil: harus sudah dibayar dan server
+  /// tidak menyatakan bukti tidak ada.
+  bool get adaBuktiBayar =>
+      sudahDicairkan && !buktiGabungan && (adaBuktiBayarServer ?? true);
+
+  /// Catatan bagi staff bila buktinya gabungan (tombol bukti disembunyikan).
+  bool get tampilCatatanBuktiGabungan => sudahDicairkan && buktiGabungan;
 
   static const _bulan = [
     '', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -1208,21 +1305,21 @@ class SalarySlip {
   bool get sedangDirevisi => statusSlip == 'draft';
   bool get terkunci => statusSlip == 'terkunci';
 
-  /// Teks status untuk staff.
+  /// Teks status di kartu untuk staff, benar untuk setiap keadaan:
+  /// menunggu_konfirmasi "Perlu konfirmasi Anda", ditolak "Anda menolak --
+  /// menunggu perbaikan HR", terkunci/dikonfirmasi "Disetujui", terkunci +
+  /// siap cair "Sedang diproses pencairan", paid "Sudah dicairkan".
   String get statusLabel {
-    switch (statusSlip) {
-      case 'menunggu_konfirmasi':
-        return 'Menunggu konfirmasi Anda';
-      case 'dikonfirmasi':
-        return 'Sudah Anda konfirmasi';
-      case 'ditolak':
-      case 'draft': // dikembalikan HR ke draft untuk direvisi setelah ditolak
-        return 'Staff menolak';
-      case 'terkunci':
-        return 'Staff menyetujui';
-      default:
-        return statusSlip;
+    // Dibayar menang atas status slip apa pun (baris legacy).
+    if (sudahDicairkan) return 'Sudah dicairkan';
+    if (statusSlip == 'menunggu_konfirmasi') return 'Perlu konfirmasi Anda';
+    // `draft` = dikembalikan HR untuk direvisi setelah staff menolak.
+    if (statusSlip == 'ditolak' || statusSlip == 'draft') {
+      return 'Anda menolak — menunggu perbaikan HR';
     }
+    if (sedangDiprosesPencairan) return 'Sedang diproses pencairan';
+    if (statusSlip == 'terkunci' || statusSlip == 'dikonfirmasi') return 'Disetujui';
+    return statusSlip;
   }
 
   /// Salinan dengan status alur konfirmasi yang baru (dipakai setelah staff
@@ -1233,6 +1330,10 @@ class SalarySlip {
     bool? bisaUnduh,
     DateTime? siapDicairkanAt,
     String? statusBayar,
+    bool? bisaBatalSetuju,
+    bool? perluAksiServer,
+    bool? adaBuktiBayarServer,
+    DateTime? paidAt,
     bool? bisaTolak,
     DateTime? ditolakAt,
     List<String>? bagianTolak,
@@ -1243,6 +1344,7 @@ class SalarySlip {
       statusSlip: statusSlip ?? this.statusSlip,
       alasanTolak: alasanTolak ?? this.alasanTolak,
       dikirimKonfirmasiAt: dikirimKonfirmasiAt,
+      createdAt: createdAt,
       bisaUnduh: bisaUnduh ?? this.bisaUnduh,
       period: period,
       periodStart: periodStart,
@@ -1261,9 +1363,13 @@ class SalarySlip {
       totalTunjanganUang: totalTunjanganUang,
       siapDicairkanAt: siapDicairkanAt ?? this.siapDicairkanAt,
       statusBayar: statusBayar ?? this.statusBayar,
-      paidAt: paidAt,
+      periodeType: periodeType,
+      paidAt: paidAt ?? this.paidAt,
       paidOleh: paidOleh,
-      adaBuktiBayar: adaBuktiBayar,
+      bisaBatalSetuju: bisaBatalSetuju ?? this.bisaBatalSetuju,
+      perluAksiServer: perluAksiServer ?? this.perluAksiServer,
+      adaBuktiBayarServer: adaBuktiBayarServer ?? this.adaBuktiBayarServer,
+      buktiGabungan: buktiGabungan,
       bisaTolak: bisaTolak ?? this.bisaTolak,
       ditolakAt: ditolakAt ?? this.ditolakAt,
       bagianTolak: bagianTolak ?? this.bagianTolak,
@@ -1417,7 +1523,9 @@ class AppNotification {
 
     return AppNotification(
       id: (j['id'] ?? '').toString(),
-      title: (j['title'] ?? '').toString(),
+      title: notificationFallbackTitle(type,
+          title: (j['title'] ?? '').toString(),
+          body: (j['body'] ?? '').toString()),
       message: (j['body'] ?? '').toString(),
       type: mapType(type),
       createdAt: DateTime.tryParse((j['createdAt'] ?? '').toString())?.toLocal() ??
@@ -1438,7 +1546,7 @@ enum NotificationType { approval, rejection, reminder, info }
 /// notification's raw backend `type`. `none` when there's nothing
 /// sensible to navigate to (info/reminder types, or a type this app
 /// doesn't recognize yet).
-enum NotificationTarget { leave, lembur, locationTransfer, none }
+enum NotificationTarget { leave, lembur, locationTransfer, gaji, none }
 
 /// Aturan pemetaan `type` backend → [NotificationTarget], sebagai fungsi
 /// murni atas String.
@@ -1455,7 +1563,37 @@ NotificationTarget notificationTargetFromRawType(String rawType) {
   if (rawType.startsWith('location_transfer_')) {
     return NotificationTarget.locationTransfer;
   }
+  // Slip gaji: SEMUA tipe berawalan `slip_` / `gaji_` / `pencairan_` (alur
+  // konfirmasi, kunci, siap cair, dicairkan, batal-setuju, ...) membuka tab
+  // Gaji. Sengaja berbasis awalan, bukan daftar tipe, supaya tipe baru dari
+  // backend otomatis ikut tanpa perubahan app.
+  if (rawType.startsWith('slip_') ||
+      rawType.startsWith('gaji_') ||
+      rawType.startsWith('pencairan_')) {
+    return NotificationTarget.gaji;
+  }
   return NotificationTarget.none;
+}
+
+/// Judul yang terbaca untuk notifikasi yang `title`-nya kosong dari server:
+/// diambil dari isi pesan bila ada, kalau tidak dari `type`-nya.
+String notificationFallbackTitle(String rawType, {String title = '', String body = ''}) {
+  final t = title.trim();
+  if (t.isNotEmpty) return t;
+  if (rawType.startsWith('slip_') ||
+      rawType.startsWith('gaji_') ||
+      rawType.startsWith('pencairan_')) {
+    return 'Slip gaji';
+  }
+  if (rawType.startsWith('leave_')) return 'Cuti & izin';
+  if (rawType.startsWith('lembur_')) return 'Lembur';
+  final b = body.trim();
+  if (b.isNotEmpty) {
+    final cut = b.indexOf(RegExp(r'[.!?]'));
+    final first = cut > 0 ? b.substring(0, cut) : b;
+    return first.length > 60 ? '${first.substring(0, 57)}...' : first;
+  }
+  return 'Notifikasi';
 }
 
 extension AppNotificationRouting on AppNotification {
@@ -1489,6 +1627,9 @@ extension NotificationTargetTab on NotificationTarget {
         return 1;
       case NotificationTarget.locationTransfer:
         return 0;
+      case NotificationTarget.gaji:
+        // Tab "Gaji" = slot 3 di IndexedStack MainScreen (slot 2 = FAB).
+        return 3;
       case NotificationTarget.none:
         return null;
     }
@@ -1937,6 +2078,10 @@ class StaffProfile {
   final String divisiNama;
   final String divisiColor;
   final String jabatanNama;
+
+  /// `Jabatan.periodeGaji` huruf kecil (`harian|mingguan|bulanan`); null bila
+  /// server tidak mengirim.
+  final String? jabatanPeriodeGaji;
   final bool jabatanIsSupervisor;
   final int gajiPokok;
   final int maxExtraHour;
@@ -1978,6 +2123,7 @@ class StaffProfile {
     required this.divisiNama,
     required this.divisiColor,
     required this.jabatanNama,
+    this.jabatanPeriodeGaji,
     required this.jabatanIsSupervisor,
     required this.gajiPokok,
     required this.maxExtraHour,
@@ -2020,6 +2166,7 @@ class StaffProfile {
       divisiNama: (divisi['nama'] ?? '-').toString(),
       divisiColor: (divisi['color'] ?? '#3b82f6').toString(),
       jabatanNama: (jabatan['nama'] ?? '-').toString(),
+      jabatanPeriodeGaji: _periodeGajiOrNull(jabatan['periodeGaji']),
       jabatanIsSupervisor: jabatan['isSupervisor'] == true,
       gajiPokok: asInt(jabatan['gajiPokok']),
       maxExtraHour: asInt(jabatan['maxExtraHour']),
@@ -2086,6 +2233,7 @@ class StaffProfile {
       divisiNama: divisiNama,
       divisiColor: divisiColor,
       jabatanNama: jabatanNama,
+      jabatanPeriodeGaji: jabatanPeriodeGaji,
       jabatanIsSupervisor: jabatanIsSupervisor,
       gajiPokok: gajiPokok,
       maxExtraHour: maxExtraHour,
@@ -2100,6 +2248,11 @@ class StaffProfile {
       kontakAdminPhone: kontakAdminPhone,
       joinDate: joinDate,
     );
+  }
+
+  static String? _periodeGajiOrNull(dynamic v) {
+    final t = (v ?? '').toString().trim().toLowerCase();
+    return (t == 'harian' || t == 'mingguan' || t == 'bulanan') ? t : null;
   }
 
   static TimeOfDay _parseTime(String hhmm) {

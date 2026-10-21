@@ -75,6 +75,8 @@ class NotificationMenuHints {
     'gaji': 'Gaji > Slip Gaji',
     'slip': 'Gaji > Slip Gaji',
     'payroll': 'Gaji > Slip Gaji',
+    'pencairan': 'Gaji > Slip Gaji',
+    'bukti': 'Gaji > Slip Gaji',
     'attendance': 'Home > Aktivitas Hari Ini',
     'absensi': 'Home > Aktivitas Hari Ini',
     'break': 'Home > Aktivitas Hari Ini',
@@ -146,6 +148,8 @@ class NotificationMenuHints {
         return ' untuk memeriksa dan mengonfirmasi slip';
       case 'slip_terkunci':
         return ' untuk mengunduh slip';
+      case 'gaji_dicairkan':
+        return ' untuk melihat bukti pembayaran';
       case 'attendance_missing_checkout':
       case 'attendance_auto_checkout':
         return ' untuk memeriksa absensi Anda';

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'slip_deep_link.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -266,7 +267,8 @@ class NotificationCenter {
           // berjam-jam kemudian, setelah app ditutup) objek AppNotification-
           // nya sudah tidak ada, sementara tujuan deep-link-nya diturunkan
           // dari rawType — lihat `MainScreen._handleNotificationTap`.
-          payload: 'notification:${n.rawType}:${n.id}',
+          payload: SlipDeepLink.buildPayload(n.rawType, n.id,
+              slipId: SlipDeepLink.slipIdFrom(metadata: n.metadata)),
           attendanceAlert: n.rawType.startsWith('attendance'),
         );
       }

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../services/slip_deep_link.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -207,7 +208,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ? SnackBarAction(
               label: 'Lihat',
               textColor: AppColors.brandLime,
-              onPressed: () => _onTabTap(tabIndex),
+              onPressed: () {
+                if (n.target == NotificationTarget.gaji) {
+                  SlipDeepLink.request(
+                      SlipDeepLink.slipIdFrom(metadata: n.metadata));
+                }
+                _onTabTap(tabIndex);
+              },
             )
           : null,
     ));
@@ -250,8 +257,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     final rawType = _rawTypeFromPayload(payload);
     if (rawType != null && !_isAdmin) {
-      final tabIndex = notificationTargetFromRawType(rawType).staffTabIndex;
+      final target = notificationTargetFromRawType(rawType);
+      final tabIndex = target.staffTabIndex;
       if (tabIndex != null) {
+        if (target == NotificationTarget.gaji) {
+          SlipDeepLink.request(SlipDeepLink.parsePayload(payload)?.slipId);
+        }
         _onTabTap(tabIndex);
         return;
       }

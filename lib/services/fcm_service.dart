@@ -9,6 +9,7 @@ import 'api_client.dart';
 import 'notification_menu_hints.dart';
 import 'push_notification_service.dart';
 import 'session_service.dart';
+import 'slip_deep_link.dart';
 
 /// Handler pesan FCM saat app TIDAK sedang di layar (background atau
 /// benar-benar ditutup).
@@ -222,7 +223,10 @@ class FcmService {
       ),
       title: title ?? 'Hadir-In',
       body: NotificationMenuHints.withHint(body ?? '', rawType, title: title),
-      payload: backendId == null ? null : 'notification:$rawType:$backendId',
+      payload: backendId == null
+          ? null
+          : SlipDeepLink.buildPayload(rawType, backendId,
+              slipId: SlipDeepLink.slipIdFrom(data: data)),
       attendanceAlert: rawType.startsWith('attendance'),
     );
   }
@@ -249,8 +253,10 @@ class FcmService {
     final data = message.data;
     final rawType = _stringOf(data['type']) ?? '';
     final backendId = backendIdOf(message);
-    final payload =
-        backendId == null ? null : 'notification:$rawType:$backendId';
+    final payload = backendId == null
+        ? null
+        : SlipDeepLink.buildPayload(rawType, backendId,
+            slipId: SlipDeepLink.slipIdFrom(data: data));
 
     final handler = PushNotificationService.onNotificationTap;
     if (handler == null) {

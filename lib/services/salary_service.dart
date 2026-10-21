@@ -31,6 +31,21 @@ class KonfirmasiResult {
       slip.copyWith(statusSlip: statusSlip, bisaUnduh: bisaUnduh);
 }
 
+/// Berkas bukti pembayaran: byte + content-type dari server (bila ada).
+class BuktiFile {
+  final Uint8List bytes;
+  final String? contentType;
+  const BuktiFile(this.bytes, [this.contentType]);
+
+  /// Content-type server didahulukan; tanpa itu, deteksi dari byte.
+  bool get isPdf {
+    final t = (contentType ?? '').toLowerCase();
+    if (t.contains('pdf')) return true;
+    if (t.startsWith('image/')) return false;
+    return SalaryService.isPdfBytes(bytes);
+  }
+}
+
 /// Panggilan backend untuk slip gaji staff yang sedang login.
 class SalaryService {
   const SalaryService._();
@@ -43,15 +58,26 @@ class SalaryService {
     return id;
   }
 
+  /// Batas maksimum `limit` yang diterima server (default server 200, jadi
+  /// tanpa ini "Semua periode" terpotong diam-diam).
+  static const maxSlipLimit = 500;
+
+  /// GET satu slip (dipakai menyegarkan detail setelah 409).
+  static Future<SalarySlip> slipById(String slipId) async {
+    final id = await _staffId();
+    final res = await ApiClient.instance.get('/mobile/staff/$id/gaji/slip/$slipId');
+    return SalarySlip.fromApi(res.asMap);
+  }
+
   /// GET daftar slip gaji. Sejak alur konfirmasi (2026-09-19) daftar ini
   /// memuat slip sejak HR menekan "Kirim Konfirmasi" (`menunggu_konfirmasi`)
   /// sampai `terkunci` -- bukan lagi hanya yang sudah final. Setiap slip sudah
   /// berisi seluruh komponen sehingga detail tidak perlu request terpisah.
-  static Future<List<SalarySlip>> mySlips({int? limit}) async {
+  static Future<List<SalarySlip>> mySlips({int limit = maxSlipLimit}) async {
     final id = await _staffId();
     final res = await ApiClient.instance.get(
       '/mobile/staff/$id/gaji/slip',
-      query: {if (limit != null) 'limit': limit},
+      query: {'limit': limit},
     );
     return res.asList.map(SalarySlip.fromApi).toList();
   }
@@ -130,6 +156,49 @@ class SalaryService {
   /// menampilkan pesan server dan memuat ulang, tanpa mengubah status lokal.
   static bool isSlipStaleConflict(ApiException e) => e.statusCode == 409;
 
+  /// Batas alasan batal-setuju di server (min 5, maks 300).
+  static const batalAlasanMin = 5;
+  static const batalAlasanMax = 300;
+
+  static Map<String, dynamic> batalSetujuBody(
+          String alasan, String? dikirimKonfirmasiAt) =>
+      {
+        'alasan': alasan.trim(),
+        if (dikirimKonfirmasiAt != null)
+          'dikirimKonfirmasiAt': dikirimKonfirmasiAt,
+      };
+
+  /// POST: staff membatalkan persetujuannya (D1) selama slip belum disetujui
+  /// cair. Slip menjadi `ditolak` di server. 409 membawa pesan server yang
+  /// ditampilkan apa adanya.
+  static Future<void> batalSetuju(String slipId, String alasan,
+      {String? dikirimKonfirmasiAt}) async {
+    final id = await _staffId();
+    await ApiClient.instance.post(
+      '/mobile/staff/$id/gaji/slip/$slipId/batal-setuju',
+      body: batalSetujuBody(alasan, dikirimKonfirmasiAt),
+    );
+  }
+
+  /// GET berkas bukti pembayaran (gambar atau PDF) dengan header auth.
+  static Future<BuktiFile> buktiBayar(String slipId) async {
+    final id = await _staffId();
+    final f = await ApiClient.instance
+        .getFile('/mobile/staff/$id/gaji/slip/$slipId/bukti');
+    return BuktiFile(f.bytes, f.contentType);
+  }
+
+  /// `%PDF` di 1024 byte pertama (beberapa PDF punya sampah sebelum header).
+  static bool isPdfBytes(Uint8List b) {
+    final end = b.length < 1024 ? b.length : 1024;
+    for (var i = 0; i + 4 <= end; i++) {
+      if (b[i] == 0x25 && b[i + 1] == 0x50 && b[i + 2] == 0x44 && b[i + 3] == 0x46) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// GET PDF slip yang dirender server (template yang sama dengan yang
   /// dikirim HR lewat email). Hanya slip `terkunci`; selain itu server
   /// membalas 403 dan app tidak boleh menawarkan unduhan.
@@ -137,21 +206,4 @@ class SalaryService {
     final id = await _staffId();
     return ApiClient.instance.getBytes('/mobile/staff/$id/gaji/slip/$slipId/pdf');
   }
-
-  /// GET bukti transfer yang diunggah admin saat mencairkan (gambar atau PDF).
-  /// Disimpan privat di Drive kantor, jadi selalu lewat server. 404 bila
-  /// belum dicairkan / tidak ada bukti.
-  static Future<Uint8List> downloadBukti(String slipId) async {
-    final id = await _staffId();
-    return ApiClient.instance
-        .getBytes('/mobile/staff/$id/gaji/slip/$slipId/bukti');
-  }
-
-  /// Bukti berupa PDF (diperiksa dari magic bytes "%PDF").
-  static bool isPdf(Uint8List bytes) =>
-      bytes.length >= 4 &&
-      bytes[0] == 0x25 &&
-      bytes[1] == 0x50 &&
-      bytes[2] == 0x44 &&
-      bytes[3] == 0x46;
 }

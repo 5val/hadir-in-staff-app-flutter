@@ -6,6 +6,7 @@ import '../widgets/common_widgets.dart';
 import '../services/notification_service.dart';
 import '../services/notification_menu_hints.dart';
 import '../services/api_client.dart';
+import '../services/slip_deep_link.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class NotificationScreen extends StatefulWidget {
@@ -696,6 +697,10 @@ class _NotificationScreenState extends State<NotificationScreen>
                   onTap: () {
                     Navigator.pop(context); // tutup bottom sheet
                     Navigator.pop(context); // kembali ke MainScreen
+                    if (n.target == NotificationTarget.gaji) {
+                      SlipDeepLink.request(
+                          SlipDeepLink.slipIdFrom(metadata: n.metadata));
+                    }
                     widget.onNavigate!(n.target);
                   },
                 ),

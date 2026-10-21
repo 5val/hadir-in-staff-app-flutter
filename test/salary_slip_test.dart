@@ -413,6 +413,7 @@ void main() {
       final slip = SalarySlip.fromApi(_slipPayload()
         ..['id'] = 'slip-9'
         ..['statusSlip'] = 'ditolak'
+        ..['statusBayar'] = 'unpaid'
         ..['alasanTolak'] = 'Lembur saya kurang 2 jam'
         ..['bisaUnduh'] = false);
 
@@ -420,7 +421,7 @@ void main() {
       expect(slip.ditolak, isTrue);
       expect(slip.alasanTolak, 'Lembur saya kurang 2 jam');
       expect(slip.bisaUnduh, isFalse);
-      expect(slip.statusLabel, 'Staff menolak');
+      expect(slip.statusLabel, contains('menunggu perbaikan HR'));
     });
 
     test('slip menunggu konfirmasi: bisa dikonfirmasi tapi TIDAK boleh diunduh', () {
@@ -459,11 +460,13 @@ void main() {
   });
 
   group('SalarySlip.fromApi â€” penolakan sekali, revisi & pencairan', () {
-    test('label chip: terkunci = Staff menyetujui, ditolak = Staff menolak', () {
-      expect(SalarySlip.fromApi(_slipPayload()..['statusSlip'] = 'terkunci').statusLabel,
-          'Staff menyetujui');
-      expect(SalarySlip.fromApi(_slipPayload()..['statusSlip'] = 'ditolak').statusLabel,
-          'Staff menolak');
+    test('label chip: terkunci = Disetujui, ditolak/draft = Anda menolak', () {
+      Map<String, dynamic> unpaid(String st) => _slipPayload()
+        ..['statusSlip'] = st
+        ..['statusBayar'] = 'unpaid';
+      expect(SalarySlip.fromApi(unpaid('terkunci')).statusLabel, 'Disetujui');
+      expect(SalarySlip.fromApi(unpaid('ditolak')).statusLabel,
+          'Anda menolak — menunggu perbaikan HR');
     });
 
     test('bisaTolak dari server; fallback: menunggu & belum pernah ditolak', () {
