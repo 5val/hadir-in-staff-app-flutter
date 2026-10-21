@@ -28,6 +28,27 @@ List<SalarySlip> filterSlipsByMonths(List<SalarySlip> slips, int months,
       .toList();
 }
 
+/// Jenis gaji slip, dibaca dari kunci periode server: "2026-08" (bulanan),
+/// "2026-W37" (mingguan) atau "2026-09-10" (harian).
+String slipJenisGaji(SalarySlip s) {
+  final key = s.periodeKey;
+  if (key.contains('W')) return 'Mingguan';
+  if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key)) return 'Harian';
+  return 'Bulanan';
+}
+
+/// Semua slip, terbaru dulu, tanpa batas bulan. Bila [periodeKey] diisi hanya
+/// slip dengan periode itu yang dikembalikan.
+List<SalarySlip> allSlipsSorted(List<SalarySlip> slips, {String? periodeKey}) {
+  final sorted = [...slips]..sort((a, b) {
+      final byEnd = b.periodEnd.compareTo(a.periodEnd);
+      return byEnd != 0 ? byEnd : b.periodStart.compareTo(a.periodStart);
+    });
+  return periodeKey == null
+      ? sorted
+      : sorted.where((s) => s.periodeKey == periodeKey).toList();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // SALARY SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,15 +68,20 @@ class _SalaryScreenState extends State<SalaryScreen> {
   bool _loading = true;
   String? _error;
 
-  // Filter: 1 = 1 bulan terakhir, 2 = 2 bulan terakhir, 3 = 3 bulan terakhir
+  // Filter: 0 = semua periode, 1/2/3 = N bulan terakhir
   int _filterMonths = 1;
+
+  // Saat "Semua Periode": null = semua slip, selain itu satu periode saja.
+  String? _selectedPeriodeKey;
 
   /// Slip dalam [_filterMonths] bulan terakhir (menurut akhir periode slip),
   /// terbaru di atas. Dulu `take(_filterMonths)` -- itu N SLIP teratas, bukan
   /// N bulan, sehingga slip mingguan (mis. W35 & W36) hilang dari filter
   /// 3 bulan. Slip yang masih menunggu konfirmasi staff selalu tampil, apa
   /// pun filternya, karena ada aksi yang harus dilakukan.
-  List<SalarySlip> get _filteredSlips => filterSlipsByMonths(_slips, _filterMonths);
+  List<SalarySlip> get _filteredSlips => _filterMonths == 0
+      ? allSlipsSorted(_slips, periodeKey: _selectedPeriodeKey)
+      : filterSlipsByMonths(_slips, _filterMonths);
 
   @override
   void initState() {
@@ -220,6 +246,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
   // ── Filter Chips ────────────────────────────────────────────
   Widget _buildFilterChips() {
     final options = [
+      (0, 'Semua Periode'),
       (1, '1 Bulan Terakhir'),
       (2, '2 Bulan Terakhir'),
       (3, '3 Bulan Terakhir'),
@@ -230,16 +257,56 @@ class _SalaryScreenState extends State<SalaryScreen> {
       children: [
         Text('Filter Periode', style: AppText.label),
         const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: options.map((opt) {
-              final isSelected = _filterMonths == opt.$1;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: GestureDetector(
-                  onTap: () => setState(() => _filterMonths = opt.$1),
-                  child: AnimatedContainer(
+        _chipRow(
+          options
+              .map((o) => (o.$2, _filterMonths == o.$1, () {
+                    setState(() {
+                      _filterMonths = o.$1;
+                      _selectedPeriodeKey = null;
+                    });
+                  }))
+              .toList(),
+        ),
+        if (_filterMonths == 0 && _slips.isNotEmpty) ..._buildPeriodList(),
+      ],
+    );
+  }
+
+  /// Daftar periode sesuai jenis gaji slip (harian/mingguan/bulanan), dipakai
+  /// untuk memilih satu periode saat filter "Semua Periode".
+  List<Widget> _buildPeriodList() {
+    final sorted = allSlipsSorted(_slips);
+    final jenis = sorted.map(slipJenisGaji).toSet();
+    final title = jenis.length == 1 ? 'Periode ${jenis.first}' : 'Periode';
+    final items = <(String, bool, VoidCallback)>[
+      ('Semua', _selectedPeriodeKey == null,
+          () => setState(() => _selectedPeriodeKey = null)),
+      for (final s in sorted)
+        (
+          jenis.length == 1 ? s.period : '${slipJenisGaji(s)} · ${s.period}',
+          _selectedPeriodeKey == s.periodeKey,
+          () => setState(() => _selectedPeriodeKey = s.periodeKey),
+        ),
+    ];
+    return [
+      const SizedBox(height: 12),
+      Text(title, style: AppText.label),
+      const SizedBox(height: 8),
+      _chipRow(items),
+    ];
+  }
+
+  Widget _chipRow(List<(String, bool, VoidCallback)> chips) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: chips.map((opt) {
+          final isSelected = opt.$2;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: opt.$3,
+              child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -271,7 +338,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                           const SizedBox(width: 5),
                         ],
                         Text(
-                          opt.$2,
+                          opt.$1,
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -285,10 +352,8 @@ class _SalaryScreenState extends State<SalaryScreen> {
                   ),
                 ),
               );
-            }).toList(),
-          ),
-        ),
-      ],
+        }).toList(),
+      ),
     );
   }
 
