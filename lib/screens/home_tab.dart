@@ -16,6 +16,7 @@ import '../services/api_client.dart';
 import '../services/location_service.dart';
 import '../services/attendance_service.dart';
 import '../services/calendar_service.dart';
+import '../services/profile_service.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import '../screens/camera_checkin_screen.dart';
 import 'break_screen.dart';
@@ -147,6 +148,20 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   void _onAttChanged() => setState(() {});
+
+  /// Tarik-untuk-refresh: profil (lokasi kerja, rekening), absensi hari ini,
+  /// lalu cek ulang lokasi. Best-effort: gagal memuat tidak menampilkan error.
+  Future<void> _refresh() async {
+    try {
+      await ProfileService.loadAndCache();
+    } catch (_) {}
+    try {
+      await _att.refreshToday();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {});
+    await _checkLocation();
+  }
 
   @override
   void dispose() {
@@ -674,7 +689,11 @@ class _HomeTabState extends State<HomeTab> {
               children: [
                 _buildAppBar(),
                 Expanded(
-                  child: SingleChildScrollView(
+                  child: RefreshIndicator(
+                    color: AppColors.brandNavy,
+                    onRefresh: _refresh,
+                    child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,6 +745,7 @@ class _HomeTabState extends State<HomeTab> {
                         // _buildAttendanceHistoryPreview(),
                       ],
                     ),
+                  ),
                   ),
                 ),
               ],
@@ -2638,7 +2658,9 @@ class _AttendanceHistoryFullScreenState
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
+              ? PullToRefresh(
+                onRefresh: _load,
+                child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
@@ -2656,8 +2678,13 @@ class _AttendanceHistoryFullScreenState
                       ],
                     ),
                   ),
-                )
-              : ListView(
+                ),
+              )
+              : RefreshIndicator(
+                color: AppColors.brandNavy,
+                onRefresh: _load,
+                child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(vertical: 12),
         children: grouped.entries.map((entry) {
           return Column(
@@ -2680,6 +2707,7 @@ class _AttendanceHistoryFullScreenState
           );
         }).toList(),
       ),
+              ),
     );
   }
 

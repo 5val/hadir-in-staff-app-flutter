@@ -323,7 +323,9 @@ class _AllAttendanceHistoryScreenState
             )
           else if (_error != null)
             Expanded(
-              child: Center(
+              child: PullToRefresh(
+                onRefresh: _load,
+                child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(28),
                   child: Column(
@@ -344,10 +346,15 @@ class _AllAttendanceHistoryScreenState
                   ),
                 ),
               ),
+              ),
             )
           else
             Expanded(
-              child: ListView.builder(
+              child: RefreshIndicator(
+                color: AppColors.brandNavy,
+                onRefresh: _load,
+                child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               itemCount: _allAttendanceRecords.length,
               itemBuilder: (context, index) {
@@ -556,6 +563,7 @@ class _AllAttendanceHistoryScreenState
                 );
               },
             ),
+              ),
           ), // Expanded
         ], // children
       ),

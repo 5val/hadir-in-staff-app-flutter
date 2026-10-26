@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:printing/printing.dart';
 
 import '../services/api_client.dart';
@@ -74,6 +75,23 @@ class _SlipBuktiScreenState extends State<SlipBuktiScreen> {
   static const _unsupported = 'Bukti tidak bisa ditampilkan';
 
   Widget _errorView(String message) {
+    // Bisa ditarik ke bawah untuk memuat ulang, selain tombol "Coba Lagi".
+    return LayoutBuilder(
+      builder: (context, constraints) => RefreshIndicator(
+        color: AppColors.brandNavy,
+        onRefresh: _load,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: SizedBox(
+            height: constraints.maxHeight,
+            child: _errorMessage(message),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _errorMessage(String message) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
@@ -118,7 +136,7 @@ class _SlipBuktiScreenState extends State<SlipBuktiScreen> {
           bytes,
           fit: BoxFit.contain,
           // Bukan gambar yang bisa didekode dan bukan PDF.
-          errorBuilder: (_, __, ___) => _errorView(_unsupported),
+          errorBuilder: (_, __, ___) => _errorMessage(_unsupported),
         ),
       ),
     );
@@ -128,12 +146,55 @@ class _SlipBuktiScreenState extends State<SlipBuktiScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.slate50,
-      appBar: AppBar(
-        backgroundColor: AppColors.brandNavy,
-        foregroundColor: AppColors.white,
-        title: Text(widget.title, style: const TextStyle(fontSize: 15)),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Header sama dengan menu lain (navy + teks putih). Bukan AppBar:
+            // titleTextStyle tema berwarna gelap sehingga judul tak terbaca.
+            Container(
+              color: AppColors.brandNavy,
+              padding: const EdgeInsets.fromLTRB(4, 16, 8, 16),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: AppColors.white, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('FINANCIAL STATEMENT',
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.white,
+                              letterSpacing: 1.2,
+                            )),
+                        Text(widget.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.headline3
+                                .copyWith(color: AppColors.white)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('bukti-refresh'),
+                    tooltip: 'Muat ulang',
+                    icon: const Icon(Icons.refresh_rounded,
+                        color: AppColors.white),
+                    onPressed: _loading ? null : _load,
+                  ),
+                ],
+              ),
+            ),
+            Container(height: 1, color: AppColors.slate200),
+            Expanded(child: _body()),
+          ],
+        ),
       ),
-      body: _body(),
     );
   }
 }

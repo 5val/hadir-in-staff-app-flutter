@@ -113,6 +113,14 @@ class _LeaveTabState extends State<LeaveTab> {
     if (justCheckedOut && mounted) _loadOvertimeDays();
   }
 
+  /// Tarik-untuk-refresh di semua tab: muat ulang pengajuan, hari lembur
+  /// dan (untuk atasan) pengajuan tim sekaligus.
+  Future<void> _refreshAll() => Future.wait([
+        _loadLeaves(),
+        _loadOvertimeDays(),
+        _loadSubordinates(),
+      ]);
+
   Future<void> _loadSubordinates() async {
     setState(() => _loadingSubordinates = true);
     try {
@@ -494,7 +502,11 @@ class _LeaveTabState extends State<LeaveTab> {
       );
     }
     final apps = _subordinates.leave;
-    return ListView(
+    return RefreshIndicator(
+      color: AppColors.brandNavy,
+      onRefresh: _refreshAll,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         // Header row with "Lihat Riwayat" button
@@ -551,6 +563,7 @@ class _LeaveTabState extends State<LeaveTab> {
             );
           }),
       ],
+    ),
     );
   }
 
@@ -649,7 +662,11 @@ class _LeaveTabState extends State<LeaveTab> {
     }
 
     if (_overtimeError != null) {
-      return ListView(
+      return RefreshIndicator(
+        color: AppColors.brandNavy,
+        onRefresh: _refreshAll,
+        child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
           SectionCard(
@@ -671,6 +688,7 @@ class _LeaveTabState extends State<LeaveTab> {
             ),
           ),
         ],
+      ),
       );
     }
 
@@ -1089,7 +1107,11 @@ class _LeaveTabState extends State<LeaveTab> {
 
   // ── Cuti Tab ─────────────────────────────────────────────
   Widget _buildCutiTab() {
-    return ListView(
+    return RefreshIndicator(
+      color: AppColors.brandNavy,
+      onRefresh: _refreshAll,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         SectionCard(
@@ -1135,12 +1157,17 @@ class _LeaveTabState extends State<LeaveTab> {
           ),
         ),
       ],
+    ),
     );
   }
 
   // ── Izin Tab ─────────────────────────────────────────────
   Widget _buildIzinTab() {
-    return ListView(
+    return RefreshIndicator(
+      color: AppColors.brandNavy,
+      onRefresh: _refreshAll,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         SectionCard(
@@ -1186,6 +1213,7 @@ class _LeaveTabState extends State<LeaveTab> {
           ),
         ),
       ],
+    ),
     );
   }
 
@@ -1398,7 +1426,9 @@ class _LeaveTabState extends State<LeaveTab> {
           ),
           Expanded(
             child: _filtered.isEmpty
-                ? Center(
+                ? PullToRefresh(
+                  onRefresh: _refreshAll,
+                  child: Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -1412,8 +1442,13 @@ class _LeaveTabState extends State<LeaveTab> {
                             style: AppText.body2),
                       ],
                     ),
-                  )
-                : ListView.builder(
+                  ),
+                )
+                : RefreshIndicator(
+                  color: AppColors.brandNavy,
+                  onRefresh: _refreshAll,
+                  child: ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     itemCount: _filtered.length,
                     itemBuilder: (_, i) {
@@ -1427,6 +1462,7 @@ class _LeaveTabState extends State<LeaveTab> {
                       );
                     },
                   ),
+                ),
           ),
         ],
       );
@@ -1436,7 +1472,11 @@ class _LeaveTabState extends State<LeaveTab> {
         .where((r) => r.submittedAt
             .isAfter(DateTime.now().subtract(const Duration(days: 7))))
         .toList();
-    return ListView(
+    return RefreshIndicator(
+      color: AppColors.brandNavy,
+      onRefresh: _refreshAll,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
       children: [
         Row(
@@ -1523,6 +1563,7 @@ class _LeaveTabState extends State<LeaveTab> {
             ),
           ),
       ],
+    ),
     );
   }
 }

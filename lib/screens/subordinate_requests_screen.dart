@@ -159,7 +159,9 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
+              ? PullToRefresh(
+                onRefresh: _load,
+                child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
@@ -176,9 +178,12 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
                       ],
                     ),
                   ),
-                )
+                ),
+              )
               : apps.isEmpty
-          ? Center(
+          ? PullToRefresh(
+            onRefresh: _load,
+            child: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
@@ -202,8 +207,13 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
                   ],
                 ),
               ),
-            )
-          : ListView.builder(
+            ),
+          )
+          : RefreshIndicator(
+            color: AppColors.brandNavy,
+            onRefresh: _load,
+            child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
               itemCount: apps.length,
               itemBuilder: (ctx, i) {
@@ -222,6 +232,7 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
                 );
               },
             ),
+          ),
     );
   }
 }

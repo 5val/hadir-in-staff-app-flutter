@@ -52,6 +52,22 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  # Generator ikon aplikasi (launcher) dari assets/icon/ -- jalankan ulang
+  # `dart run flutter_launcher_icons` bila logo berubah.
+  flutter_launcher_icons: ^0.14.4
+
+flutter_launcher_icons:
+  # Sumber: assets/images/logo_hadir_in.png. launcher_icon = logo di atas
+  # latar putih (iOS tidak boleh transparan); launcher_foreground = logo
+  # transparan untuk adaptive icon Android (plugin sudah menambah inset 16%
+  # supaya tidak terpotong mask, jadi gambarnya sendiri hampir tanpa padding).
+  image_path: "assets/icon/launcher_icon.png"
+  android: "ic_launcher"
+  ios: true
+  remove_alpha_ios: true
+  min_sdk_android: 24
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/icon/launcher_foreground.png"
 
 flutter:
   uses-material-design: true

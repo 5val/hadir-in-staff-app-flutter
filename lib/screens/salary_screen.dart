@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../theme/app_theme.dart';
+import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../models/slip_filter.dart';
 import 'slip_bukti_screen.dart';
@@ -330,7 +331,9 @@ class _SalaryScreenState extends State<SalaryScreen> {
   }
 
   Widget _buildErrorState() {
-    return Center(
+    return PullToRefresh(
+      onRefresh: _load,
+      child: Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
         child: Column(
@@ -350,6 +353,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -432,7 +436,11 @@ class _SalaryScreenState extends State<SalaryScreen> {
                           CircularProgressIndicator(color: AppColors.brandNavy))
                   : _error != null
                       ? _buildErrorState()
-                      : ListView(
+                      : RefreshIndicator(
+                          color: AppColors.brandNavy,
+                          onRefresh: () => _load(silent: true),
+                          child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
                           children: [
                             _buildFilterChips(),
@@ -445,6 +453,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                                     child: _buildSalaryCard(slip),
                                   )),
                           ],
+                        ),
                         ),
             ),
           ],
@@ -1139,39 +1148,27 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     }
   }
 
-  /// Bagian slip yang bisa dicentang staff saat menolak: data kehadiran, tiap
-  /// baris rincian (dikelompokkan seperti di layar), lalu total THP.
+  /// Bagian slip yang bisa dicentang staff saat menolak: hanya Gaji Pokok,
+  /// Lembur, tiap Tunjangan dan tiap Fasilitas. Baris lain (bonus, THR, uang
+  /// makan, pajak, potongan, kehadiran, THP) tidak bisa ditolak.
   List<_TolakItem> _tolakItems() {
-    String sectionOf(SalaryGroup g) {
-      switch (g) {
-        case SalaryGroup.pendapatanPokok:
-          return 'Pendapatan Pokok';
-        case SalaryGroup.pajak:
-          return 'Pajak';
-        case SalaryGroup.tunjangan:
-          return 'Tunjangan';
-        case SalaryGroup.potongan:
-          return 'Potongan';
+    String? sectionOf(SalaryComponent c) {
+      if (c.key == 'col:gajiPokok' || c.key == 'col:lemburTotal') {
+        return 'Pendapatan Pokok';
       }
+      if (c.key.startsWith('tunjangan:')) return 'Tunjangan';
+      if (c.key.startsWith('fasilitas:')) return 'Fasilitas';
+      return null;
     }
 
     return [
-      const _TolakItem(
-          key: 'umum:kehadiran', section: 'Umum', label: 'Data kehadiran / absensi'),
-      for (final g in const [
-        SalaryGroup.pendapatanPokok,
-        SalaryGroup.pajak,
-        SalaryGroup.tunjangan,
-        SalaryGroup.potongan,
-      ])
-        for (final c in slip.components.where((c) => c.group == g))
+      for (final c in slip.components)
+        if (sectionOf(c) != null)
           _TolakItem(
               key: c.key,
-              section: sectionOf(g),
+              section: sectionOf(c)!,
               label: c.label,
               amount: _fmt(c.amount)),
-      const _TolakItem(
-          key: 'umum:thp', section: 'Umum', label: 'Total / Take Home Pay'),
     ];
   }
 
@@ -1666,7 +1663,11 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
 
             // ── Content ──────────────────────────────────────
             Expanded(
-              child: ListView(
+              child: RefreshIndicator(
+                color: AppColors.brandNavy,
+                onRefresh: _refreshSlip,
+                child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
                 children: [
                   _buildStatusBanner(),
@@ -1715,6 +1716,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                   // _buildLineTotal('Take Home Pay', slip.takeHomePay,
                   //     highlight: true),
                 ],
+              ),
               ),
             ),
           ],
@@ -2881,7 +2883,7 @@ const _slipSteps = [
       Icons.published_with_changes_rounded,
       'Ditolak & direvisi HR (bila ada)',
       'Bila Anda menolak, HR memperbaiki lalu mengirim ulang. Penolakan hanya bisa sekali. '
-          'Ikon ⓘ merah = bagian yang Anda tolak, ⓘ hijau = hasil revisi admin/manajer.'),
+          'Di rincian slip, tanda berikut muncul di samping baris:'),
   _SlipStep(Icons.verified_rounded, 'Staff menyetujui',
       'Anda menyetujui slip, slip terkunci dan bisa diunduh.'),
   _SlipStep(Icons.hourglass_top_rounded, 'Disetujui untuk dicairkan',
@@ -2964,11 +2966,22 @@ Future<void> showSlipStatusGuide(BuildContext context, SalarySlip? slip) {
                 isSkipped:
                     current != null && i == 2 && i < current && !revisiDilalui,
                 isLast: i == _slipSteps.length - 1,
+                // Legend ikon ⓘ ditaruh di detail tahap revisi, tempat
+                // penjelasannya relevan.
+                extra: i == 2
+                    ? Column(
+                        key: const Key('slip-guide-legend'),
+                        children: [
+                          const SizedBox(height: 6),
+                          _guideLegend(
+                              _InfoMarker.tolakColor, 'Bagian yang Anda tolak'),
+                          const SizedBox(height: 4),
+                          _guideLegend(_InfoMarker.revisiColor,
+                              'Hasil revisi admin/manajer'),
+                        ],
+                      )
+                    : null,
               ),
-            const SizedBox(height: 8),
-            _guideLegend(_InfoMarker.tolakColor, 'Bagian yang Anda tolak'),
-            const SizedBox(height: 6),
-            _guideLegend(_InfoMarker.revisiColor, 'Hasil revisi admin/manajer'),
           ],
         ),
       ),
@@ -2994,6 +3007,7 @@ Widget _buildGuideStep({
   required bool isDone,
   required bool isSkipped,
   required bool isLast,
+  Widget? extra,
 }) {
   final Color color = isCurrent
       ? AppColors.brandNavy
@@ -3073,6 +3087,7 @@ Widget _buildGuideStep({
                         fontSize: 11.5,
                         height: 1.4,
                         color: AppColors.slate600)),
+                if (extra != null) extra,
               ],
             ),
           ),

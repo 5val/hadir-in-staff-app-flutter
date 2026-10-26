@@ -385,6 +385,34 @@ class AppDivider extends StatelessWidget {
   }
 }
 
+// ── Pull to Refresh (konten tidak bisa di-scroll) ─────────────
+/// Membuat [child] yang tidak bisa di-scroll (empty/error state) tetap bisa
+/// ditarik ke bawah untuk refresh, mengisi seluruh tinggi yang tersedia.
+/// Untuk ListView, cukup bungkus langsung dengan [RefreshIndicator].
+class PullToRefresh extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+  final Widget child;
+
+  const PullToRefresh({super.key, required this.onRefresh, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => RefreshIndicator(
+        color: AppColors.brandNavy,
+        onRefresh: onRefresh,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Mascot Overlay (replaces SmileyOverlay) ───────────────────
 /// Shows the Hadir-In owl mascot with a message overlay.
 /// [wave] = true → waving mascot, false → regular sitting mascot.

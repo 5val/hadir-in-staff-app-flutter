@@ -259,7 +259,9 @@ class _AllSubordinateLeaveHistoryScreenState
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                ? Center(
+                ? PullToRefresh(
+                  onRefresh: _load,
+                  child: Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: Column(
@@ -278,9 +280,12 @@ class _AllSubordinateLeaveHistoryScreenState
                         ],
                       ),
                     ),
-                  )
+                  ),
+                )
                 : _filtered.isEmpty
-                ? Center(
+                ? PullToRefresh(
+                  onRefresh: _load,
+                  child: Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -294,14 +299,20 @@ class _AllSubordinateLeaveHistoryScreenState
                             style: AppText.body2),
                       ],
                     ),
-                  )
-                : ListView.separated(
+                  ),
+                )
+                : RefreshIndicator(
+                  color: AppColors.brandNavy,
+                  onRefresh: _load,
+                  child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     itemCount: _filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) =>
                         _SubordinateRequestCard(request: _filtered[i]),
                   ),
+                ),
           ),
         ],
       ),

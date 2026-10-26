@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
+import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import '../services/document_service.dart';
 import '../services/api_client.dart';
@@ -67,6 +68,16 @@ class _AccountTabState extends State<AccountTab> {
     } on ApiException {
       // Diamkan — menu tetap bisa dibuka, hanya badge-nya yang tidak muncul.
     }
+  }
+
+  /// Tarik-untuk-refresh: profil staff (nama, foto, rekening) dan status
+  /// dokumen. Best-effort, gagal memuat profil tidak menampilkan error.
+  Future<void> _refresh() async {
+    try {
+      await ProfileService.loadAndCache();
+    } catch (_) {}
+    await _loadDocStatus();
+    if (mounted) setState(() {});
   }
 
   /// Ringkasan status dokumen untuk baris menu.
@@ -160,7 +171,11 @@ class _AccountTabState extends State<AccountTab> {
             Container(height: 1, color: AppColors.slate200),
 
             Expanded(
-              child: ListView(
+              child: RefreshIndicator(
+                color: AppColors.brandNavy,
+                onRefresh: _refresh,
+                child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
                 children: [
                   // ── Profile Section ───────────────────
@@ -396,6 +411,7 @@ class _AccountTabState extends State<AccountTab> {
                     onTap: _logout,
                   ),
                 ],
+              ),
               ),
             ),
           ],

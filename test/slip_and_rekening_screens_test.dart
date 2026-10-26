@@ -105,18 +105,21 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Apa yang salah?'), findsOneWidget);
-      expect(find.text('Data kehadiran / absensi'), findsOneWidget);
-      expect(find.text('Total / Take Home Pay'), findsOneWidget);
-      expect(find.byType(CheckboxListTile), findsWidgets);
+      // Hanya gaji pokok, lembur, tunjangan & fasilitas yang bisa ditolak.
+      expect(find.text('Data kehadiran / absensi'), findsNothing);
+      expect(find.text('Total / Take Home Pay'), findsNothing);
+      expect(find.byType(CheckboxListTile), findsOneWidget);
+      final gajiPokok = find.byKey(const ValueKey('tolak-item-0'));
+      expect(find.descendant(of: gajiPokok, matching: find.text('Gaji Pokok')), findsOneWidget);
 
       FilledButton send() => tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Kirim ke HR'));
       expect(send().onPressed, isNull);
 
-      await tester.tap(find.text('Data kehadiran / absensi'));
+      await tester.tap(gajiPokok);
       await tester.pump();
       expect(send().onPressed, isNotNull);
 
-      await tester.tap(find.text('Data kehadiran / absensi'));
+      await tester.tap(gajiPokok);
       await tester.pump();
       expect(send().onPressed, isNull);
 

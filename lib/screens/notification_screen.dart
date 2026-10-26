@@ -394,9 +394,15 @@ class _NotificationScreenState extends State<NotificationScreen>
                     child:
                         CircularProgressIndicator(color: AppColors.brandNavy))
                 : _error != null
-                    ? _buildErrorState()
+                    ? PullToRefresh(
+                      onRefresh: _load,
+                      child: _buildErrorState(),
+                    )
                     : filtered.isEmpty
-                        ? _buildEmpty()
+                        ? PullToRefresh(
+                          onRefresh: _load,
+                          child: _buildEmpty(),
+                        )
                         : RefreshIndicator(
                             onRefresh: _load,
                             child: ListView.builder(

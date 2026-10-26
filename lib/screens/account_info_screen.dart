@@ -5,6 +5,7 @@ import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/api_client.dart';
 import '../services/phone_change_service.dart';
+import '../services/profile_service.dart';
 import '../services/session_service.dart';
 import 'onboarding_documents_screen.dart';
 import 'rekening_screen.dart';
@@ -35,6 +36,20 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     super.dispose();
+  }
+
+  /// Tarik-untuk-refresh: muat ulang profil (email, HP, rekening) dari server.
+  Future<void> _refresh() async {
+    try {
+      await ProfileService.loadAndCache();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _emailCtrl.text = AppSession.currentUser.email;
+      _phoneCtrl.text = AppSession.currentUser.phoneNumber;
+    });
   }
 
   Widget _buildRekeningCard() {
@@ -209,7 +224,11 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
         title: 'Informasi Akun',
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: RefreshIndicator(
+          color: AppColors.brandNavy,
+          onRefresh: _refresh,
+          child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(20.0),
           child: Form(
             key: _formKey,
@@ -459,6 +478,7 @@ class _AccountInfoScreenState extends State<AccountInfoScreen> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
