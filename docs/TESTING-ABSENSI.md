@@ -80,12 +80,15 @@ Pilih **skenario** lewat flag CLI kedua:
 flutter run --dart-define=TESTING_MODE=true --dart-define=TESTING_SCENARIO=lembur
 ```
 
-Tanpa `TESTING_SCENARIO`, skenario yang dipakai adalah `normal` — persis sama
-dengan perilaku sebelum skenario ada.
+Tanpa `TESTING_SCENARIO`, skenario yang dipakai adalah **`lembur`** —
+`String.fromEnvironment('TESTING_SCENARIO', defaultValue: 'lembur')` di
+`lib/config/testing_config.dart:157` (koreksi 2026-11-06: versi sebelumnya
+menulis `normal` sebagai default, itu salah). `normal` hanya berlaku bila
+dipilih eksplisit atau bila nama skenario tidak dikenali.
 
 | Skenario | Check-in → Check-out | Hasil yang diharapkan |
 |---|---|---|
-| `normal` (default) | 08:00 → 17:00 | Status hadir, lembur 0 |
+| `normal` | 08:00 → 17:00 | Status hadir, lembur 0 |
 | `terlambat` | 09:30 → 17:00 | Terlambat 90 menit + denda, lembur 0 |
 | `lembur` | 08:00 → 20:00 | **Lembur 180 menit (3 jam)**, hari itu layak diajukan lembur |
 | `lemburTepatBatas` | 08:00 → 18:00 | Lembur 60 menit **tapi TIDAK layak diajukan** |

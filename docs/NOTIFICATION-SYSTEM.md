@@ -1,62 +1,86 @@
-# Notification System — Flutter Reference (2026-09-08)
+# Notification System — Flutter Reference
 
-Referensi teknis buat siapa pun yang kerja di notifikasi app staff. Versi lengkap lintas-3-repo (analisis bisnis, apa yang kurang, rencana fase) ada di `hadir-in-web-admin-react/docs/product/NOTIFICATION-SYSTEM-AUDIT-2026-09-08.md` — baca itu dulu buat konteks penuh, dokumen ini fokus ke fakta teknis repo ini aja.
+Referensi teknis untuk siapa pun yang kerja di notifikasi app staff. Disinkronkan dengan kode 2026-11-06 (versi sebelumnya, 2026-09-08, menyebut push "LOKAL, bukan FCM, belum ada pengirim server" — itu sudah tidak benar). Sisi server (tabel `Notification`, `createNotification()`, pengirim FCM) ada di [backend NOTIFICATION-SYSTEM.md](../../hadir-in-api-backend-express-js/docs/NOTIFICATION-SYSTEM.md); analisis bisnis lintas repo ada di `hadir-in-web-admin-react/docs/product/NOTIFICATION-SYSTEM-AUDIT-2026-09-08.md`. Dokumen ini fokus ke fakta teknis repo ini.
 
-## 2 jalur notifikasi yang BEDA arsitektur — jangan tertukar
+## Gambaran: tiga sumber, satu pintu ke tray
 
-### Jalur 1 — dari backend (`Notification` table, lewat `GET /api/mobile/staff/:id/notifications`)
-Ditarik `NotificationService.myNotifications()` (`lib/services/notification_service.dart`), di-polling tiap 45 detik selagi app di-foreground (`MainScreen._startNotificationPolling`, di `main_screen.dart`), muncul di:
-- Banner in-app (SnackBar candy-bar) buat yang baru muncul sejak polling mulai.
-- Layar Notifikasi (`notification_screen.dart`) — daftar lengkap, bisa di-mark-read.
-- Notifikasi status-bar HP asli, lewat `NotificationCenter.syncFromServer` → `PushNotificationService.show()`.
+Semua notifikasi yang muncul di status bar HP lewat **satu** kelas: `PushNotificationService.show()` (`lib/services/push_notification_service.dart`, memakai `flutter_local_notifications`). Tiga sumber memberinya makan:
 
-`type` mentah dari backend disimpan di `AppNotification.rawType` (dulu dibuang, sekarang disimpan — lihat `lib/models/models.dart`). `NotificationTarget`/`staffTabIndex` (extension di file yang sama) resolve mau buka tab mana pas notif di-tap: `leave_*` → tab Cuti & Izin, `lembur_*`/`location_transfer_*` → tab Home (belum ada layar khusus buat keduanya, fallback ke Home).
+| # | Sumber | Kapan jalan | Kode |
+|---|--------|-------------|------|
+| 1 | **Push FCM** dari backend | Satu-satunya yang bekerja saat app di-background / ditutup | `lib/services/fcm_service.dart` |
+| 2 | **Polling** `GET /staff/:id/notifications` | Tiap 45 detik selagi app di foreground + saat app resume | `MainScreen._startNotificationPolling` / `_pollNotifications` (`main_screen.dart`) → `NotificationCenter.syncFromServer` |
+| 3 | **Peringatan lokal** buatan app (tanpa backend) | Timer 3 menit + saat resume | `MainScreen._runAttendanceGuards` / `_runShiftReminders` → `NotificationCenter.alertOnce` |
 
-### Jalur 2 — lokal, dibangkitkan APP SENDIRI (`NotificationCenter.alertOnce`, `main_screen.dart`)
-Sama sekali TIDAK lewat backend/`Notification` table — dihitung langsung di HP dari `AttendanceRules` (waktu shift, status absensi lokal), dipicu timer 3 menit + tiap app di-resume (`MainScreen._startBackgroundWatchers` → `_runAttendanceGuards`). Dedup "sekali per hari per key" via `SharedPreferences`.
+Polling **tetap dipertahankan** walau FCM sudah jalan, karena (a) ia penyelaras bila push ke-miss (token belum ter-refresh, izin notifikasi ditolak, HP tanpa Google Play Services) dan (b) ia satu-satunya sumber data untuk layar Notifikasi dan badge unread — keduanya tidak lahir dari event push.
 
-**Yang SUDAH jalan** (`_runAttendanceGuards`, `main_screen.dart` ~baris 368-414):
-- `attendance_missing_checkout` — open session menggantung dari hari sebelumnya belum ditutup.
-- `attendance_overtime_limit` — sudah lembur lewat batas maksimal (`Jabatan.maxExtraHour`), belum checkout.
-- `break_reminder` — masih istirahat padahal jam pulang shift sudah lewat.
+## Jalur 1 — Push FCM
 
-## Kenapa reminder BARU (T-15/T-5/T-0 sebelum masuk, dst) itu murah dikerjakan di sini
+Tulang punggung: `FcmService` (`fcm_service.dart`).
 
-Semua building block waktu yang dibutuhkan **SUDAH ADA** di `AttendanceRules` (`lib/services/attendance_provider.dart`), semuanya sudah wrap-aware buat shift overnight (lihat `computePulangTarget`/`computeMasukTarget`, dites di `test/attendance_rules_test.dart`):
+- **Init** — `main()` memanggil `unawaited(FcmService.init())` (`main.dart:22`), sengaja tanpa `await` agar dialog izin notifikasi Android 13+ tidak menahan layar pertama. Isi `init()`: `Firebase.initializeApp()` → `PushNotificationService.init()` (buat channel) → `onBackgroundMessage(fcmBackgroundHandler)` → `requestPermission()` → listener `onMessage` (foreground), `onMessageOpenedApp` (ketuk dari tray), `getInitialMessage()` (app dibuka dari keadaan tertutup lewat notifikasi) → `onTokenRefresh` + `getToken()`. Best-effort: bila Firebase gagal menyala (mis. tanpa `google-services.json`), log `[fcm] init gagal` dan app tetap jalan dengan polling saja.
+- **Pendaftaran token** — `registerWithBackend()` → `POST /api/mobile/staff/:id/fcm-token` `{token, platform: "android"|"ios"}`. Dipanggil di tiga saat: sesudah login berhasil (`AuthService._persistLogin`, tanpa await), tiap `onTokenRefresh`, dan tiap init. Diam bila belum login.
+- **Pencabutan** — `unregisterFromBackend()` → `DELETE .../fcm-token` `{token}`, dipanggil `SessionService.clearSession()` SEBELUM JWT dihapus.
+- **Payload `data`** (semua string, dari backend): `type`, `notificationId`, `webPath` (bila ada), `slipId` (bila ada). `backendIdOf()` membaca `notificationId` (fallback `id`).
+- **Channel Android**: `hadirin_umum` (importance high, bisa dimatikan staff) dan `hadirin_absensi` (importance max, untuk peringatan yang harus tembus). `AndroidManifest.xml` menunjuk `default_notification_channel_id = hadirin_umum` — **harus sama** dengan yang dibuat `PushNotificationService` dan dengan konstanta di backend. Tipe berawalan `attendance` → `hadirin_absensi`; selain itu `hadirin_umum` (saat ini backend tidak mengirim tipe berawalan `attendance`).
+- **Pesan ber-blok `notification`** saat app di background ditampilkan Android sendiri; `fcmBackgroundHandler` hanya mencatat `markShown(backendId)` lalu berhenti. Pesan **data-only** ditampilkan manual lewat `showAsLocalNotification`.
+- **Ketukan** — payload `notification:<rawType>:<id>[:<slipId>]` (`SlipDeepLink.buildPayload`). Bila `MainScreen` belum memasang handler (app benar-benar tertutup), tujuan disimpan di `_pendingTapPayload` dan ditebus `FcmService.flushPendingTap()` setelah frame pertama.
+- **iOS**: `Platform.isIOS` → `platform: "ios"` dikirim, tetapi `ios/Runner/GoogleService-Info.plist` tidak ada di working tree dan konfigurasi APNs belum didokumentasikan → push iOS **perlu dicek** (ClickUp 1100280000005331 menandainya terbuka).
 
-- `jamMasukTarget` — `DateTime` jam masuk shift hari ini (atau besok kalau shift overnight sedang di jeda siang).
-- `remainingWorkTime` — sisa waktu ke jam pulang.
-- `overtimeDeadline` / `isPastOvertimeLimit` — sudah dipakai `attendance_overtime_limit`.
-- `overtimeElapsedSinceCheckout` — sudah dipakai buat timer hitung-naik di Home tab.
+> Catatan: komentar kelas di `fcm_service.dart` ("backend BELUM mengirim FCM ...") sudah basi — backend sekarang mengirim FCM (`createNotification()` → `StaffDeviceToken`). Itu komentar di kode, tidak diubah di sini.
 
-Artinya nambah reminder baru **TIDAK BUTUH backend baru sama sekali** — tinggal tambah kondisi baru di `_runAttendanceGuards`, pakai `NotificationCenter.alertOnce(key: ..., title: ..., body: ..., type: ...)` yang sudah ada.
+## Jalur 2 — Polling & `NotificationCenter`
 
-### Reminder yang BELUM ada, siap dibangun dengan pola yang sama
+`MainScreen._pollNotifications` menarik `GET /staff/:id/notifications` (50 terbaru + `unreadCount`) dan menyuapi **dua kanal**:
 
-Semua ini derivable dari `AttendanceRules.jamMasukTarget` + status `AttendanceProvider` yang sudah ada, tidak butuh field/model baru:
+1. **Banner in-app** (SnackBar "candy-bar", 4 detik, tombol "Lihat" yang pindah tab). Hanya untuk notifikasi yang baru sejak polling mulai (`_seenNotifIds` di memori; tarikan pertama hanya menyemai set ini).
+2. **Tray HP** lewat `NotificationCenter.syncFromServer(prefetched: result)` — penanda "sudah ditampilkan" disimpan di `SharedPreferences` (`notif_shown_ids`, maks 200 id).
 
-1. **T-15 / T-5 menit sebelum jam masuk** — bandingkan `DateTime.now()` vs `jamMasukTarget`, cuma relevan kalau status masih `notCheckedIn` dan hari ini hari kerja (`_isWorkDay`). Key dedup: `pre_checkin_15/staffId/tanggal`.
-2. **"Sekarang waktunya check-in"** — persis di `jamMasukTarget`, sama syaratnya.
-3. **Sudah telat, sisa toleransi** — butuh field toleransi keterlambatan (cek apakah `Jabatan`/`PayrollSettings`/`KebijakanAbsensi` punya kolom ini; kalau tidak ada, tulis pesan tanpa angka toleransi — jangan mengarang angka).
-4. **Separuh durasi shift lewat, belum istirahat** — hitung `remainingWorkTime` vs total durasi shift (`jamPulang - jamMasuk`, wrap-aware), cuma relevan kalau status `checkedIn` (belum pernah `onBreak`/`breakEnded`) DAN sudah lewat separuh.
-5. **Mendekati/pas/lewat jam pulang** — `remainingWorkTime` mendekati 0 / `isAfterNormalCheckout` baru jadi true — ini SEBAGIAN sudah ada sebagai tampilan (bukan reminder push) di kartu Home (`home_tab.dart`, Fase 6 sesi sebelumnya), tinggal tambahkan versi push-nya kalau mau lebih menonjol.
+Sinkron pertama setelah instal/login (`seen` kosong) dibatasi: hanya notifikasi **belum dibaca**, berumur ≤ 24 jam, maksimal 5 (`_firstRunLimit`); sisanya hanya didaftarkan sebagai "sudah dilihat". Notifikasi yang sudah dibaca (mis. lewat web) tidak dimunculkan ulang.
 
-**Yang TIDAK bisa dibangun di sini**: rollup lintas-staff buat Manager ("12 dari 20 staff sudah masuk") — itu butuh data staff LAIN yang tidak ada di 1 device, harus backend (lihat dokumen backend).
+### Dedup antar-jalur
+- Id tray diturunkan dari id notifikasi backend (`PushNotificationService.idFor`), jadi push + polling untuk kejadian yang sama **memperbarui** satu baris, bukan dua.
+- Jalur push memanggil `NotificationCenter.markShown(backendId)` begitu tampil; `syncFromServer` melewati id itu. Banner in-app mengecek `NotificationCenter.isShown` **sebelum** `syncFromServer` (urutan penting: sesudahnya hasilnya selalu true).
+
+### Layar Notifikasi & tujuan ketukan
+- `notification_screen.dart`: daftar penuh, filter (Belum Dibaca / Disetujui / Ditolak / Pengingat / Info), mark-read (`PATCH .../notifications/:id/read`, `.../read-all`). Pengguna dengan `Jabatan.isSupervisor` mendapat toggle "Diri Sendiri / Tim" — tetapi `AppNotification.isTeam` selalu `false` dari API (`models.dart:1534`), jadi sisi "Tim" selalu kosong (known issue).
+- Pemetaan `rawType` → tab (`notificationTargetFromRawType` + `NotificationTargetTab.staffTabIndex`, `models.dart:1560`): `leave_*` dan `lembur_*` → tab Cuti & Izin (index 1); `slip_*`/`gaji_*`/`pencairan_*` → tab Gaji (index 3, dan `SlipDeepLink` membuka detail slip bila `slipId` ada); `location_transfer_*` → Home (index 0, **belum ada layar staff** untuk Pindah Lokasi); lainnya → buka layar Notifikasi.
+
+## Jalur 3 — Peringatan lokal (`NotificationCenter.alertOnce`)
+
+Dihitung langsung di HP dari `AttendanceRules` (`lib/services/attendance_provider.dart`) dan status absensi lokal; tidak lewat backend/tabel `Notification`. Dedup "sekali per `key` per hari" lewat `SharedPreferences` (`notif_local_alert_*`). Dipicu timer 3 menit (`_guardTimer`) dan tiap resume. Tidak jalan bila profil belum termuat, gerbang onboarding aktif, atau role admin.
+
+`_runAttendanceGuards` (`main_screen.dart`):
+
+| `type` | Kondisi |
+|--------|---------|
+| `attendance_missing_checkout` | Ada sesi menggantung dari **hari sebelumnya** (`open.isPreviousDay`) — juga memunculkan dialog penutup. Sesi hari ini yang cuma lewat batas lembur TIDAK memicu dialog |
+| `attendance_overtime_limit` | Masih bekerja dan lembur sudah melewati batas (`min(Jabatan.maxExtraHour, 4)` jam) |
+| `break_reminder` | Masih tercatat istirahat padahal jam pulang sudah lewat |
+
+`_runShiftReminders` (Sprint 3 Fase 4; tidak berlaku di hari libur, bukan hari kerja shift, atau saat cuti/izin hari itu):
+
+| `type` | Kondisi |
+|--------|---------|
+| `attendance_reminder_checkin` | Belum check-in: T-15 (`checkin_t15_*`), T-5 (`checkin_t5_*`), dan 0–10 menit setelah jam masuk (`checkin_ontime_*`) |
+| `attendance_reminder_late` | Belum check-in dan ≥ 15 menit lewat jam masuk (`checkin_late_*`) |
+| `attendance_reminder_break` | Sudah check-in, belum pernah istirahat, dan lewat separuh durasi shift |
+| `attendance_reminder_checkout` | Bekerja (checkedIn/breakEnded, bukan onBreak) dan jam pulang sudah lewat |
+
+Tidak ada angka toleransi keterlambatan di client (tidak ada field-nya) — pesan sengaja tidak menyebut angka toleransi. Rollup lintas-staff untuk Manager ("12 dari 20 staff sudah masuk") tidak bisa dibangun di HP dan butuh backend.
 
 ## `NotificationMenuHints` (`lib/services/notification_menu_hints.dart`)
 
-Peta `type` (dari backend ATAU lokal) → "Menu > Submenu" tujuan di app, dipakai nempel kalimat "Buka menu Akun > Dokumen Saya untuk mengunggah ulang." di belakang body notifikasi HP. Kalau nambah `type` baru (baik dari backend maupun `alertOnce` lokal), **tambahkan juga entry-nya di sini** (`_byType`) — kalau lupa, ada fallback tebak-kata-kunci (`_byKeyword`) tapi lebih baik eksplisit.
+Peta `type` → "Menu > Submenu" yang ditempel di belakang body notifikasi ("Buka menu Akun > Dokumen Saya ..."), dipakai tray, banner, dan layar Notifikasi supaya menyebut tujuan yang sama. Tambah `type` baru (dari backend atau `alertOnce`) ke `_byType`; bila lupa ada fallback tebak-kata-kunci (`_byKeyword`) yang kurang presisi. `location_transfer_*` sengaja tidak ada (belum ada layar tujuannya).
 
-Catatan: `location_transfer_*` SENGAJA tidak ada di peta ini — Pindah Lokasi belum punya layar staff sama sekali di Flutter (dikonfirmasi: nol layar di `lib/screens/` yang menampilkannya). Jangan tambahkan menu tujuan sampai layarnya beneran ada.
+## `PushNotificationService` (`push_notification_service.dart`)
 
-## `PushNotificationService` (`lib/services/push_notification_service.dart`)
+Membungkus `flutter_local_notifications`: `init()` (buat 2 channel, minta izin), `show(...)`, `cancelAll()`, `onNotificationTap` (diisi `MainScreen`). Dipanggil dari `FcmService.init()` dan `MainScreen.initState`. `NotificationCenter.reset()` (hapus penanda tampil) hanya dipanggil dari logout di `MainScreen._logout` — logout dari tab Akun, layar passcode, dan layar onboarding tidak memanggilnya (known issue, lihat [AUTH-LOGIN-FLOW.md](features/AUTH-LOGIN-FLOW.md)).
 
-Notifikasi status-bar HP ASLI (bukan cuma daftar di dalam app), pakai `flutter_local_notifications`. **Ini LOKAL, bukan FCM** — belum ada infrastruktur push server-side (tidak ada kolom device token, tidak ada pengirim). Begitu FCM tersambung (lihat requirement FCM di `hadir-in-web-admin-react/docs/product/SPRINT3-REMAINING-FCM-REQUIREMENT-2026-09-07.md`), tinggal panggil `PushNotificationService.show()` yang sama dari handler pesan FCM — servicenya sendiri sudah didesain gak perlu berubah.
+## Known issues
+- Sisi "Tim" di layar Notifikasi selalu kosong (`isTeam` tidak pernah true).
+- Titik merah di ikon lonceng Home (`home_tab.dart`, di `_buildAppBar`) selalu tampil, tidak terkait `unreadCount`.
+- Penanda notifikasi tidak dibersihkan pada logout selain `MainScreen._logout`.
+- Push iOS belum terverifikasi (lihat atas).
 
-2 channel Android sudah dipisah: `hadirin_umum` (importance high, bisa dimatikan staff) vs `hadirin_absensi` (importance max, buat peringatan yang harus tetap tembus — lembur/lupa checkout/istirahat).
-
-## Bug/gap yang relevan dari sisi backend (lihat detail di dokumen backend)
-
-- Bell **web-admin** (bukan di sini) bocor scoping — tidak berdampak ke app ini (mobile endpoint sudah scoped benar per staffId), cuma relevan kalau kerja lintas repo.
-- `phone_verification` copy salah orang (backend, `v1/staff.ts`) — begitu diperbaiki backend-side, tidak ada perubahan yang dibutuhkan di app ini (cuma teks body yang berubah).
-- Tidak ada `breadcrumb`/`webPath` di response backend — untuk app ini TIDAK masalah besar karena `NotificationMenuHints` sudah jalan cukup baik sebagai versi client-side-nya. Kalau backend nanti nambah field `mobileTarget` yang otoritatif, evaluasi apa masih perlu dipakai atau `NotificationMenuHints` tetap cukup.
+Setup Firebase dan cara menguji push: [guides/FCM-SETUP.md](guides/FCM-SETUP.md).

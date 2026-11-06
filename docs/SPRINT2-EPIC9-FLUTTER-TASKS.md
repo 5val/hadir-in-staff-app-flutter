@@ -1,6 +1,8 @@
 # Sprint 2 EPIC 9 — Tugas sisi Flutter (staff app)
 
-**Dibuat:** 2026-07-31. **Sumber kebenaran untuk sisi Flutter Sprint 2 EPIC 9** — kalau ada dokumen lain yang menyebut soal ini secara sekilas (PRD web-admin, contract doc backend), file INI yang jadi rujukan detail eksekusinya.
+> **ARSIP (2026-11-06) — jangan dipakai sebagai petunjuk kerja.** Pekerjaan dokumen ini sudah **SELESAI** (2026-08-01): `SalarySlip.takeHomePay`/`netSalary` kini mengembalikan `gajiNetto` dari server, dan komponen di luar THP ditandai `excludedFromThp` (regression test: `test/salary_slip_test.dart`). 6 butir `- [ ]` di bawah tidak pernah dicentang walau pekerjaannya selesai, dan nomor baris yang disebut sudah basi karena file berubah banyak sejak itu. Beberapa pernyataan di bawah juga sudah tidak benar — contoh: **uang makan sekarang SUDAH masuk `gajiNetto`/THP** (di-wire backend sejak 2026-08-03), bukan "belum di-wire". Untuk perilaku terkini baca [features/SLIP-GAJI-FLOW.md](features/SLIP-GAJI-FLOW.md) dan [aturan bisnis penggajian](../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md). Dokumen ini dipertahankan hanya sebagai konteks historis keputusan.
+
+**Dibuat:** 2026-07-31. ~~Sumber kebenaran untuk sisi Flutter Sprint 2 EPIC 9~~ (digantikan, lihat banner arsip di atas) — kalau ada dokumen lain yang menyebut soal ini secara sekilas (PRD web-admin, contract doc backend), file INI dulu jadi rujukan detail eksekusinya.
 
 **Cara pakai dokumen ini:** ini ditulis supaya bisa dieksekusi tuntas hanya dengan membaca file ini — gak perlu baca histori chat/keputusan lain. Semua konteks bisnis yang relevan sudah dirangkum di bawah. Kalau ada bagian yang kurang jelas saat eksekusi, lebih baik tanya balik ke pemilik project daripada menebak.
 
