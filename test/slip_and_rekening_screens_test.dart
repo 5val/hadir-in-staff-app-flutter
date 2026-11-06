@@ -48,6 +48,42 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  group('SalaryDetailScreen -- Fasilitas is its own section (meet 2026-11-05)', () {
+    final extra = {
+      'tunjanganBreakdown': [
+        {'nama': 'Transport', 'jumlah': 300000, 'periode': 'bulanan', 'bentuk': 'uang'},
+      ],
+      'fasilitasBreakdown': [
+        {'kategori': 'Mess Karyawan', 'nominal': 500000},
+      ],
+    };
+
+    testWidgets('fasilitas items sit under "Fasilitas", below Tunjangan', (tester) async {
+      await pumpDetail(tester, slipWith('terkunci', extra: extra));
+      // Tall enough that the lazy ListView builds every section.
+      tester.view.physicalSize = const Size(1080, 12000);
+      await tester.pump();
+      final tunjanganTitle = find.text('Tunjangan');
+      final fasilitasTitle = find.text('Fasilitas');
+      expect(tunjanganTitle, findsOneWidget);
+      expect(fasilitasTitle, findsOneWidget);
+      final yTunjangan = tester.getTopLeft(tunjanganTitle).dy;
+      final yFasilitas = tester.getTopLeft(fasilitasTitle).dy;
+      final yTransport = tester.getTopLeft(find.text('Transport')).dy;
+      final yMess = tester.getTopLeft(find.text('Mess Karyawan')).dy;
+      expect(yTransport, inExclusiveRange(yTunjangan, yFasilitas));
+      expect(yMess, greaterThan(yFasilitas));
+    });
+
+    testWidgets('no fasilitas: no Fasilitas section', (tester) async {
+      await pumpDetail(tester, slipWith('terkunci'));
+      tester.view.physicalSize = const Size(1080, 12000);
+      await tester.pump();
+      expect(find.text('Tunjangan'), findsOneWidget);
+      expect(find.text('Fasilitas'), findsNothing);
+    });
+  });
+
   group('SalaryDetailScreen -- status drives what the staff can do', () {
     testWidgets('menunggu_konfirmasi: confirm/reject bar, review banner, NO download', (tester) async {
       await pumpDetail(tester, slipWith('menunggu_konfirmasi'));

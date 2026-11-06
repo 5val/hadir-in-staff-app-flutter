@@ -1079,7 +1079,7 @@ class SalarySlip {
         final kategori = (item['kategori'] ?? 'Fasilitas').toString();
         final nominal = (item['nominal'] as num?)?.toInt() ?? 0;
         add(SalaryGroup.tunjangan, 'fasilitas:$kategori', kategori,
-            'Fasilitas (natura)', nominal,
+            'Natura', nominal,
             excludedFromThp: true);
       }
     }

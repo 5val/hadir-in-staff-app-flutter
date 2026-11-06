@@ -1559,8 +1559,14 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     final pokok = slip.components
         .where((c) => c.group == SalaryGroup.pendapatanPokok)
         .toList();
+    // Fasilitas (natura) tetap di grup tunjangan untuk total, tapi klien minta
+    // (meet 2026-11-05) ditampilkan sebagai bagian sendiri.
+    final semuaTunjangan =
+        slip.components.where((c) => c.group == SalaryGroup.tunjangan);
     final tunjangan =
-        slip.components.where((c) => c.group == SalaryGroup.tunjangan).toList();
+        semuaTunjangan.where((c) => !c.key.startsWith('fasilitas:')).toList();
+    final fasilitas =
+        semuaTunjangan.where((c) => c.key.startsWith('fasilitas:')).toList();
     final pajak =
         slip.components.where((c) => c.group == SalaryGroup.pajak).toList();
     final potongan =
@@ -1703,6 +1709,15 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
                       Icons.card_giftcard_rounded, 'Tunjangan'),
                   const SizedBox(height: 8),
                   _buildSalaryTable(tunjangan, isDeduction: false),
+
+                  // 3b. Fasilitas (natura) -- bagian sendiri, tidak menambah THP
+                  if (fasilitas.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _buildSectionTitle(
+                        Icons.business_center_rounded, 'Fasilitas'),
+                    const SizedBox(height: 8),
+                    _buildSalaryTable(fasilitas, isDeduction: false),
+                  ],
 
                   // 4. Potongan -- di bawah gaji bersih, sesuai permintaan
                   const SizedBox(height: 20),
