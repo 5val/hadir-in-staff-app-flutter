@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
+import 'session_expiry.dart';
 import 'session_service.dart';
 
 /// Dilempar saat sebuah request gagal — baik karena error jaringan maupun
@@ -87,25 +88,45 @@ class ApiClient {
   }
 
   Future<ApiResponse> get(String path,
-          {Map<String, dynamic>? query, bool auth = true}) =>
-      _send(() async =>
-          http.get(_uri(path, query), headers: await _headers(auth: auth)));
+          {Map<String, dynamic>? query,
+              bool auth = true,
+              bool logoutOn401 = true}) =>
+      _send(
+          () async =>
+              http.get(_uri(path, query), headers: await _headers(auth: auth)),
+          auth: auth && logoutOn401);
 
-  Future<ApiResponse> post(String path, {Object? body, bool auth = true}) =>
-      _send(() async => http.post(_uri(path),
-          headers: await _headers(auth: auth), body: jsonEncode(body ?? {})));
+  Future<ApiResponse> post(String path,
+          {Object? body, bool auth = true, bool logoutOn401 = true}) =>
+      _send(
+          () async => http.post(_uri(path),
+              headers: await _headers(auth: auth),
+              body: jsonEncode(body ?? {})),
+          auth: auth && logoutOn401);
 
-  Future<ApiResponse> put(String path, {Object? body, bool auth = true}) =>
-      _send(() async => http.put(_uri(path),
-          headers: await _headers(auth: auth), body: jsonEncode(body ?? {})));
+  Future<ApiResponse> put(String path,
+          {Object? body, bool auth = true, bool logoutOn401 = true}) =>
+      _send(
+          () async => http.put(_uri(path),
+              headers: await _headers(auth: auth),
+              body: jsonEncode(body ?? {})),
+          auth: auth && logoutOn401);
 
-  Future<ApiResponse> patch(String path, {Object? body, bool auth = true}) =>
-      _send(() async => http.patch(_uri(path),
-          headers: await _headers(auth: auth), body: jsonEncode(body ?? {})));
+  Future<ApiResponse> patch(String path,
+          {Object? body, bool auth = true, bool logoutOn401 = true}) =>
+      _send(
+          () async => http.patch(_uri(path),
+              headers: await _headers(auth: auth),
+              body: jsonEncode(body ?? {})),
+          auth: auth && logoutOn401);
 
-  Future<ApiResponse> delete(String path, {Object? body, bool auth = true}) =>
-      _send(() async => http.delete(_uri(path),
-          headers: await _headers(auth: auth), body: jsonEncode(body ?? {})));
+  Future<ApiResponse> delete(String path,
+          {Object? body, bool auth = true, bool logoutOn401 = true}) =>
+      _send(
+          () async => http.delete(_uri(path),
+              headers: await _headers(auth: auth),
+              body: jsonEncode(body ?? {})),
+          auth: auth && logoutOn401);
 
   /// GET untuk respons biner (mis. PDF slip gaji). Non-2xx dipetakan ke
   /// [ApiException] dengan pesan dari server, sama seperti request JSON.
@@ -131,6 +152,7 @@ class ApiClient {
     } catch (_) {
       decoded = null;
     }
+    if (auth && res.statusCode == 401) _notifyUnauthorized();
     throw ApiException(_errorMessage(decoded, res.statusCode),
         statusCode: res.statusCode);
   }
@@ -153,7 +175,19 @@ class ApiClient {
     }
   }
 
-  Future<ApiResponse> _send(Future<http.Response> Function() request) async {
+  /// Catatan [logoutOn401]: set `false` untuk request ber-auth yang 401-nya
+  /// berarti "kredensial yang diketik salah", bukan sesi habis (mis.
+  /// set-passcode dengan passcode lama salah).
+  ///
+  /// 401 pada request ber-auth = JWT kedaluwarsa/dicabut -> logout terpadu.
+  /// 403 SENGAJA tidak ikut (backend memakainya untuk "tidak berwenang atas
+  /// data ini", sesi tetap valid). Fire-and-forget; dedup ada di handler.
+  void _notifyUnauthorized() {
+    unawaited(SessionExpiry.handleUnauthorized());
+  }
+
+  Future<ApiResponse> _send(Future<http.Response> Function() request,
+      {required bool auth}) async {
     final res = await _execute(request);
 
     dynamic decoded;
@@ -179,6 +213,7 @@ class ApiClient {
       return ApiResponse(data: decoded);
     }
 
+    if (auth && res.statusCode == 401) _notifyUnauthorized();
     throw ApiException(
       _errorMessage(decoded, res.statusCode),
       statusCode: res.statusCode,

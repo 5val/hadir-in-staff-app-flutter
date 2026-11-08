@@ -6,6 +6,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'screens/auth_wrapper.dart';
 import 'theme/app_theme.dart';
 import 'services/fcm_service.dart';
+import 'services/session_expiry.dart';
 import 'services/session_service.dart';
 
 void main() async {
@@ -22,6 +23,7 @@ void main() async {
   unawaited(FcmService.init());
 
   await initializeDateFormatting('id_ID', null);
+  await SessionService.purgeLegacyCredentials();
   await SessionService.lockSession();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(
@@ -42,6 +44,8 @@ class HadirInApp extends StatelessWidget {
     return MaterialApp(
       title: 'Hadir-In',
       debugShowCheckedModeBanner: false,
+      navigatorKey: SessionExpiry.navigatorKey,
+      scaffoldMessengerKey: SessionExpiry.messengerKey,
       theme: AppTheme.light,
       home: const AuthWrapper(),
     );

@@ -24,6 +24,28 @@ class SessionService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
+  /// Key kredensial lama di SharedPreferences (plaintext) yang tersisa dari
+  /// sebelum migrasi ke secure storage (2026-08-04) atau dari fitur yang
+  /// sudah dihapus (passcode lokal, username). Tidak pernah dibaca lagi;
+  /// dihapus idempoten saat init dan saat logout.
+  static const legacyCredentialKeys = <String>[
+    'hadir_in_token',
+    'hadir_in_staff_id',
+    'hadir_in_passcode',
+    'hadir_in_username',
+  ];
+
+  /// Hapus key kredensial lama dari SharedPreferences. Aman dipanggil
+  /// berulang; TIDAK menyentuh secure storage. Best-effort.
+  static Future<void> purgeLegacyCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final k in legacyCredentialKeys) {
+        if (prefs.containsKey(k)) await prefs.remove(k);
+      }
+    } catch (_) {}
+  }
+
   // ── Kredensial backend (JWT staff + id staff asli dari database) ──────
   static Future<void> saveToken(String token) async {
     await _secureStorage.write(key: _keyToken, value: token);
@@ -116,6 +138,7 @@ class SessionService {
     await prefs.remove(_keyLoggedIn);
     await prefs.remove(_keyEmployeeId);
     await prefs.remove(_keySessionActive);
+    await purgeLegacyCredentials();
     await _secureStorage.delete(key: _keyToken);
     await _secureStorage.delete(key: _keyStaffId);
     AppSession.clearUser();

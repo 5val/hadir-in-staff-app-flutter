@@ -167,6 +167,9 @@ class AuthService {
     await ApiClient.instance.post(
       '/mobile/auth/staff/set-passcode',
       body: buildSetPasscodeBody(passcode: passcode, passcodeLama: passcodeLama),
+      // Backend membalas 401 "Passcode lama salah" -- itu salah ketik, bukan
+      // sesi habis, jadi jangan memicu logout global.
+      logoutOn401: false,
     );
   }
 
