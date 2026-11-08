@@ -123,22 +123,36 @@ class SubordinateService {
     final id = await _staffId();
     await ApiClient.instance.patch(
       '/mobile/staff/$id/subordinates/leave/$leaveId',
-      body: {
-        'action': approve ? 'approve' : 'reject',
-        if (alasanTolak != null && alasanTolak.isNotEmpty)
-          'alasanTolak': alasanTolak,
-      },
+      body: respondBody(approve: approve, alasanTolak: alasanTolak),
     );
   }
 
   static Future<void> respondLembur({
     required String lemburId,
     required bool approve,
+    String? alasanTolak,
   }) async {
     final id = await _staffId();
     await ApiClient.instance.patch(
       '/mobile/staff/$id/subordinates/lembur/$lemburId',
-      body: {'action': approve ? 'approve' : 'reject'},
+      body: respondBody(approve: approve, alasanTolak: alasanTolak),
     );
+  }
+
+  /// Batas alasan tolak di server (lembur: dipotong 500; opsional).
+  static const alasanTolakMax = 500;
+
+  /// Body PATCH setujui/tolak. `alasanTolak` hanya ikut saat menolak dan
+  /// tidak kosong (opsional di server), dipotong ke [alasanTolakMax].
+  static Map<String, dynamic> respondBody(
+      {required bool approve, String? alasanTolak}) {
+    final alasan = (alasanTolak ?? '').trim();
+    return {
+      'action': approve ? 'approve' : 'reject',
+      if (!approve && alasan.isNotEmpty)
+        'alasanTolak': alasan.length <= alasanTolakMax
+            ? alasan
+            : alasan.substring(0, alasanTolakMax),
+    };
   }
 }

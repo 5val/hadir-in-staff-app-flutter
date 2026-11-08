@@ -9,7 +9,6 @@ import '../services/attendance_service.dart';
 import '../services/profile_service.dart';
 import '../services/document_service.dart';
 import '../services/api_client.dart';
-import '../services/location_service.dart';
 import '../services/session_service.dart';
 import '../services/calendar_service.dart';
 import '../services/staff_log_service.dart';
@@ -17,10 +16,9 @@ import '../services/notification_service.dart';
 import '../services/notification_menu_hints.dart';
 import '../services/push_notification_service.dart';
 import '../services/fcm_service.dart';
-import '../services/document_draft_service.dart';
 import '../widgets/staff_log_dialog.dart';
 import '../widgets/open_session_dialog.dart';
-import '../widgets/early_checkout_dialog.dart';
+import '../widgets/attendance_entry_flow.dart';
 import '../screens/camera_checkin_screen.dart'; // ← halaman kamera
 import '../models/models.dart';
 import 'login_screen.dart';
@@ -649,11 +647,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _logout() async {
-    // Berkas dokumen yang belum diajukan dan penanda notifikasi terikat pada
-    // staff yang sedang login — keduanya dibersihkan supaya tidak bocor ke
-    // staff berikutnya yang memakai HP yang sama.
-    await DocumentDraftService.clear();
-    await NotificationCenter.reset();
+    // clearSession() juga membersihkan draft dokumen & notifikasi (F2).
     await SessionService.clearSession();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -693,98 +687,42 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       return;
     }
 
-    // Absensi hari sebelumnya belum ditutup → check-in baru tidak boleh
-    // dilakukan (server pun menolaknya dengan 409). Tutup dulu hari itu.
-    if (status == AttendanceProviderStatus.notCheckedIn) {
-      await _attendance.refreshOpenSession();
-      final open = _attendance.openSession;
-      if (open != null) {
-        await _promptCloseOpenSession(open);
-        return;
-      }
-    }
-
     // Tentukan tipe kamera
     final actionType = (status == AttendanceProviderStatus.notCheckedIn)
         ? CameraActionType.checkIn
         : CameraActionType.checkOut;
 
-    // Kerja di hari libur (lembur yang sudah disetujui): jadwal shift tidak
-    // berlaku dan SEMUA jam kerja dihitung lembur. Staff dimintai konfirmasi
-    // SEBELUM kamera dibuka, supaya yang batal tidak perlu berfoto.
-    final holidayWork = AppCalendar.instance.hariIni.kerjaHariLibur;
-    if (actionType == CameraActionType.checkIn && holidayWork) {
-      final proceed = await _confirmHolidayWorkCheckIn();
-      if (!mounted || !proceed) return;
-    }
-
-    // 2026-09-09 -- peringatan "Belum Jam Pulang!" SEBELUM kamera dibuka,
-    // bukan sesudah foto diambil (perilaku lama, lihat
-    // widgets/early_checkout_dialog.dart's doc comment). Staff yang batal
-    // di sini tidak pernah membuka kamera sama sekali.
-    if (actionType == CameraActionType.checkOut) {
-      // 2026-09-10 -- tarik ulang `attendance/today` SEKARANG, sesegar
-      // mungkin persis sebelum keputusan gerbang diambil, supaya snapshot
-      // shift-terms (`jamPulangShiftSnapshot`/`toleransiPulangSnapshot`)
-      // yang dipakai [AttendanceRules.earliestCheckoutTarget] tidak
-      // ketinggalan. Snapshot yang dihidrasi cuma sekali di awal sesi
-      // (`_hydrateProfile`) bisa basi persis di celah bug yang di-fix ini:
-      // staff check-in → admin edit Shift → (jauh) kemudian staff tap
-      // check-out, semua SETELAH sesi app dimulai. Best-effort: gagal
-      // refresh tidak memblokir check-out, cuma jatuh balik ke snapshot/
-      // nilai live yang sudah ada dari hidrasi sebelumnya.
-      try {
-        await _attendance.refreshToday();
-      } catch (_) {}
-      if (!mounted) return;
-      _hydrateCheckoutSnapshot(_attendance.today);
-
-      // Hari libur tidak punya jam pulang shift untuk ditunggu (server pun
-      // tidak menggerbanginya), jadi peringatan "Belum Jam Pulang!" tidak
-      // relevan.
-      if (!holidayWork && !AttendanceRules.isAfterEarliestCheckout) {
-        final proceed = await showEarlyCheckoutDialog(context);
-        if (!mounted || !proceed) return;
-      }
-    }
-
-    // Buka halaman kamera
-    final result = await Navigator.push<CameraResult>(
-      context,
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => CameraCheckinScreen(actionType: actionType),
-      ),
+    // Gerbang yang SAMA dengan kartu Home (widgets/attendance_entry_flow.dart):
+    // absensi menggantung, konfirmasi hari libur, "Belum Jam Pulang!", kamera,
+    // GPS (+ tolak lokasi palsu).
+    final entry = await runAttendanceEntry(
+      context: context,
+      actionType: actionType,
+      hooks: AttendanceEntryHooks.live(_attendance),
+      onMessage: (msg, {bool error = false}) =>
+          error ? _showInfoSnackbar(msg) : _showSuccessSnackbar(msg),
     );
-
-    if (!mounted || result == null || !result.confirmed) return;
-
-    // Fase 8: koordinat GPS wajib menyertai absensi — server yang memutuskan
-    // apakah posisinya di dalam radius Lokasi staff (lib/geo.ts).
-    final gps = await LocationService.current();
-    if (!mounted) return;
-    if (!gps.ok) {
-      _showInfoSnackbar(gps.failure!.message);
-      return;
-    }
+    if (!mounted || entry == null) return;
+    final result = entry.camera;
+    final pos = entry.position;
 
     // Simpan ke backend sesuai aksi.
     try {
       if (result.actionType == CameraActionType.checkIn) {
         await _attendance.checkInRemote(
           fotoPath: result.imagePath,
-          latitude: gps.position!.latitude,
-          longitude: gps.position!.longitude,
-          accuracy: gps.position!.accuracy,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+          accuracy: pos.accuracy,
         );
         if (!mounted) return;
         _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
       } else {
         await _attendance.checkOutRemote(
           fotoPath: result.imagePath,
-          latitude: gps.position!.latitude,
-          longitude: gps.position!.longitude,
-          accuracy: gps.position!.accuracy,
+          latitude: pos.latitude,
+          longitude: pos.longitude,
+          accuracy: pos.accuracy,
         );
         if (!mounted) return;
         final uangMakan = _attendance.uangMakan;
@@ -799,38 +737,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   // ── Dialog selesai istirahat ─────────────────────────────────
-  /// Popup konfirmasi check-in di hari libur. Mengembalikan true bila staff
-  /// melanjutkan.
-  Future<bool> _confirmHolidayWorkCheckIn() async {
-    final hariIni = AppCalendar.instance.hariIni;
-    final window = (hariIni.lemburJamMulai != null && hariIni.lemburJamSelesai != null)
-        ? '\nRencana yang disetujui: ${hariIni.lemburJamMulai} - ${hariIni.lemburJamSelesai}.'
-        : '';
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.event_available_rounded,
-            color: AppColors.brandOrange, size: 36),
-        title: Text('Hari libur${hariIni.namaLibur != null ? ': ${hariIni.namaLibur}' : ''}'),
-        content: Text(
-          'Anda bekerja di hari libur dengan lembur yang sudah disetujui.$window\n\n'
-          'Seluruh jam kerja Anda hari ini, dari check-in sampai check-out, '
-          'dihitung sebagai lembur. Uang makan dan tunjangan harian tidak '
-          'berlaku di hari libur.\n\nLanjut check-in?',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Batal')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Ya, check-in')),
-        ],
-      ),
-    );
-    return ok == true;
-  }
-
   Future<void> _showEndBreakDialog() async {
     final ok = await showDialog<bool>(
       context: context,

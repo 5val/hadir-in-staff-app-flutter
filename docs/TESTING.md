@@ -39,13 +39,18 @@ Test regresi yang tidak pernah merah tidak membuktikan apa pun. Untuk setiap per
 | `salary_slip_test.dart` | `SalarySlip`: `KonfirmasiResult` (server memutuskan status), round-trip `dikirimKonfirmasiAt`, `alasanTolak` hanya saat `ditolak`, state pencairan, **THP = `gajiNetto`** (regresi EPIC 9), komponen di luar THP, potongan BPJS (EPIC 9c), statistik kehadiran |
 | `slip_followup_test.dart` | Tipe & label periode, `SlipFilter`, label status kartu, flag batal-setuju & bukti, notifikasi slip (`SlipDeepLink`), `AttentionPulse`, detail slip (batalkan persetujuan, bukti), `SlipBuktiScreen` |
 | `slip_and_rekening_screens_test.dart` | Widget `SalaryDetailScreen` (Fasilitas bagian sendiri, status menentukan tombol, dialog Tolak dengan centang, banner pencairan, penolakan sekali + tanda revisi) dan `RekeningScreen` |
-| `widget_test.dart` | Smoke test: `HadirInApp` ter-build tanpa crash |
+| `logout_and_drafts_test.dart` | F2: draft dokumen per staffId; `clearSession` membersihkan draft + penanda notifikasi + kredensial |
+| `attendance_entry_flow_test.dart` | F3/F4/F5: `LocationService.guardMocked`; `runAttendanceEntry` (dialog "Belum Jam Pulang!", konfirmasi hari libur, foto wajib, GPS palsu) |
+| `subordinate_approval_test.dart` | F6: body PATCH setujui/tolak (`alasanTolak`), parsing lembur bawahan, dialog tolak dengan alasan opsional |
+| `notification_settings_test.dart` | F7: `NotificationDelivery.decide` (sakelar + mode bunyi), preferensi tersimpan, `unreadCount` |
+| `admin_contact_and_copy_test.dart` | F8: normalisasi nomor WA, peringatan ganti rekening |
+| `widget_test.dart` |
 
 Tidak ada test untuk: `LoginScreen`/`PasscodeUnlockScreen`, `CameraCheckinScreen`, `HomeTab`/`MainScreen`, `LeaveTab` (pengajuan), `OnboardingDocumentsScreen`, `ApiClient`, `FcmService`/`NotificationCenter`, `SubordinateService`. Perubahan di area itu tidak punya jaring pengaman otomatis — verifikasi manual dan tulis test bila memungkinkan.
 
 ## Test yang akan perlu diubah bersama perilakunya
 
-- **Dialog Tolak slip (R9).** `slip_and_rekening_screens_test.dart` (grup "tolak dialog with per-part checkboxes" dan "reject dialog") saat ini **mengunci perilaku lama**: tombol "Kirim ke HR" aktif bila ada centang **atau** catatan ≥ 5 karakter, dan aktif hanya dengan catatan tanpa centang. Server sejak 2026-10-25 menolak request tanpa `bagian` (400). Saat R9 dikerjakan, test ini harus diubah: tombol harus **tetap mati** bila tidak ada centang walau catatan ≥ 5 karakter, dan test baru itu harus terbukti merah terhadap `_valid` yang sekarang (`salary_screen.dart:2693`). Lihat [features/SLIP-GAJI-FLOW.md](features/SLIP-GAJI-FLOW.md).
+- ~~Dialog Tolak slip (R9)~~ -- SELESAI 2026-11-08: kedua grup test diubah bersama `_valid`; tombol harus mati tanpa centang walau catatan >= 5 karakter, dan terbukti merah terhadap `_valid` lama (3 test gagal).
 - **RENCANA batal-setuju** (centang bagian wajib saat membatalkan): test dialog batal-setuju di `slip_followup_test.dart` ("detail slip: batalkan persetujuan", memakai `BatalSetujuDialog` yang sekarang hanya meminta alasan 5–300 karakter) perlu diubah bersama dialog barunya, dan test baru harus terbukti merah terhadap dialog lama.
 
 ## Konvensi

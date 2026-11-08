@@ -51,7 +51,7 @@ Setelah `phone-change/verify` sukses, server mengisi `documentsResetAt`; `Onboar
 
 ## 7. Logout dari layar ini
 
-Tombol **Keluar** (hanya `manageMode: false`) memanggil `SessionService.clearSession()` saja — tidak membersihkan draft dokumen (lihat known issue di [AUTH-LOGIN-FLOW.md §9](AUTH-LOGIN-FLOW.md)): staff berikutnya di HP yang sama bisa mewarisi draft berkas staff sebelumnya (`DocumentDraftService.all()` tidak dikunci per staff).
+Tombol **Keluar** (hanya `manageMode: false`) memanggil `SessionService.clearSession()`, yang sejak F2 (2026-11-08) juga membersihkan draft dokumen dan penanda notifikasi (lihat [AUTH-LOGIN-FLOW.md §9](AUTH-LOGIN-FLOW.md)). Draft juga dikunci per staffId, jadi tidak bisa diwarisi staff lain di HP yang sama.
 
 ## 8. Notifikasi terkait
 

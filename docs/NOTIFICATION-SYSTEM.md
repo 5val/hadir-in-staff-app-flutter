@@ -75,12 +75,10 @@ Peta `type` → "Menu > Submenu" yang ditempel di belakang body notifikasi ("Buk
 
 ## `PushNotificationService` (`push_notification_service.dart`)
 
-Membungkus `flutter_local_notifications`: `init()` (buat 2 channel, minta izin), `show(...)`, `cancelAll()`, `onNotificationTap` (diisi `MainScreen`). Dipanggil dari `FcmService.init()` dan `MainScreen.initState`. `NotificationCenter.reset()` (hapus penanda tampil) hanya dipanggil dari logout di `MainScreen._logout` — logout dari tab Akun, layar passcode, dan layar onboarding tidak memanggilnya (known issue, lihat [AUTH-LOGIN-FLOW.md](features/AUTH-LOGIN-FLOW.md)).
+Membungkus `flutter_local_notifications`: `init()` (buat saluran umum + absensi, masing-masing per mode bunyi: `_sound/_vibration/_silent`, minta izin), `show(...)` (membaca sakelar **Notifikasi** dan mode **Notifikasi Suara** lewat `NotificationDelivery.decide`; sakelar mati menyembunyikan notifikasi umum, pengingat absensi tetap tampil), `cancelAll()`, `onNotificationTap` (diisi `MainScreen`). `NotificationCenter.unreadCount` (`ValueNotifier`) memberi makan titik merah lonceng Home. `NotificationCenter.reset()` dipanggil oleh `SessionService.clearSession()` untuk semua jalur logout.
 
 ## Known issues
-- Sisi "Tim" di layar Notifikasi selalu kosong (`isTeam` tidak pernah true).
-- Titik merah di ikon lonceng Home (`home_tab.dart`, di `_buildAppBar`) selalu tampil, tidak terkait `unreadCount`.
-- Penanda notifikasi tidak dibersihkan pada logout selain `MainScreen._logout`.
+- Sisi "Tim" di layar Notifikasi hanya muncul bila ada notifikasi `isTeam` (API belum pernah mengirimnya).
 - Push iOS belum terverifikasi (lihat atas).
 
 Setup Firebase dan cara menguji push: [guides/FCM-SETUP.md](guides/FCM-SETUP.md).

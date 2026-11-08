@@ -55,18 +55,16 @@ Siapa yang melihatnya: hanya staff dengan `isApprover == true` dari `GET /staff/
 Aturan server (#50): Manager **atau** Supervisor di lokasi staff boleh memproses cuti/izin; tidak boleh memproses pengajuan sendiri (403 `Anda tidak bisa memproses pengajuan sendiri`) atau di luar lokasi yang diwenangi (403). Setujui memotong sisa cuti dan memicu notifikasi ke staff (fungsi approval yang sama dengan portal web).
 
 **Yang TIDAK ada di UI app:**
-- **Tolak tanpa alasan.** `SubordinateService.respondLeave` mendukung `alasanTolak`, tetapi dialog tidak punya kolom input.
-- **Persetujuan lembur.** `SubordinateService.respondLembur` ada (hanya `action`) tetapi tidak dipanggil layar mana pun; field `lembur[]` dan flag `canApproveLembur` pada respons #49 tidak dipakai. Di server lembur hanya boleh **Manager** (Supervisor 403 `Hanya Manager yang berwenang menyetujui/menolak lembur`). Konsekuensi: perubahan backend 2026-11-06 (reject lembur menyimpan `alasanTolak`, mobile-api #51) tidak berdampak ke app — persetujuan lembur dilakukan di portal web.
+- (Diperbaiki F6, 2026-11-08) Dialog tolak kini punya kolom **alasan opsional** (maks 500) yang dikirim sebagai `alasanTolak` untuk cuti/izin maupun lembur.
+- (Diperbaiki F6) **Persetujuan lembur** ada di `SubordinateRequestsScreen`: bagian "Pengajuan Lembur" (kartu nama, tanggal, jam, alasan, Setujui/Tolak) tampil hanya bila server memberi `canApproveLembur` (Manager; Supervisor 403 `Hanya Manager yang berwenang menyetujui/menolak lembur`). `PATCH .../subordinates/lembur/:id` `{action, alasanTolak?}` (#51) -- alasan penolakan lembur kini tersimpan server (2026-11-06).
 
 ## 4. RENCANA (belum di kode)
 
 - **Lampiran bukti izin/sakit dapat dikonfigurasi per jenis** (Sakit/Izin/Dinas/Cuti: Tidak perlu / Opsional / Wajib, plus "wajib jika > N hari") oleh admin; validasi di backend, app mengikuti (keputusan 2026-11-06, [ATURAN-BISNIS §10.4](../../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md)). **Sekarang:** `lampiran[]` maks 3, tidak pernah wajib (mobile-api #24: "Rencana: setting wajib/opsional per jenis (belum ada)"). Dampak ke app nanti: UI Izin harus membaca setting (endpoint belum ada — **perlu kontrak backend baru**; flutter-dev tidak boleh menebak shapenya) dan menandai foto wajib.
-- Persetujuan lembur oleh Manager di app: belum direncanakan di dokumen yang ditemukan (**perlu dicek**).
 
 ## 5. Known issues
 
-- Tolak cuti/izin bawahan tanpa kolom alasan; persetujuan lembur tidak punya UI (bagian 3).
 - Lampiran tak pernah wajib di app (sesuai server saat ini).
-- `_buildEmployeeTab()` di `leave_tab.dart` adalah kode mati (versi lama "Pengajuan Karyawan" sebagai sub-tab); `AllLeaveHistoryScreen` yatim.
+- `AllLeaveHistoryScreen` yatim (`_buildEmployeeTab`/`_EmployeeAppTile` mati di `leave_tab.dart` sudah dihapus).
 - Nama `_isSupervisor` di `leave_tab.dart:46` sebenarnya `isApprover`.
 - Tidak ada UI pembatalan pengajuan oleh staff (tidak ada endpoint mobile untuk itu di mobile-api).

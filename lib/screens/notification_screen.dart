@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
 import '../services/notification_service.dart';
+import '../services/push_notification_service.dart';
 import '../services/notification_menu_hints.dart';
 import '../services/api_client.dart';
 import '../services/slip_deep_link.dart';
@@ -32,7 +33,11 @@ class _NotificationScreenState extends State<NotificationScreen>
   String _filter = 'Semua';
   String _scope = 'Diri Sendiri';
 
-  bool get _isSupervisor => AppSession.isSupervisor;
+  /// Segmen "Team Saya" hanya muncul bila ada notifikasi tim sungguhan.
+  /// Backend belum pernah mengirim notifikasi tim (`isTeam` selalu false),
+  /// jadi sebelumnya segmen ini selalu kosong untuk Supervisor.
+  bool get _isSupervisor =>
+      AppSession.isSupervisor && _notifications.any((n) => n.isTeam);
 
   static const _filters = [
     'Semua',
@@ -75,6 +80,7 @@ class _NotificationScreenState extends State<NotificationScreen>
     });
     try {
       final res = await NotificationService.myNotifications();
+      NotificationCenter.unreadCount.value = res.unreadCount;
       if (!mounted) return;
       setState(() {
         _notifications = res.items;
@@ -138,6 +144,7 @@ class _NotificationScreenState extends State<NotificationScreen>
       );
       return;
     }
+    NotificationCenter.unreadCount.value = 0;
     if (!mounted) return;
     setState(() {
       _notifications = _notifications
@@ -161,6 +168,10 @@ class _NotificationScreenState extends State<NotificationScreen>
       await NotificationService.markRead(id);
     } on ApiException catch (_) {
       // Diamkan; tandai lokal saja bila gagal.
+    }
+    final wasUnread = _notifications.any((n) => n.id == id && !n.isRead);
+    if (wasUnread && NotificationCenter.unreadCount.value > 0) {
+      NotificationCenter.unreadCount.value -= 1;
     }
     if (!mounted) return;
     setState(() {

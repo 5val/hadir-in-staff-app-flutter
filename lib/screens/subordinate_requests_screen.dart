@@ -52,17 +52,16 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
     }
   }
 
-  Future<void> _respond(LeaveRequest app, bool approve) async {
+  Future<void> _runRespond(
+      Future<void> Function() call, String okMsg, bool approve) async {
     try {
-      await SubordinateService.respondLeave(leaveId: app.id, approve: approve);
+      await call();
       if (!mounted) return;
       await _load();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(approve
-              ? 'Pengajuan ${app.employeeName ?? ''} disetujui.'
-              : 'Pengajuan ${app.employeeName ?? ''} ditolak.'),
+          content: Text(okMsg),
           backgroundColor:
               approve ? AppColors.brandLimeDark : AppColors.slate700,
         ),
@@ -75,42 +74,31 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
     }
   }
 
-  void _showActionDialog(bool approve, LeaveRequest app) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        icon: Icon(
-          approve ? Icons.check_circle_rounded : Icons.cancel_rounded,
-          color: approve ? AppColors.brandLimeDark : AppColors.danger,
-          size: 40,
-        ),
-        title: Text(approve ? 'Setujui Pengajuan?' : 'Tolak Pengajuan?'),
-        content: Text(
-          '${approve ? "Setujui" : "Tolak"} pengajuan dari ${app.employeeName}?',
-          style: AppText.body2,
-          textAlign: TextAlign.center,
-        ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  approve ? AppColors.brandLimeDark : AppColors.danger,
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              // Fase 8: benar-benar mengubah status di database (dan memicu
-              // potong sisa cuti + notifikasi ke staff) lewat backend.
-              _respond(app, approve);
-            },
-            child: Text(approve ? 'Setujui' : 'Tolak'),
-          ),
-        ],
-      ),
+  /// Fase 8: benar-benar mengubah status di database (dan memicu potong sisa
+  /// cuti + notifikasi ke staff) lewat backend. Tolak membawa alasan opsional.
+  Future<void> _decideLeave(LeaveRequest app, bool approve) async {
+    final name = app.employeeName ?? 'karyawan ini';
+    final res = await showSubordinateDecisionDialog(context,
+        approve: approve, name: name, kind: 'pengajuan');
+    if (res == null || !mounted) return;
+    await _runRespond(
+      () => SubordinateService.respondLeave(
+          leaveId: app.id, approve: approve, alasanTolak: res.alasan),
+      'Pengajuan $name ${approve ? 'disetujui' : 'ditolak'}.',
+      approve,
+    );
+  }
+
+  /// Lembur: hanya Manager (server menolak selain itu, lihat `canApproveLembur`).
+  Future<void> _decideLembur(SubordinateOvertime o, bool approve) async {
+    final res = await showSubordinateDecisionDialog(context,
+        approve: approve, name: o.staffNama, kind: 'lembur');
+    if (res == null || !mounted) return;
+    await _runRespond(
+      () => SubordinateService.respondLembur(
+          lemburId: o.id, approve: approve, alasanTolak: res.alasan),
+      'Lembur ${o.staffNama} ${approve ? 'disetujui' : 'ditolak'}.',
+      approve,
     );
   }
 
@@ -128,6 +116,9 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
     final apps = _data.leave
         .where((r) => r.status == RequestStatus.pending)
         .toList();
+    final lembur = _data.canApproveLembur
+        ? _data.lembur.where((o) => o.status == 'pending').toList()
+        : <SubordinateOvertime>[];
 
     return Scaffold(
       backgroundColor: AppColors.slate50,
@@ -180,7 +171,7 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
                   ),
                 ),
               )
-              : apps.isEmpty
+              : (apps.isEmpty && lembur.isEmpty)
           ? PullToRefresh(
             onRefresh: _load,
             child: Center(
@@ -215,24 +206,227 @@ class _SubordinateRequestsScreenState extends State<SubordinateRequestsScreen> {
             child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-              itemCount: apps.length,
+              itemCount: apps.length + lembur.length + (lembur.isEmpty ? 0 : 1),
               itemBuilder: (ctx, i) {
-                final app = apps[i];
+                if (i < apps.length) {
+                  final app = apps[i];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: SectionCard(
+                      padding: EdgeInsets.zero,
+                      child: _EmployeeAppTile(
+                        app: app,
+                        onApprove: () => _decideLeave(app, true),
+                        onReject: () => _decideLeave(app, false),
+                        allowanceLabel: _allowanceLabel,
+                      ),
+                    ),
+                  );
+                }
+                final j = i - apps.length;
+                if (j == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6, bottom: 10),
+                    child: Text('Pengajuan Lembur',
+                        key: const Key('lembur-section-title'),
+                        style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.slate700)),
+                  );
+                }
+                final o = lembur[j - 1];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: SectionCard(
                     padding: EdgeInsets.zero,
-                    child: _EmployeeAppTile(
-                      app: app,
-                      onApprove: () => _showActionDialog(true, app),
-                      onReject: () => _showActionDialog(false, app),
-                      allowanceLabel: _allowanceLabel,
+                    child: _LemburTile(
+                      item: o,
+                      onApprove: () => _decideLembur(o, true),
+                      onReject: () => _decideLembur(o, false),
                     ),
                   ),
                 );
               },
             ),
           ),
+    );
+  }
+}
+
+/// Dialog setujui/tolak pengajuan bawahan. Saat menolak ada kolom alasan
+/// (opsional di server, maks [SubordinateService.alasanTolakMax]).
+/// Mengembalikan null bila dibatalkan.
+Future<({String? alasan})?> showSubordinateDecisionDialog(
+  BuildContext context, {
+  required bool approve,
+  required String name,
+  required String kind,
+}) {
+  return showDialog<({String? alasan})>(
+    context: context,
+    builder: (_) => _DecisionDialog(approve: approve, name: name, kind: kind),
+  );
+}
+
+class _DecisionDialog extends StatefulWidget {
+  final bool approve;
+  final String name;
+  final String kind;
+  const _DecisionDialog(
+      {required this.approve, required this.name, required this.kind});
+
+  @override
+  State<_DecisionDialog> createState() => _DecisionDialogState();
+}
+
+class _DecisionDialogState extends State<_DecisionDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final approve = widget.approve;
+    return AlertDialog(
+      icon: Icon(
+        approve ? Icons.check_circle_rounded : Icons.cancel_rounded,
+        color: approve ? AppColors.brandLimeDark : AppColors.danger,
+        size: 40,
+      ),
+      title: Text(approve
+          ? 'Setujui ${_cap(widget.kind)}?'
+          : 'Tolak ${_cap(widget.kind)}?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${approve ? "Setujui" : "Tolak"} ${widget.kind} dari ${widget.name}?',
+            style: AppText.body2,
+            textAlign: TextAlign.center,
+          ),
+          if (!approve) ...[
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('alasan-tolak'),
+              controller: _ctrl,
+              maxLines: 3,
+              maxLength: SubordinateService.alasanTolakMax,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'Alasan penolakan (opsional)',
+              ),
+            ),
+          ],
+        ],
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor:
+                approve ? AppColors.brandLimeDark : AppColors.danger,
+          ),
+          onPressed: () => Navigator.pop(
+              context, (alasan: approve ? null : _ctrl.text.trim())),
+          child: Text(approve ? 'Setujui' : 'Tolak'),
+        ),
+      ],
+    );
+  }
+
+  static String _cap(String s) => s[0].toUpperCase() + s.substring(1);
+}
+
+class _LemburTile extends StatelessWidget {
+  final SubordinateOvertime item;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+  const _LemburTile(
+      {required this.item, required this.onApprove, required this.onReject});
+
+  @override
+  Widget build(BuildContext context) {
+    final f = DateFormat('dd MMM yyyy', 'id_ID');
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(item.staffNama,
+                    style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.slate900)),
+              ),
+              const Icon(Icons.more_time_rounded,
+                  size: 11, color: AppColors.brandNavyLight),
+              const SizedBox(width: 4),
+              Text('Lembur',
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.brandNavyLight)),
+            ],
+          ),
+          if (item.jabatan != '-')
+            Text(item.jabatan, style: AppText.caption),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.slate50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.date_range_rounded,
+                    size: 14, color: AppColors.slate700),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${f.format(item.tanggal)}, ${item.jamMulai} - ${item.jamSelesai}',
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.slate700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (item.alasan.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(item.alasan, style: AppText.body2.copyWith(fontSize: 12)),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _ActionBtn(
+                  label: 'Tolak', color: AppColors.danger, onTap: onReject),
+              const SizedBox(width: 8),
+              _ActionBtn(
+                label: 'Setujui',
+                color: AppColors.brandLimeDark,
+                onTap: onApprove,
+                filled: true,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

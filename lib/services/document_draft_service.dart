@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'session_service.dart';
+
 /// Satu dokumen yang sudah DIPILIH staff tapi BELUM diajukan.
 ///
 /// Ada dua bentuk draft:
@@ -78,8 +80,18 @@ class DocumentDraft {
 class DocumentDraftService {
   const DocumentDraftService._();
 
-  static const _prefsKey = 'document_drafts_v1';
+  /// Prefix kunci draft. Kunci sebenarnya per-staff: `<prefix>:<staffId>`
+  /// (F2) supaya draft sisa staff A tidak pernah muncul di staff B pada HP
+  /// yang sama. Kunci lama tanpa staffId (`document_drafts_v1`) sengaja
+  /// diabaikan saat membaca dan dibuang saat [clear].
+  static const _prefsKeyPrefix = 'document_drafts_v1';
   static const _folder = 'document_drafts';
+
+  @visibleForTesting
+  static Future<String> prefsKeyForCurrentStaff() async {
+    final staffId = await SessionService.getStaffId();
+    return '$_prefsKeyPrefix:${staffId == null || staffId.isEmpty ? '_none' : staffId}';
+  }
 
   /// Semua draft, dipetakan per jenis dokumen.
   ///
@@ -88,7 +100,7 @@ class DocumentDraftService {
   /// gagal saat diajukan.
   static Future<Map<String, DocumentDraft>> all() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
+    final raw = prefs.getString(await prefsKeyForCurrentStaff());
     if (raw == null || raw.isEmpty) return {};
 
     Map<String, dynamic> decoded;
@@ -186,21 +198,29 @@ class DocumentDraftService {
     await _write(drafts);
   }
 
-  /// Buang semua draft — dipanggil setelah pengajuan berhasil, dan saat
-  /// logout supaya berkas staff sebelumnya tidak tertinggal di HP.
+  /// Buang SEMUA draft (semua staff) beserta salinan berkasnya -- dipanggil
+  /// saat logout (`SessionService.clearSession`) supaya berkas staff
+  /// sebelumnya tidak tertinggal di HP.
   static Future<void> clear() async {
-    final drafts = await all();
-    for (final d in drafts.values) {
-      await _deleteFileOf(d);
-    }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefsKey);
+    for (final k in prefs.getKeys().toList()) {
+      if (k.startsWith(_prefsKeyPrefix)) await prefs.remove(k);
+    }
+    // Seluruh folder draft dibuang, bukan hanya berkas yang tercatat, jadi
+    // sisa berkas yatim (mis. dari kunci versi lama) ikut hilang.
+    try {
+      final dir = Directory(
+          '${(await getApplicationDocumentsDirectory()).path}/$_folder');
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (e) {
+      debugPrint('[doc-draft] gagal menghapus folder draft: $e');
+    }
   }
 
   static Future<void> _write(Map<String, DocumentDraft> drafts) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      _prefsKey,
+      await prefsKeyForCurrentStaff(),
       jsonEncode(drafts.map((k, v) => MapEntry(k, v.toJson()))),
     );
   }

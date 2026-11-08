@@ -149,7 +149,8 @@ class SalaryService {
         'alasan': alasan.trim(),
         if (dikirimKonfirmasiAt != null)
           'dikirimKonfirmasiAt': dikirimKonfirmasiAt,
-        if (bagian.isNotEmpty) 'bagian': bagian,
+        // Selalu dikirim: server mewajibkan minimal 1 (R9).
+        'bagian': bagian,
       };
 
   /// 409 = slip sudah berubah di server (HR memperbarui / menariknya). App

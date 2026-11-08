@@ -31,15 +31,15 @@ Status diturunkan dari satu record (`GET attendance/today`) di `AttendanceProvid
 - **Tidak ada**: liveness (kedip/gerak), pencocokan identitas, deteksi foto-dari-layar. Foto orang lain / foto dari foto lolos.
 - Di Web (`kIsWeb`) shutter aktif tanpa deteksi wajah.
 - Kamera: kamera **depan**, portrait terkunci. Foto dikirim sebagai base64 (`fotoMasuk`/`fotoKeluar` + `fotoMimeType`), disimpan server ke Google Drive; path file lokal tidak diterima server.
-- Bila `takePicture()` melempar, kode **tetap melanjutkan** tanpa file (`catch (_) {}`, komentar "untuk demo / device tanpa kamera") → `imagePath` null → request dikirim **tanpa foto** (server menerima foto opsional). Perilaku ini mungkin tidak diinginkan di produksi (**perlu keputusan produk**).
+- Bila `takePicture()` melempar (F3, diperbaiki 2026-11-08): aksi **digagalkan** -- snackbar "Gagal mengambil foto. Silakan coba lagi.", deteksi wajah dinyalakan lagi, tidak masuk ke overlay konfirmasi. `_confirm()` menolak bila `_capturedFile == null`, dan `runAttendanceEntry` menolak `CameraResult` tanpa `imagePath` ("Foto wajah tidak tersimpan"). Server sebenarnya menganggap foto **opsional** (`attendance.ts`: foto hanya disimpan bila ada), tetapi foto wajah adalah bukti absensi di sisi app, jadi app tetap memblokir tanpa foto. Tidak ada perubahan backend.
 
 ## 4. GPS palsu (mock location)
 
-Home membaca `Position.isMocked` (geolocator, Android) dan menolak mengaktifkan kartu Check-In/Out bila true (`_locationInRange = inRange && !pos.isMocked`, `home_tab.dart:326-328`), serta menampilkan peringatan "fake location terdeteksi". Keterbatasan:
+Sejak F4 (2026-11-08) keputusan "lokasi palsu = ditolak" ada di **satu tempat**: `LocationService.current()` memanggil `LocationService.guardMocked(position)`, yang mengembalikan `GpsResult.failed(GpsFailure.mockLocation)` bila `Position.isMocked` (geolocator, Android). Karena FAB, kartu Home, dan layar kamera semuanya membaca lokasi lewat `current()`, ketiganya memblokir. Kartu Home menampilkan peringatan "fake location terdeteksi" (`_fakeLocation = failure == mockLocation`) dan tidak mengaktifkan kartu Check-In/Out. Keterbatasan:
 
-- Pemeriksaan **hanya ada di Home**. Jalur **FAB** (`MainScreen._onFabTap`) dan layar kamera **tidak** memeriksa `isMocked`; server pun tidak menerima/menimbang flag itu. GPS palsu karenanya bisa lolos lewat FAB.
+- Server **tidak** menerima/menimbang flag `isMocked` (hanya geofence jarak) -- ini pagar sisi-app saja, bisa dilewati bila API dipanggil langsung. Tidak ada perubahan backend.
 - `isMocked` hanya terdeteksi di Android; tidak ada deteksi lain (root, developer options, emulator).
-- Di mode testing `fakePosition()` sengaja `isMocked: false`.
+- Di mode testing `fakePosition()` sengaja `isMocked: false` dan `current()` mengembalikannya sebelum `guardMocked` (bypass `TestingConfig` tetap satu-satunya).
 
 ## 5. Check-in
 
@@ -59,7 +59,7 @@ Home membaca `Position.isMocked` (geolocator, Android) dan menolak mengaktifkan 
 ## 7. Check-out
 
 - Tombol/kartu check-out aktif bila sudah check-in dan belum check-out **dan** GPS dalam radius (Home).
-- **FAB saja**: sebelum kamera, `refreshToday()` lalu, bila belum `isAfterEarliestCheckout` (jam pulang − toleransi pulang, memakai **snapshot shift saat check-in** bila ada) → dialog **"Belum Jam Pulang!"** (`showEarlyCheckoutDialog`). Tidak ditampilkan di hari libur kerja. **Kartu Home melewati dialog ini** (known issue: dua pintu tidak setara).
+- Sebelum kamera (F5, FAB **dan** kartu Home lewat `runAttendanceEntry`, `widgets/attendance_entry_flow.dart`): `refreshToday()` lalu, bila belum `isAfterEarliestCheckout` (jam pulang - toleransi pulang, memakai **snapshot shift saat check-in** bila ada) -> dialog **"Belum Jam Pulang!"** (`showEarlyCheckoutDialog`). Tidak ditampilkan di hari libur kerja. Check-in hari libur juga lewat konfirmasi hari libur yang sama di kedua pintu.
 - Server menolak check-out sebelum jamnya (`Belum bisa check-out. Check-out baru bisa dilakukan mulai pukul HH:mm`, 400) — jadi dialog di app adalah pengingat, server yang menegakkan.
 - Record hasil check-out (field `uangMakan`) → snackbar "Uang makan hari ini didapat" bila `uangMakan > 0` (app membaca `AttendanceRecord.uangMakan`, bukan blok `uangMakanInfo` dari respons).
 - Lembur dihitung server **sekali saat check-out** dan ditulis ke `Attendance.lembur` (jam terbayar final). App tidak menghitung lembur terbayar sendiri; yang dihitung app hanya timer tampilan (bagian 9).
@@ -104,9 +104,6 @@ Setelah absensi shift malam **ditutup sesudah lewat tengah malam**, `GET attenda
 
 ## 13. Known issues
 
-- Pemeriksaan GPS palsu hanya di Home (bagian 4); FAB tidak memeriksa.
-- Dialog "Belum Jam Pulang!" dan konfirmasi hari libur hanya di FAB; kartu Home melewatinya.
-- Foto opsional secara efektif bila `takePicture()` gagal (bagian 3).
 - Face detection bukan verifikasi identitas/liveness.
 - Bug `/today` null setelah shift malam ditutup (bagian 10; perlu dicek).
 - `_checkoutAllowed`/`_checkinAllowed` di `camera_checkin_screen.dart` konstanta `true` (sisa guard jam lama) dan branch `if (_canCheckout) return _buildCheckinBlockedAfterNoon()` di status `notCheckedIn` Home tak pernah jalan (kode mati dengan nama menyesatkan "setelah jam 12").

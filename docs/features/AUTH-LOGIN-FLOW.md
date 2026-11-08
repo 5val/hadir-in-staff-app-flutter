@@ -82,7 +82,9 @@ Membalik keputusan Sprint 2 "hanya admin" (2026-08-29): staff menggantinya sendi
 | JWT (`hadir_in_token`), staffId (`hadir_in_staff_id`) | `flutter_secure_storage` (Android: `encryptedSharedPreferences`) | ya |
 | `hadir_in_logged_in`, `hadir_in_session_active`, `hadir_in_employee_id` | `SharedPreferences` | ya |
 | `hadir_in_phone` (nomor terakhir) | `SharedPreferences` | **tidak** (sengaja: kenyamanan; bukan kredensial) |
-| `hadir_in_sound_notif_mode`, `notif_shown_ids`, `notif_local_alert_*`, `slip_drive_saved_ids`, draft dokumen | `SharedPreferences` / folder privat | **tidak**, kecuali jalur tertentu (lihat bawah) |
+| `hadir_in_sound_notif_mode`, `hadir_in_notif_enabled` | `SharedPreferences` | **tidak** (preferensi perangkat) |
+| `notif_shown_ids`, `notif_local_alert_*`, draft dokumen (`document_drafts_v1:<staffId>`) | `SharedPreferences` / folder privat | ya (`clearSession`) |
+| `slip_drive_saved_ids` | `SharedPreferences` | **tidak** |
 
 ## 9. Logout
 
@@ -92,11 +94,11 @@ Lima titik keluar (empat hidup, satu kode mati), **hasilnya tidak sama**:
 |-------|:---:|:---:|
 | `AccountTab._logout` (menu Logout) | ya | **tidak** |
 | `HomeTab._logout` (private, tidak dipanggil siapa pun — kode mati) | ya | tidak |
-| `PasscodeUnlockScreen._logout` | ya | **tidak** |
-| `OnboardingDocumentsScreen._logout` | ya | **tidak** |
+| `PasscodeUnlockScreen._logout` | ya | ya (lewat `clearSession`) |
+| `OnboardingDocumentsScreen._logout` | ya | ya (lewat `clearSession`) |
 | `MainScreen._logout` (hanya dari tampilan error "Gagal memuat data → Keluar") | ya | **ya** |
 
-`clearSession()` melakukan, berurutan: `FcmService.unregisterFromBackend()` (**dulu**, selagi JWT ada — `DELETE /fcm-token`) → hapus flag SharedPreferences → hapus JWT/staffId dari secure storage → `AppSession.clearUser()`. Komentar di `MainScreen._logout` menyatakan draft dokumen dan penanda notifikasi terikat staff dan harus dibersihkan "supaya tidak bocor ke staff berikutnya di HP yang sama" — tetapi jalur logout yang dipakai staff sehari-hari (Akun) tidak melakukannya. **Known issue** (rekomendasi: pindahkan pembersihan ke `SessionService.clearSession()`; belum dilakukan karena di luar cakupan dokumen).
+`SessionService.clearSession()` adalah SATU-SATUNYA rutin logout (F2, 2026-11-08) dan dipanggil semua pintu keluar. Berurutan: `FcmService.unregisterFromBackend()` (**dulu**, selagi JWT ada -- `DELETE /fcm-token`) -> `DocumentDraftService.clear()` (semua draft + folder berkasnya) -> `NotificationCenter.reset()` (penanda tampil, `unreadCount`, tray) -> hapus flag SharedPreferences -> hapus JWT/staffId dari secure storage -> `AppSession.clearUser()`. Pembersihan draft/notifikasi best-effort (kegagalannya tidak menggagalkan logout). Draft dokumen juga **per staff**: kunci prefs `document_drafts_v1:<staffId>`, jadi draft sisa staff A tidak pernah terbaca staff B walau pembersihan terlewat. Preferensi perangkat (mode bunyi, sakelar Notifikasi, nomor terakhir) sengaja tidak dihapus.
 
 ## 10. Token kedaluwarsa
 
@@ -104,9 +106,7 @@ Lima titik keluar (empat hidup, satu kode mati), **hasilnya tidak sama**:
 
 ## 11. Known issues
 
-- Logout tidak seragam (bagian 9).
 - `_showMockWaNotification` / `_waNotif*` bernama menyesatkan (bagian 3).
-- Teks kartu "Hubungi Admin" basi (bagian 7).
 - Mode `LoginDestination.leaveRequest` (re-verifikasi passcode di dalam `LoginScreen`) hanya terjangkau dari `LandingScreen` yang yatim → kode mati.
 - Tidak ada handler 401 global (bagian 10).
 - Enumerasi nomor lewat 404 di tiga endpoint (catatan backend).

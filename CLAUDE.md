@@ -40,7 +40,7 @@ lib/
 ├── theme/        # app_theme.dart (token desain). "app_theme copy.dart" = salinan cadangan, jangan diedit
 ├── widgets/      # common_widgets, open_session_dialog, early_checkout_dialog, staff_log_dialog, uploaded_file_image, work_date_picker
 assets/images/    # logo & maskot Hadir-In
-test/             # 14 file test, lihat docs/TESTING.md
+test/             # 19 file test, lihat docs/TESTING.md
 docs/             # lihat docs/README.md (indeks)
 ```
 Folder `lib/screens copy/` dan `pubspec copy.yaml` yang disebut di catatan lama TIDAK ada di working tree saat ini; yang masih ada hanya `lib/theme/app_theme copy.dart`.
@@ -78,7 +78,7 @@ flutter build apk                                  # / build ios, dst — lihat 
 - Build release saat ini memakai **debug signing** (TODO di `build.gradle.kts`) — belum siap Play Store.
 
 ## Known issues (ringkas; rincian & rujukan baris di docs/features/*)
-Hardcoded "Hubungi Admin/HR" (Budi Santoso + nomor) di tombol SOS Home; `http://` + IP LAN; debug signing di release; tab "Tim" mock tak terjangkau; nama `_showMockWaNotification` menyesatkan (OTP dikirim via email; banner hanya bila server mengembalikan `devCode`); UI Tolak slip masih mengizinkan kirim tanpa centang bagian (server mewajibkan ≥1, R9); persetujuan lembur oleh atasan tidak punya UI; logout dari tab Akun / layar Passcode / layar Onboarding tidak membersihkan draft dokumen & penanda notifikasi; Home check-in/out via kartu melewati dialog "Belum Jam Pulang!"/konfirmasi hari libur yang hanya ada di FAB; menu "Coming soon" (Tema/Bahasa/Ukuran Teks/Panduan/Syarat/Privasi).
+`http://` + IP LAN; debug signing di release; tab "Tim" mock tak terjangkau; nama `_showMockWaNotification` menyesatkan (OTP dikirim via email; banner hanya bila server mengembalikan `devCode`); menu "Coming soon" (Tema/Bahasa/Ukuran Teks/Panduan/Syarat/Privasi). **Diperbaiki 2026-11-08 (F1-F8):** Tolak slip wajib centang + catatan (R9); satu rutin logout `SessionService.clearSession()` + draft dokumen per staffId; foto wajib saat absen; `isMocked` diblokir di `LocationService.current()` untuk semua pintu; FAB & kartu Home memakai alur sama (`widgets/attendance_entry_flow.dart`); persetujuan lembur + alasan tolak di "Pengajuan Karyawan"; sakelar Notifikasi/Notifikasi Suara dibaca `PushNotificationService`, titik lonceng mengikuti `NotificationCenter.unreadCount`; SOS memakai `kontakAdminPhone`; nama app "Hadir-In".
 
 ## Repo terkait
 - `../hadir-in-api-backend-express-js` — endpoint mobile di `src/routes/mobile/*.ts`; referensi: `docs/mobile-api.md`, `docs/authorization.md`, `docs/api-contracts/sprint2.md` & `sprint3.md`.

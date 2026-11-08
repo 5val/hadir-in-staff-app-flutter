@@ -28,10 +28,8 @@ Penting: `Jabatan.isSupervisor` (atribut jabatan) **bukan** wewenang persetujuan
 
 ### Detail persetujuan atasan (apa yang benar-benar ada di UI)
 
-- Layar: `SubordinateRequestsScreen` (daftar pending, tombol **Setujui** / **Tolak**, dialog konfirmasi) dan `AllSubordinateLeaveHistoryScreen` (riwayat). Hanya memuat `data.leave` — field `lembur` pada respons #49 diabaikan.
-- Endpoint: `PATCH /staff/:id/subordinates/leave/:leaveId` `{action: "approve"|"reject"}` (#50). Server menolak pengajuan sendiri (403 `Anda tidak bisa memproses pengajuan sendiri`) dan pengajuan di luar lokasi yang diwenangi (403).
-- **Tolak tanpa alasan**: dialog hanya meminta konfirmasi Ya/Batal; `alasanTolak` didukung `SubordinateService.respondLeave` tetapi tidak ada kolom input di UI, jadi staff yang ditolak tidak mendapat alasan dari jalur app ini.
-- **Lembur bawahan tidak punya UI.** `SubordinateService.respondLembur` (`subordinate_service.dart:134`) ada, tetapi tidak dipanggil dari layar mana pun; `SubordinateRequests.canApproveLembur` dibaca dari server tetapi tidak dipakai. Konsekuensinya, perubahan backend 2026-11-06 ("reject lembur bawahan sekarang menyimpan `alasanTolak`", mobile-api #51) **tidak berdampak ke app ini**: app tidak pernah mengirim `alasanTolak` untuk lembur. Persetujuan lembur dilakukan lewat portal web.
+- Layar: `SubordinateRequestsScreen` (daftar pending cuti/izin + bagian "Pengajuan Lembur" bila `canApproveLembur`, tombol **Setujui** / **Tolak**, dialog konfirmasi dengan alasan tolak opsional) dan `AllSubordinateLeaveHistoryScreen` (riwayat).
+- Endpoint: `PATCH /staff/:id/subordinates/leave/:leaveId` `{action, alasanTolak?}` (#50) dan `.../lembur/:id` (#51). Server menolak pengajuan sendiri (403 `Anda tidak bisa memproses pengajuan sendiri`) dan pengajuan di luar lokasi yang diwenangi (403).
 - Pemuatan: `SubordinateService.load()` dipanggil `LeaveTab` saat dibuat dan saat tarik-refresh; `isApprover=false` untuk staff tanpa grant (server membalas 200 kosong, bukan error).
 
 ## `UserRole.admin` — tidak terpakai
@@ -52,7 +50,5 @@ Pelaku yang "mengelola" (Admin/HRD, Manager sebagai pengelola) bekerja di **port
 ## Known issues
 
 - Tab "Tim" mock + cabang `UserRole.admin` adalah kode mati; menyesatkan saat membaca.
-- Persetujuan lembur atasan tidak punya UI (service sudah ada).
-- Tolak cuti/izin bawahan tanpa kolom alasan.
-- Toggle "Diri Sendiri / Tim" di Notifikasi untuk `Jabatan.isSupervisor` selalu menampilkan sisi Tim kosong (`AppNotification.isTeam` tidak pernah true dari API, `models.dart:1534`).
+- Toggle "Diri Sendiri / Tim" di Notifikasi kini hanya muncul bila ada notifikasi `isTeam` sungguhan (API belum pernah mengirimnya, jadi praktis tersembunyi).
 - Nama `_isSupervisor` di `leave_tab.dart:46` sebenarnya berarti `isApprover` (menyesatkan).

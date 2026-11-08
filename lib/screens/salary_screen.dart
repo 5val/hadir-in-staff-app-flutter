@@ -2689,9 +2689,11 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
           if (_checked.contains(i)) widget.items[i].text,
       ];
 
-  /// Valid bila ada bagian yang dicentang ATAU catatan cukup panjang.
+  /// Valid bila ADA bagian yang dicentang DAN catatan cukup panjang. Server
+  /// (slipTolakSchema) mewajibkan `bagian` minimal 1 -- tanpa centang request
+  /// ditolak 400 (R9).
   bool get _valid =>
-      _checked.isNotEmpty || _controller.text.trim().length >= _min;
+      _checked.isNotEmpty && _controller.text.trim().length >= _min;
 
   @override
   Widget build(BuildContext context) {
@@ -2764,9 +2766,10 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 border: const OutlineInputBorder(),
-                hintText: _checked.isEmpty
-                    ? 'Catatan (minimal 5 karakter bila tidak ada yang dicentang)'
-                    : 'Catatan tambahan (opsional), mis. "kurang 2 jam"',
+                hintText: 'Catatan (minimal 5 karakter), mis. "kurang 2 jam"',
+                helperText: _checked.isEmpty
+                    ? 'Centang minimal satu bagian yang salah.'
+                    : null,
               ),
             ),
           ],

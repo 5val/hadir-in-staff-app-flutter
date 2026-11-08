@@ -21,6 +21,11 @@ enum GpsFailure {
   permissionDeniedForever,
   timeout,
   unknown,
+
+  /// Android mendeteksi lokasi palsu (`Position.isMocked`), mis. aplikasi
+  /// fake GPS. Diblokir di app untuk SEMUA pintu absensi; server tidak ikut
+  /// menimbang flag ini (hanya geofence), jadi ini pagar sisi-app saja.
+  mockLocation,
 }
 
 extension GpsFailureMessage on GpsFailure {
@@ -36,6 +41,8 @@ extension GpsFailureMessage on GpsFailure {
         return 'Gagal mendapatkan sinyal GPS. Coba pindah ke area yang lebih terbuka.';
       case GpsFailure.unknown:
         return 'Gagal membaca lokasi GPS. Coba lagi.';
+      case GpsFailure.mockLocation:
+        return 'Lokasi palsu (fake GPS) terdeteksi. Matikan aplikasi lokasi palsu lalu coba lagi.';
     }
   }
 }
@@ -87,7 +94,7 @@ class LocationService {
           timeLimit: Duration(seconds: 20),
         ),
       );
-      return GpsResult.success(position);
+      return guardMocked(position);
     } on LocationServiceDisabledException {
       return const GpsResult.failed(GpsFailure.serviceDisabled);
     } on PermissionDeniedException {
@@ -96,6 +103,14 @@ class LocationService {
       return const GpsResult.failed(GpsFailure.timeout);
     }
   }
+
+  /// Satu-satunya tempat keputusan "lokasi palsu = ditolak" (F4). Dipakai
+  /// `current()` sehingga FAB, kartu Home, dan layar kamera semuanya ikut
+  /// memblokir. Mode testing tidak melewati sini (posisinya `fakePosition()`,
+  /// `isMocked: false`), jadi bypass TestingConfig tetap satu-satunya.
+  static GpsResult guardMocked(Position position) => position.isMocked
+      ? const GpsResult.failed(GpsFailure.mockLocation)
+      : GpsResult.success(position);
 
   /// Posisi palsu untuk MODE TESTING (lihat [TestingConfig]).
   ///

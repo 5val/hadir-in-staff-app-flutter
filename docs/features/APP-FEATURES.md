@@ -42,7 +42,7 @@ Tap notifikasi / banner → `_onTabTap(index)` (peta di [NOTIFICATION-SYSTEM.md]
 | Elemen | Aksi / isi | Endpoint / sumber | Gerbang |
 |--------|-----------|-------------------|---------|
 | App bar: ikon riwayat | buka `AllAttendanceHistoryScreen` (kalender bulan, `limit: 100`) | `GET attendance?month=YYYY-MM&limit=100` (#16) | — |
-| App bar: lonceng | buka `NotificationScreen` | `GET notifications` (#39) | titik merah selalu tampil (bukan unread count) |
+| App bar: lonceng | buka `NotificationScreen` | `GET notifications` (#39) | titik merah hanya bila `NotificationCenter.unreadCount > 0` (diisi polling `MainScreen` + layar Notifikasi) |
 | Banner Hari Libur Kerja | info lembur hari libur disetujui | kalender (#35) | hanya bila `hariIni.kerjaHariLibur` |
 | Banner Rekening belum diisi | buka `RekeningScreen` | profil | hilang bila `rekeningLengkap` |
 | Banner MODE TESTING | penanda | `TestingConfig` | hanya `--dart-define=TESTING_MODE=true` |
@@ -53,9 +53,9 @@ Tap notifikasi / banner → `_onTabTap(index)` (peta di [NOTIFICATION-SYSTEM.md]
 | Tombol Check-Out | buka kamera → `POST check-out` (#11) | | lihat catatan "kartu vs FAB" di bawah |
 | Kartu Detail Kehadiran, Timeline | jam/lokasi/foto absen, uang makan | `attendance/today` (#9) | setelah check-in |
 | Tarik-refresh | muat ulang profil, absensi hari ini, cek ulang lokasi | #6, #9 | — |
-| Tombol **SOS** (FAB Home) | dialog "Hubungi Admin/HR" | **hardcode** | lihat Known issues |
+| Tombol **SOS** (FAB Home) | dialog "Hubungi Admin/HR": nomor `kontakAdminPhone` office (profil), tombol "Hubungi WhatsApp" membuka `wa.me` (fallback salin nomor); bila kosong dialog berisi info "belum diatur" tanpa tombol hubungi | profil (#6) | F8 |
 
-**Dua pintu absen.** FAB MainScreen dan kartu Home sama-sama berujung ke kamera + `check-in`/`check-out`, tetapi **tidak identik**: dialog konfirmasi hari libur (`_confirmHolidayWorkCheckIn`) dan dialog "Belum Jam Pulang!" (`showEarlyCheckoutDialog`) hanya ada di jalur **FAB** (`main_screen.dart:717,746`); jalur kartu Home (`_openCameraForCheckIn/_openCameraForCheckOut`) tidak memunculkannya. Dialog "sesi menggantung" (`showOpenSessionDialog`) ada di keduanya untuk check-in. Aturan rinci: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md).
+**Dua pintu absen (setara sejak F5).** FAB MainScreen dan kartu Home memakai SATU alur `runAttendanceEntry` (`widgets/attendance_entry_flow.dart`): sesi menggantung -> konfirmasi hari libur -> dialog "Belum Jam Pulang!" -> kamera -> GPS segar (+ tolak lokasi palsu, F4) -> pemanggil mengirim ke server. Foto wajib (F3). Aturan rinci: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md).
 
 Status absensi lokal (`AttendanceProviderStatus`): `notCheckedIn` → `checkedIn` → `onBreak` ⇄ `breakEnded` → `checkedOut`; semuanya diturunkan dari satu record `attendance/today` di `AttendanceProvider.hydrateFromToday` (tidak ada jalur lain yang menebak status).
 
@@ -71,7 +71,7 @@ Status absensi lokal (`AttendanceProviderStatus`): `notCheckedIn` → `checkedIn
 | Riwayat | riwayat cuti/izin (filter jenis/status) + riwayat lembur | `GET leave` (#22), `GET lembur` (#26) |
 | Header "See My Team" | hanya `isApprover`; buka `SubordinateRequestsScreen` (Setujui/Tolak cuti-izin bawahan) + riwayat tim | `GET subordinates/requests` (#49), `PATCH subordinates/leave/:id` (#50) |
 
-Dead code di file ini: `_buildEmployeeTab()` (sub-tab "Pengajuan Karyawan" versi lama) tidak dipanggil dari `_buildTabContent` (hanya case 0–3). Persetujuan **lembur** oleh atasan (`SubordinateService.respondLembur`, `subordinate_service.dart:134`) **tidak dipanggil dari UI mana pun** — lihat [ROLE-MATRIX.md](ROLE-MATRIX.md).
+Persetujuan **lembur** oleh Manager sekarang ada di `SubordinateRequestsScreen` ("Pengajuan Karyawan"): bagian "Pengajuan Lembur" tampil bila `canApproveLembur`; tolak (cuti/izin/lembur) punya kolom alasan opsional (`alasanTolak`, maks 500). `_buildEmployeeTab()` dan `_EmployeeAppTile` mati di `leave_tab.dart` sudah dihapus. Lihat [CUTI-IZIN-LEMBUR.md](CUTI-IZIN-LEMBUR.md).
 
 ## 5. Gaji (`salary_screen.dart`)
 
@@ -97,8 +97,8 @@ Daftar slip (`SalaryScreen`) + detail (`SalaryDetailScreen`). Dipakai di tab Gaj
 | Dokumen Saya | `OnboardingDocumentsScreen(manageMode: true)`; badge bila ada dokumen ditolak | #19, #17, #20, #21 |
 | Riwayat Kehadiran | `AllAttendanceHistoryScreen` | #16 |
 | Riwayat Gaji | `SalaryScreen(isFromAccount: true)` | #28 |
-| Notifikasi (switch) | **tidak berfungsi** — state lokal `_notifEnabled`, tidak disimpan, tidak dibaca service mana pun | — |
-| Notifikasi Suara | dialog Sound/Vibration/Silent, disimpan ke `SharedPreferences` — **tidak dibaca** `PushNotificationService` (kosmetik; perlu dicek bila ada niat memakainya) | — |
+| Notifikasi (switch) | disimpan (`SessionService.saveNotifEnabled`) dan dibaca `PushNotificationService.show` lewat `NotificationDelivery.decide`: mati = notifikasi umum tidak ditampilkan; pengingat absensi (saluran terpisah) tetap muncul | - |
+| Notifikasi Suara | dialog Sound/Vibration/Silent, disimpan dan DIBACA `PushNotificationService` (saluran Android per mode: `hadirin_umum_sound/_vibration/_silent`, dst.) | - |
 | Ubah Passcode | dialog passcode lama + baru + konfirmasi | `POST auth/staff/set-passcode` (#5) |
 | Keunggulan Hadir-In | dialog statis | — |
 | Logout | konfirmasi → `SessionService.clearSession()` → LoginScreen | `DELETE fcm-token` (#43) |
@@ -155,10 +155,5 @@ Rekening (`RekeningScreen`, dari Akun → Informasi Akun atau banner Home): isi/
 
 ## 10. Known issues (layar)
 
-- Tombol SOS Home menampilkan kontak **hardcode** "Budi Santoso · Admin HR · +62 811-122-2333" (`home_tab.dart:568-654`), dan tombol "Hubungi WhatsApp" hanya menampilkan snackbar "Menghubungi via WhatsApp..." (tidak membuka WhatsApp). Kontak admin yang benar (`kontakAdminPhone`) hanya dipakai di kartu "Hubungi Admin" tab Akun.
-- Teks kartu "Hubungi Admin" di Akun (`account_tab.dart:745`) masih berkata nomor HP "hanya bisa diganti oleh admin kantor", padahal ada tombol Ubah Nomor HP mandiri di Informasi Akun.
-- Switch Notifikasi dan Notifikasi Suara kosmetik (lihat bagian 6).
-- Titik merah lonceng Home selalu tampil.
-- Dua pintu absen berbeda gerbangnya (bagian 3).
 - Tab "Tim" mock tak terjangkau; layar yatim (bagian 9) menambah beban baca kode.
 - Komentar di `salary_screen.dart` build (rumus "Take Home Pay = Gaji Bersih + Tunjangan - Potongan") sudah basi; THP = `gajiNetto` server (lihat [SLIP-GAJI-FLOW.md](SLIP-GAJI-FLOW.md)).

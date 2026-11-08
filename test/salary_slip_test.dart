@@ -137,8 +137,14 @@ void _sprint3Tests() {
 
     test('konfirmasi and tolak bodies carry the exact ISO string', () {
       expect(SalaryService.konfirmasiBody(iso), {'dikirimKonfirmasiAt': iso});
-      expect(SalaryService.tolakBody('  salah hitung  ', iso),
-          {'alasan': 'salah hitung', 'dikirimKonfirmasiAt': iso});
+      expect(
+          SalaryService.tolakBody('  salah hitung  ', iso,
+              bagian: ['col:gajiPokok']),
+          {
+            'alasan': 'salah hitung',
+            'dikirimKonfirmasiAt': iso,
+            'bagian': ['col:gajiPokok'],
+          });
     });
 
     test('susunAlasanTolak lists the checked parts, then the note', () {
@@ -159,7 +165,9 @@ void _sprint3Tests() {
 
     test('without the field the bodies stay as the old app sent them', () {
       expect(SalaryService.konfirmasiBody(null), isNull);
-      expect(SalaryService.tolakBody('salah hitung', null), {'alasan': 'salah hitung'});
+      // R9: `bagian` selalu ikut terkirim (server mewajibkan minimal 1).
+      expect(SalaryService.tolakBody('salah hitung', null),
+          {'alasan': 'salah hitung', 'bagian': <String>[]});
     });
 
     test('only HTTP 409 counts as a stale-slip conflict', () {

@@ -1,5 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'document_draft_service.dart';
 import 'fcm_service.dart';
+import 'push_notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -90,11 +92,25 @@ class SessionService {
   /// Nomor HP sengaja TIDAK dihapus — murni kenyamanan (kolom nomor terisi
   /// otomatis di layar login). Ia bukan kredensial: tanpa passcode/OTP nomor
   /// itu tidak memberi akses apa pun.
+  ///
+  /// SATU-SATUNYA rutin logout (F2): semua pintu keluar (tab Akun, layar
+  /// Passcode, layar Onboarding, MainScreen) memanggil ini, jadi tidak ada
+  /// jalur yang lupa membersihkan data staff sebelumnya.
   static Future<void> clearSession() async {
     // WAJIB duluan, selagi JWT masih ada: endpoint pencabutannya ber-auth.
     // Kalau dilewatkan, notifikasi pribadi staff ini tetap mendarat di HP
     // sampai ada staff lain yang login dan mengambil alih tokennya.
     await FcmService.unregisterFromBackend();
+
+    // Data lokal milik staff: draft dokumen (+ berkasnya) dan penanda/tray
+    // notifikasi. Best-effort -- kegagalan membersihkan tidak boleh
+    // menggagalkan logout.
+    try {
+      await DocumentDraftService.clear();
+    } catch (_) {}
+    try {
+      await NotificationCenter.reset();
+    } catch (_) {}
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyLoggedIn);
@@ -106,6 +122,19 @@ class SessionService {
   }
 
   static const _keySoundNotifMode = 'hadir_in_sound_notif_mode';
+  static const _keyNotifEnabled = 'hadir_in_notif_enabled';
+
+  /// Sakelar "Notifikasi" di tab Akun. Preferensi perangkat: TIDAK dihapus
+  /// saat logout (sama seperti mode bunyi). Default aktif.
+  static Future<bool> getNotifEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyNotifEnabled) ?? true;
+  }
+
+  static Future<void> saveNotifEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyNotifEnabled, enabled);
+  }
 
   static Future<String> getSavedPhone() async {
     final prefs = await SharedPreferences.getInstance();

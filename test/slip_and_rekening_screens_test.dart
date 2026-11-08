@@ -135,7 +135,7 @@ void main() {
   });
 
   group('SalaryDetailScreen -- tolak dialog with per-part checkboxes', () {
-    testWidgets('lists slip parts, submit disabled until a part is checked or a note is typed', (tester) async {
+    testWidgets('lists slip parts; submit needs BOTH a ticked part and a note (R9)', (tester) async {
       await pumpDetail(tester, slipWith('menunggu_konfirmasi'));
       await tester.tap(find.text('Ada yang salah'));
       await tester.pumpAndSettle();
@@ -150,16 +150,24 @@ void main() {
 
       FilledButton send() => tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Kirim ke HR'));
       expect(send().onPressed, isNull);
+      expect(find.text('Centang minimal satu bagian yang salah.'), findsOneWidget);
 
-      await tester.tap(gajiPokok);
-      await tester.pump();
-      expect(send().onPressed, isNotNull);
-
+      // Centang saja, tanpa catatan: belum cukup.
       await tester.tap(gajiPokok);
       await tester.pump();
       expect(send().onPressed, isNull);
+      expect(find.text('Centang minimal satu bagian yang salah.'), findsNothing);
 
+      // Catatan tanpa centang: server akan menolak 400 (bagian wajib) -> tetap mati.
+      await tester.tap(gajiPokok);
+      await tester.pump();
       await tester.enterText(find.byKey(const Key('tolak-catatan')), 'salah hitung');
+      await tester.pump();
+      expect(send().onPressed, isNull,
+          reason: 'catatan tanpa bagian dicentang harus tetap mati (R9)');
+
+      // Centang + catatan: aktif.
+      await tester.tap(gajiPokok);
       await tester.pump();
       expect(send().onPressed, isNotNull);
     });
@@ -192,7 +200,7 @@ void main() {
   });
 
   group('SalaryDetailScreen -- reject dialog', () {
-    testWidgets('"Kirim ke HR" stays disabled until the reason has at least 5 characters', (tester) async {
+    testWidgets('"Kirim ke HR" stays disabled until a part is ticked AND the note has at least 5 characters', (tester) async {
       await pumpDetail(tester, slipWith('menunggu_konfirmasi'));
       await tester.tap(find.text('Ada yang salah'));
       await tester.pumpAndSettle();
@@ -200,6 +208,9 @@ void main() {
 
       FilledButton send() => tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Kirim ke HR'));
       expect(send().onPressed, isNull);
+
+      await tester.tap(find.byKey(const ValueKey('tolak-item-0')));
+      await tester.pump();
 
       await tester.enterText(find.byType(TextField), 'sala');
       await tester.pump();

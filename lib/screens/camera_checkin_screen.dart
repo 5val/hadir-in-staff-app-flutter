@@ -438,7 +438,18 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
     try {
       _capturedFile = await _cameraCtrl!.takePicture();
     } catch (_) {
-      // Jika gagal ambil foto tetap lanjut (untuk demo / device tanpa kamera)
+      // F3: foto wajah adalah bukti absensi di sisi app -- gagal ambil foto
+      // TIDAK boleh lanjut ke konfirmasi tanpa foto. Beri tahu staff dan
+      // izinkan mengulang (deteksi wajah dinyalakan lagi).
+      _capturedFile = null;
+      if (!mounted) return;
+      setState(() => _processingCapture = false);
+      _restartFaceStream();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Gagal mengambil foto. Silakan coba lagi.'),
+        backgroundColor: AppColors.danger,
+      ));
+      return;
     }
 
     if (!_locationChecked) await _fetchLocation();
@@ -560,6 +571,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   // peringatan itu sudah pernah ditampilkan (atau memang tidak perlu),
   // jadi tidak diulang lagi di sini.
   void _confirm() {
+    // F3: tanpa foto tidak ada konfirmasi (lihat juga runAttendanceEntry).
+    if (_capturedFile == null) {
+      _retake();
+      return;
+    }
     Navigator.pop(
         context,
         CameraResult(
@@ -579,7 +595,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       _faceInCenter = false;
     });
     _fetchLocation();
-    // Restart image stream untuk face detection
+    _restartFaceStream();
+  }
+
+  /// Nyalakan lagi deteksi wajah setelah foto diulang atau gagal diambil.
+  void _restartFaceStream() {
     if (!kIsWeb &&
         _faceDetector != null &&
         _cameraCtrl != null &&

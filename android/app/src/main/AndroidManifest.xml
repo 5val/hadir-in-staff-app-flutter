@@ -29,7 +29,7 @@
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
-        android:label="app_staff_flutter"
+        android:label="Hadir-In"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

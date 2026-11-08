@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'notification_menu_hints.dart';
 import 'notification_service.dart';
+import 'session_service.dart';
 
 /// Notifikasi NYATA di HP (status bar / notification tray), bukan sekadar
 /// daftar di dalam app.
@@ -40,27 +41,35 @@ class PushNotificationService {
   static void Function(String? payload)? onNotificationTap;
 
   /// Saluran notifikasi umum (persetujuan cuti, dokumen, gaji, dst).
-  static const AndroidNotificationChannel _generalChannel =
+  /// Android 8+ menyimpan suara/getar di SALURAN, bukan per notifikasi, jadi
+  /// tiap mode "Notifikasi Suara" (Sound/Vibration/Silent) punya saluran
+  /// sendiri -- id berakhiran mode ([NotificationDelivery.channelSuffix]).
+  static AndroidNotificationChannel _generalChannel(NotificationDelivery d) =>
       AndroidNotificationChannel(
-    'hadirin_umum',
-    'Notifikasi Hadir-In',
-    description:
-        'Pemberitahuan persetujuan cuti, status dokumen, gaji, dan info lain.',
-    importance: Importance.high,
-  );
+        'hadirin_umum${d.channelSuffix}',
+        'Notifikasi Hadir-In (${d.modeLabel})',
+        description:
+            'Pemberitahuan persetujuan cuti, status dokumen, gaji, dan info lain.',
+        importance: Importance.high,
+        playSound: d.playSound,
+        enableVibration: d.vibrate,
+      );
 
   /// Saluran absensi — peringatan yang harus segera dilihat staff (batas
   /// lembur terlewat, lupa check-out). Dipisah supaya staff bisa mematikan
   /// notifikasi umum tanpa ikut mematikan peringatan absensi.
-  static const AndroidNotificationChannel _attendanceChannel =
+  static AndroidNotificationChannel _attendanceChannel(
+          NotificationDelivery d) =>
       AndroidNotificationChannel(
-    'hadirin_absensi',
-    'Pengingat Absensi',
-    description:
-        'Pengingat check-out, batas maksimal lembur, dan istirahat yang belum '
-        'ditutup.',
-    importance: Importance.max,
-  );
+        'hadirin_absensi${d.channelSuffix}',
+        'Pengingat Absensi (${d.modeLabel})',
+        description:
+            'Pengingat check-out, batas maksimal lembur, dan istirahat yang belum '
+            'ditutup.',
+        importance: Importance.max,
+        playSound: d.playSound,
+        enableVibration: d.vibrate,
+      );
 
   static bool get isInitialized => _initialized;
   static bool get permissionGranted => _permissionGranted;
@@ -88,8 +97,12 @@ class PushNotificationService {
       final androidImpl = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
       if (androidImpl != null) {
-        await androidImpl.createNotificationChannel(_generalChannel);
-        await androidImpl.createNotificationChannel(_attendanceChannel);
+        for (final mode in NotificationDelivery.modes) {
+          final d = NotificationDelivery.decide(
+              enabled: true, soundMode: mode, attendanceAlert: false);
+          await androidImpl.createNotificationChannel(_generalChannel(d));
+          await androidImpl.createNotificationChannel(_attendanceChannel(d));
+        }
       }
 
       _initialized = true;
@@ -141,7 +154,26 @@ class PushNotificationService {
     if (!_initialized) await init();
     if (!_initialized) return;
 
-    final channel = attendanceAlert ? _attendanceChannel : _generalChannel;
+    // Pengaturan staff di tab Akun (F7): sakelar "Notifikasi" dan mode
+    // "Notifikasi Suara". Berlaku juga untuk push FCM karena semuanya lewat
+    // sini. Peringatan absensi tetap tampil walau sakelar mati (lihat
+    // [NotificationDelivery.decide]).
+    NotificationDelivery delivery;
+    try {
+      delivery = NotificationDelivery.decide(
+        enabled: await SessionService.getNotifEnabled(),
+        soundMode: await SessionService.getSoundNotifMode(),
+        attendanceAlert: attendanceAlert,
+      );
+    } catch (_) {
+      delivery = NotificationDelivery.decide(
+          enabled: true, soundMode: 'Sound', attendanceAlert: attendanceAlert);
+    }
+    if (!delivery.show) return;
+
+    final channel = attendanceAlert
+        ? _attendanceChannel(delivery)
+        : _generalChannel(delivery);
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
         channel.id,
@@ -154,11 +186,13 @@ class PushNotificationService {
         // baris dan justru bagian "buka menu ..." yang hilang.
         styleInformation: BigTextStyleInformation(body),
         ticker: title,
+        playSound: delivery.playSound,
+        enableVibration: delivery.vibrate,
       ),
-      iOS: const DarwinNotificationDetails(
+      iOS: DarwinNotificationDetails(
         presentAlert: true,
         presentBadge: true,
-        presentSound: true,
+        presentSound: delivery.playSound,
       ),
     );
 
@@ -182,6 +216,45 @@ class PushNotificationService {
   }
 }
 
+/// Keputusan murni: tampilkan atau tidak, dan bersuara/getar atau tidak,
+/// dari pengaturan staff. Dipisah supaya bisa dites tanpa plugin.
+class NotificationDelivery {
+  final bool show;
+  final bool playSound;
+  final bool vibrate;
+  final String mode;
+
+  const NotificationDelivery(
+      {required this.show,
+      required this.playSound,
+      required this.vibrate,
+      required this.mode});
+
+  static const modes = ['Sound', 'Vibration', 'Silent'];
+
+  String get channelSuffix => '_${mode.toLowerCase()}';
+  String get modeLabel => mode;
+
+  /// - `enabled == false` menyembunyikan notifikasi UMUM; peringatan absensi
+  ///   ([attendanceAlert]: batas lembur, lupa check-out) tetap tampil karena
+  ///   salurannya memang dipisah agar tidak ikut mati.
+  /// - Mode: Sound = suara + getar, Vibration = getar saja, Silent = hening.
+  ///   Nilai tak dikenal diperlakukan sebagai Sound.
+  static NotificationDelivery decide({
+    required bool enabled,
+    required String soundMode,
+    required bool attendanceAlert,
+  }) {
+    final mode = modes.contains(soundMode) ? soundMode : 'Sound';
+    return NotificationDelivery(
+      show: enabled || attendanceAlert,
+      playSound: mode == 'Sound',
+      vibrate: mode != 'Silent',
+      mode: mode,
+    );
+  }
+}
+
 /// Satu pintu untuk MEMUNCULKAN notifikasi ke HP staff.
 ///
 /// Dua sumber:
@@ -196,6 +269,11 @@ class PushNotificationService {
 /// jadi staff selalu diberi tahu MENU MANA yang harus dibuka.
 class NotificationCenter {
   const NotificationCenter._();
+
+  /// Jumlah notifikasi server yang belum dibaca staff -- sumber titik merah
+  /// lonceng di Home. Diperbarui tiap penarikan ([syncFromServer]) dan oleh
+  /// layar Notifikasi saat memuat/menandai dibaca. 0 = tidak ada titik.
+  static final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
 
   static const _seenKey = 'notif_shown_ids';
   static const _localAlertPrefix = 'notif_local_alert_';
@@ -221,6 +299,7 @@ class NotificationCenter {
   static Future<int?> syncFromServer({NotificationResult? prefetched}) async {
     try {
       final result = prefetched ?? await NotificationService.myNotifications();
+      unreadCount.value = result.unreadCount;
 
       final prefs = await SharedPreferences.getInstance();
       final seen = prefs.getStringList(_seenKey) ?? const <String>[];
@@ -369,6 +448,7 @@ class NotificationCenter {
   /// Lupakan semua penanda — dipakai saat logout supaya staff berikutnya di
   /// HP yang sama tidak kehilangan notifikasinya (id staff lain).
   static Future<void> reset() async {
+    unreadCount.value = 0;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_seenKey);

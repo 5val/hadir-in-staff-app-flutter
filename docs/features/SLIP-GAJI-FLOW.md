@@ -48,9 +48,9 @@ Dialog `_TolakSlipDialog` ("Apa yang salah?"):
 - Setelah sukses: lokal `statusSlip: ditolak`, `bisaTolak: false`, `bagianTolak` terisi; snackbar "Slip ditolak. HR akan memeriksa dan merevisinya."
 - **Tolak hanya sekali** per slip (`ditolakAt`). Setelah HR memperbaiki dan mengirim ulang, tombol "Ada yang salah" hilang (`bisaTolak` false) dan staff hanya bisa Setujui. Bagian yang ditolak ditandai ikon ⓘ **merah**, bagian yang direvisi HR ⓘ **hijau** (ketuk untuk detail; daftar "Slip sudah direvisi HR" merangkum semua perubahan).
 
-### Known issue (R9): UI mengizinkan kirim tanpa centang, server menolak
+### R9 (diperbaiki 2026-11-08): kirim Tolak wajib centang + catatan
 
-`_TolakSlipDialogState._valid` = `_checked.isNotEmpty || catatan.trim().length >= 5` (`salary_screen.dart:2693`) — jadi tombol **Kirim ke HR aktif walau tidak ada bagian dicentang**, asal catatan ≥ 5 karakter (hint field bahkan menyebut "minimal 5 karakter bila tidak ada yang dicentang"). Tetapi sejak 2026-10-25 server mewajibkan **`bagian` minimal 1** (`slipTolakSchema`, [sprint3.md "Penggajian follow-up 2026-10-25" #1](../../../hadir-in-api-backend-express-js/docs/api-contracts/sprint3.md)): request tanpa centang → **400 "Pilih minimal satu bagian slip yang ditolak"**, ditampilkan sebagai snackbar. Sisi daftar centang (hanya Gaji pokok/Lembur/Tunjangan/Fasilitas) sudah sesuai R9; yang belum: tombol Kirim harus mensyaratkan ≥ 1 centang **dan** alasan ≥ 5. Penugasan R9 disebut menunggu rekan satu tim; perbaikannya ada di kode, bukan di dokumen ini. Bukan perubahan backend.
+`_TolakSlipDialogState._valid` = `_checked.isNotEmpty && catatan.trim().length >= 5`: tombol **Kirim ke HR** hanya aktif bila **minimal satu bagian dicentang DAN catatan >= 5 karakter**; tanpa centang tampil helper "Centang minimal satu bagian yang salah." `SalaryService.tolakBody` selalu mengirim `bagian`. Alasan: server mewajibkan `bagian` minimal 1 sejak 2026-10-25 (`slipTolakSchema`, [sprint3.md "Penggajian follow-up 2026-10-25" #1](../../../hadir-in-api-backend-express-js/docs/api-contracts/sprint3.md)), request tanpa centang dulu berakhir 400. Test: `slip_and_rekening_screens_test.dart` (grup "tolak dialog" dan "reject dialog").
 
 ## 6. Batalkan persetujuan
 
@@ -80,7 +80,7 @@ Kartu "Ada yang keliru? Selama HR belum menyetujui pencairan, Anda bisa membatal
 |---------|----------|
 | Konfirmasi/Tolak → 409 (versi basi / tidak menunggu / sudah pernah ditolak) | snackbar pesan server; `_reloadIfStale` menutup layar detail (`maybePop`) sehingga daftar memuat ulang; status lokal tidak diubah |
 | Batal-setuju → 409 | snackbar pesan server; layar tetap; `_refreshSlip` (`GET .../slip/:id`) |
-| 400 Tolak tanpa bagian | snackbar pesan server (lihat Known issue R9) |
+| 400 Tolak tanpa bagian | tidak lagi bisa dari UI (tombol mati tanpa centang); bila terjadi tetap snackbar pesan server |
 | Jaringan/401 | pesan dari `ApiClient` (`Sesi berakhir…` untuk 401, dll.) |
 
 ## 10. Notifikasi slip
@@ -89,8 +89,7 @@ Semua `rawType` berawalan `slip_`, `gaji_`, `pencairan_` membuka tab Gaji dan (b
 
 ## 11. Known issues (ringkas)
 
-- **R9**: Kirim Tolak tanpa centang → 400 (bagian 5).
 - Komentar di build `SalaryDetailScreen` ("Take Home Pay = Gaji Bersih + Tunjangan - Potongan") basi; angka THP = `gajiNetto` server.
 - `filterSlipsByMonths` dead code.
-- Dialog "Ganti rekening gaji?" tidak menyebut bahwa mengganti rekening **mencabut Setujui Cair** slip `unpaid` (mobile-api #45) — staff bisa kaget slip yang sudah "Sedang diproses pencairan" kembali ke "Disetujui" (**perlu dicek** di UI nyata).
+- Dialog "Ganti rekening gaji?" kini menyebut (F8) bahwa slip yang sudah disetujui cair tetapi belum dibayar dibatalkan persetujuan cairnya (`rekeningReplaceWarning`; server: `rekening.ts` A9 `revokeSiapCairForStaff`, hanya bila bank/nomor/nama pemilik berubah).
 - RENCANA batal-setuju (bagian 6) belum ada di kode maupun backend.

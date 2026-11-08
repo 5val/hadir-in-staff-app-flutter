@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
 import '../services/session_service.dart';
+import '../services/admin_contact.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import '../services/document_service.dart';
@@ -50,11 +51,43 @@ class _AccountTabState extends State<AccountTab> {
   void initState() {
     super.initState();
     _loadSoundNotif();
+    _loadNotifEnabled();
     _loadDocStatus();
+  }
+
+  Future<void> _loadNotifEnabled() async {
+    final enabled = await SessionService.getNotifEnabled();
+    if (!mounted) return;
+    setState(() => _notifEnabled = enabled);
+  }
+
+  /// Simpan sakelar Notifikasi; PushNotificationService membacanya saat
+  /// menampilkan notifikasi (F7).
+  void _setNotifEnabled(bool v) {
+    setState(() => _notifEnabled = v);
+    SessionService.saveNotifEnabled(v);
+    if (!v) {
+      // Jelaskan sekali saat dimatikan: sakelar ini hanya menyembunyikan
+      // notifikasi umum dari tray; pengingat absensi tetap muncul, dan
+      // semua notifikasi tetap tersimpan di menu Notifikasi.
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 6),
+            content: Text(
+              'Notifikasi umum tidak akan muncul di HP. Pengingat absensi '
+              '(lupa check-out, batas lembur) tetap muncul, dan semua '
+              'notifikasi tetap bisa dilihat di menu Notifikasi.',
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _loadSoundNotif() async {
     final mode = await SessionService.getSoundNotifMode();
+    if (!mounted) return;
     setState(() {
       _soundNotifMode = mode;
     });
@@ -128,6 +161,7 @@ class _AccountTabState extends State<AccountTab> {
     );
     if (ok != true || !mounted) return;
     await SessionService.clearSession();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
@@ -280,14 +314,16 @@ class _AccountTabState extends State<AccountTab> {
                       _MenuItem(
                         icon: Icons.notifications_outlined,
                         label: 'Notifikasi',
-                        subtitle: _notifEnabled ? 'Aktif' : 'Nonaktif',
+                        subtitle: _notifEnabled
+                            ? 'Aktif'
+                            : 'Nonaktif · pengingat absensi tetap muncul, '
+                                'notifikasi lain tetap ada di menu Notifikasi',
                         trailing: Switch(
                           value: _notifEnabled,
-                          onChanged: (v) => setState(() => _notifEnabled = v),
+                          onChanged: _setNotifEnabled,
                           activeColor: AppColors.brandNavy,
                         ),
-                        onTap: () =>
-                            setState(() => _notifEnabled = !_notifEnabled),
+                        onTap: () => _setNotifEnabled(!_notifEnabled),
                       ),
                       _MenuItem(
                         icon: Icons.volume_up_outlined,
@@ -677,19 +713,13 @@ class _AccountTabState extends State<AccountTab> {
 
   // ── Kartu "Hubungi Admin" ──────────────────────────────────
   //
-  // Sprint 2 OTP/auth overhaul: tidak ada endpoint self-service untuk staff
-  // mengganti nomor HP-nya sendiri (hanya verifikasi pertama kali oleh
-  // admin) — kartu ini menjelaskan kenapa & memberi jalan pintas kontak.
+  // Nomor HP bisa diganti sendiri lewat Info Akun (OTP ke email), jadi kartu
+  // ini cuma jalan pintas menghubungi admin kantor untuk bantuan lain.
   //
   // Buka WhatsApp/dialer beneran lewat `url_launcher`. Kalau gagal (mis. WA
   // tidak terinstal), fallback ke salin nomor ke clipboard supaya staff
   // tetap punya cara pakai nomornya.
-  String _normalizeToWaNumber(String phone) {
-    final digits = phone.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('62')) return digits;
-    if (digits.startsWith('0')) return '62${digits.substring(1)}';
-    return '62$digits';
-  }
+  String _normalizeToWaNumber(String phone) => AdminContact.normalizeToWa(phone);
 
   Future<void> _copyPhoneFallback(String phone) async {
     await Clipboard.setData(ClipboardData(text: phone));
@@ -742,7 +772,7 @@ class _AccountTabState extends State<AccountTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Ganti nomor HP terdaftar? Hubungi admin',
+                  'Butuh bantuan? Hubungi admin',
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
@@ -751,7 +781,7 @@ class _AccountTabState extends State<AccountTab> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Nomor HP yang sudah terverifikasi hanya bisa diganti oleh admin kantor Anda.',
+                  'Nomor HP bisa Anda ubah sendiri di Info Akun. Untuk kendala lain, hubungi admin kantor Anda.',
                   style: GoogleFonts.inter(
                       fontSize: 11, color: AppColors.slate700, height: 1.4),
                 ),

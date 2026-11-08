@@ -2,27 +2,29 @@ import 'dart:async';
 import 'dart:math';
 import 'package:hadirin_staff_app/screens/account_tab.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import '../services/admin_contact.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/testing_config.dart';
 import '../widgets/uploaded_file_image.dart';
-import '../widgets/open_session_dialog.dart';
+import '../widgets/attendance_entry_flow.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../models/models.dart';
-import '../services/session_service.dart';
 import '../services/attendance_provider.dart';
 import '../services/api_client.dart';
 import '../services/location_service.dart';
 import '../services/attendance_service.dart';
 import '../services/calendar_service.dart';
 import '../services/profile_service.dart';
+import '../services/push_notification_service.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import '../screens/camera_checkin_screen.dart';
 import 'break_screen.dart';
 import 'notification_screen.dart';
 import 'history_screen.dart';
-import 'login_screen.dart';
 import 'main_screen.dart';
 import 'all_attendance_history_screen.dart';
 import 'rekening_screen.dart';
@@ -282,8 +284,11 @@ class _HomeTabState extends State<HomeTab> {
       setState(() {
         _checkingLoc = false;
         _locationChecked = true;
-        _locationOn = false;
-        _fakeLocation = false;
+        // GPS-nya menyala bila yang gagal hanya karena lokasi palsu.
+        _locationOn = result.failure == GpsFailure.mockLocation;
+        // Lokasi palsu ditolak di LocationService.current(); kartu
+        // peringatan "fake location" tetap tampil lewat flag ini.
+        _fakeLocation = result.failure == GpsFailure.mockLocation;
         _locationInRange = false;
         _lastPosition = null;
         _locationMessage = result.failure!.message;
@@ -362,51 +367,29 @@ class _HomeTabState extends State<HomeTab> {
   String get _effCheckInPhotoUrl => _att.today?.fotoMasuk ?? '';
   String get _effCheckOutPhotoUrl => _att.today?.fotoKeluar ?? '';
 
+  AttendanceEntryHooks get _entryHooks => AttendanceEntryHooks.live(_att);
+
   Future<void> _openCameraForCheckIn() async {
-    // Gerbang yang sama seperti di FAB MainScreen: absensi hari sebelumnya
-    // yang belum ditutup harus diselesaikan dulu — server pun menolak
-    // check-in baru dengan HTTP 409 selama baris itu menggantung, jadi
-    // membuka kamera di sini hanya akan berakhir dengan error setelah staff
-    // repot berfoto.
-    await _att.refreshOpenSession();
-    if (!mounted) return;
-    final open = _att.openSession;
-    if (open != null) {
-      final closed = await showOpenSessionDialog(context, _att, open);
-      if (!mounted) return;
-      if (closed) {
-        _showSnackbar(
-            'Absensi ${open.tanggal} ditutup pada ${open.jamPulangShift}. '
-            'Silakan check-in kembali.');
-      }
-      return;
-    }
-
-    final result = await Navigator.push<CameraResult>(
-      context,
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) =>
-            const CameraCheckinScreen(actionType: CameraActionType.checkIn),
-      ),
+    // Gerbang yang SAMA dengan FAB MainScreen (widgets/attendance_entry_flow.dart):
+    // absensi menggantung, konfirmasi hari libur, kamera, GPS segar (+ tolak
+    // lokasi palsu).
+    final entry = await runAttendanceEntry(
+      context: context,
+      actionType: CameraActionType.checkIn,
+      hooks: _entryHooks,
+      onMessage: (msg, {bool error = false}) =>
+          _showSnackbar(msg, color: error ? AppColors.danger : null),
     );
-    if (!mounted || result == null || !result.confirmed) return;
-
-    // Ambil fix GPS SEGAR tepat saat absen — bukan memakai hasil pengecekan
-    // beberapa menit lalu, karena staff bisa saja sudah berpindah.
-    final gps = await LocationService.current();
-    if (!mounted) return;
-    if (!gps.ok) {
-      _showSnackbar(gps.failure!.message, color: AppColors.danger);
-      return;
-    }
+    if (!mounted || entry == null) return;
+    final result = entry.camera;
+    final pos = entry.position;
 
     try {
       await _att.checkInRemote(
         fotoPath: result.imagePath,
-        latitude: gps.position!.latitude,
-        longitude: gps.position!.longitude,
-        accuracy: gps.position!.accuracy,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        accuracy: pos.accuracy,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -426,35 +409,25 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Future<void> _openCameraForCheckOut() async {
-    final result = await Navigator.push<CameraResult>(
-      context,
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) =>
-            const CameraCheckinScreen(actionType: CameraActionType.checkOut),
-      ),
+    // Check-out juga wajib membawa koordinat (geofence server, lib/geo.ts)
+    // dan lewat gerbang "Belum Jam Pulang!" yang sama dengan FAB.
+    final entry = await runAttendanceEntry(
+      context: context,
+      actionType: CameraActionType.checkOut,
+      hooks: _entryHooks,
+      onMessage: (msg, {bool error = false}) =>
+          _showSnackbar(msg, color: error ? AppColors.danger : null),
     );
-    if (!mounted || result == null || !result.confirmed) return;
-
-    // Check-out juga wajib membawa koordinat: server memvalidasinya dengan
-    // geofence yang sama seperti check-in (lib/geo.ts) dan menyimpannya ke
-    // `latitudeKeluar/longitudeKeluar/jarakKeluar`. Sebelumnya jalur ini
-    // mengirim foto saja, sehingga staff yang punya lokasi kerja selalu
-    // ditolak 400 "Lokasi GPS tidak terbaca" — padahal jalur FAB di
-    // main_screen.dart sudah mengirimnya dengan benar.
-    final gps = await LocationService.current();
-    if (!mounted) return;
-    if (!gps.ok) {
-      _showSnackbar(gps.failure!.message, color: AppColors.danger);
-      return;
-    }
+    if (!mounted || entry == null) return;
+    final result = entry.camera;
+    final pos = entry.position;
 
     try {
       await _att.checkOutRemote(
         fotoPath: result.imagePath,
-        latitude: gps.position!.latitude,
-        longitude: gps.position!.longitude,
-        accuracy: gps.position!.accuracy,
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+        accuracy: pos.accuracy,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -533,39 +506,22 @@ class _HomeTabState extends State<HomeTab> {
         color: AppColors.slate700);
   }
 
-  // ── Logout ─────────────────────────────────────────────────────
-  Future<void> _logout() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Keluar dari Akun?'),
-        content:
-            Text('Kamu perlu login ulang lain kali.', style: AppText.body2),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Keluar'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    await SessionService.clearSession();
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(
-          builder: (_) =>
-              const LoginScreen(destination: LoginDestination.landing)),
-      (r) => false,
-    );
+  // ── SOS Call ──────────────────────────────────────────────────
+  /// Nomor admin kantor dari profil (sama dengan kartu di tab Akun). Kosong
+  /// = belum diatur admin: tombol hubungi dinonaktifkan, bukan nomor palsu.
+  String get _adminPhone => (AppSession.staff?.kontakAdminPhone ?? '').trim();
+
+  Future<void> _callAdminWhatsApp(String phone) async {
+    final ok = await launchUrl(AdminContact.waUri(phone),
+        mode: LaunchMode.externalApplication);
+    if (ok) return;
+    await Clipboard.setData(ClipboardData(text: phone));
+    if (!mounted) return;
+    _showSnackbar('Tidak bisa membuka WhatsApp, nomor ($phone) disalin.');
   }
 
-  // ── SOS Call ──────────────────────────────────────────────────
   void _showSosDialog() {
+    final phone = _adminPhone;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -595,70 +551,77 @@ class _HomeTabState extends State<HomeTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-                'Kamu akan menghubungi admin/hr langsung untuk situasi darurat atau mendesak.',
+                phone.isEmpty
+                    ? 'Nomor admin kantor belum diatur. Hubungi admin lewat jalur lain atau minta admin mengisi kontaknya di pengaturan kantor.'
+                    : 'Kamu akan menghubungi admin/hr langsung untuk situasi darurat atau mendesak.',
+                key: const Key('sos-info'),
                 style: GoogleFonts.inter(
                     fontSize: 13, color: AppColors.slate600, height: 1.4)),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.slate50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.slate200),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: AppColors.brandNavy.withOpacity(0.08),
-                      shape: BoxShape.circle,
+            if (phone.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.slate50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.slate200),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppColors.brandNavy.withOpacity(0.08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.person_rounded,
+                          color: AppColors.brandNavy, size: 20),
                     ),
-                    child: const Icon(Icons.person_rounded,
-                        color: AppColors.brandNavy, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Budi Santoso',
-                          style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.slate900)),
-                      Text('Admin HR · +62 811-122-2333',
-                          style: GoogleFonts.inter(
-                              fontSize: 11, color: AppColors.slate700)),
-                    ],
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Admin Kantor',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.slate900)),
+                          Text(phone,
+                              style: GoogleFonts.inter(
+                                  fontSize: 11, color: AppColors.slate700)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Batal',
+            child: Text(phone.isEmpty ? 'Tutup' : 'Batal',
                 style: GoogleFonts.inter(color: AppColors.slate700)),
           ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF25D366),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+          if (phone.isNotEmpty)
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF25D366),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.call_rounded, size: 16),
+              label: Text('Hubungi WhatsApp',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+              onPressed: () {
+                Navigator.pop(context);
+                _callAdminWhatsApp(phone);
+              },
             ),
-            icon: const Icon(Icons.call_rounded, size: 16),
-            label: Text('Hubungi WhatsApp',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
-            onPressed: () {
-              Navigator.pop(context);
-              _showSnackbar('🟢 Menghubungi via WhatsApp...',
-                  color: const Color(0xFF25D366));
-            },
-          ),
         ],
       ),
     );
@@ -990,14 +953,21 @@ class _HomeTabState extends State<HomeTab> {
                               },
                             ))),
               ),
+              // Titik merah HANYA bila ada notifikasi belum dibaca.
               Positioned(
                 right: 8,
                 top: 8,
-                child: Container(
-                  width: 7,
-                  height: 7,
-                  decoration: const BoxDecoration(
-                      color: AppColors.danger, shape: BoxShape.circle),
+                child: ValueListenableBuilder<int>(
+                  valueListenable: NotificationCenter.unreadCount,
+                  builder: (_, unread, __) => unread <= 0
+                      ? const SizedBox.shrink()
+                      : Container(
+                          key: const Key('home-bell-dot'),
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                              color: AppColors.danger, shape: BoxShape.circle),
+                        ),
                 ),
               ),
             ],

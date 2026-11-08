@@ -10,6 +10,16 @@ import '../widgets/common_widgets.dart';
 
 /// Staff mengisi/mengubah rekening gaji sendiri (meeting klien 2026-09-20).
 /// Menutup dengan `true` bila rekening berhasil disimpan.
+/// Peringatan saat mengganti rekening yang sudah ada. Server (A9, rekening.ts)
+/// mencabut "Setujui Cair" slip yang belum dibayar saat bank/nomor/nama
+/// pemilik berubah, jadi staff harus tahu pencairannya bisa mundur.
+const rekeningReplaceWarning =
+    'Gaji berikutnya akan ditransfer ke rekening yang baru. '
+    'HRD akan menerima pemberitahuan penggantian ini.\n\n'
+    'Perhatian: slip yang sudah disetujui untuk dicairkan tetapi belum '
+    'dibayar akan dibatalkan persetujuan cairnya dan perlu diperiksa ulang '
+    'oleh HRD, sehingga pembayarannya bisa tertunda.';
+
 class RekeningScreen extends StatefulWidget {
   const RekeningScreen({super.key});
 
@@ -66,9 +76,7 @@ class _RekeningScreenState extends State<RekeningScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Ganti rekening gaji?'),
-        content: const Text(
-            'Gaji berikutnya akan ditransfer ke rekening yang baru. '
-            'HRD akan menerima pemberitahuan penggantian ini.'),
+        content: const Text(rekeningReplaceWarning),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
