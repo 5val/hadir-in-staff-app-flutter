@@ -164,13 +164,21 @@ class AuthService {
     required String passcode,
     String? passcodeLama,
   }) async {
-    await ApiClient.instance.post(
+    final res = await ApiClient.instance.post(
       '/mobile/auth/staff/set-passcode',
       body: buildSetPasscodeBody(passcode: passcode, passcodeLama: passcodeLama),
       // Backend membalas 401 "Passcode lama salah" -- itu salah ketik, bukan
       // sesi habis, jadi jangan memicu logout global.
       logoutOn401: false,
     );
+    // Mengganti passcode me-revoke token lama (tokenVersion naik); backend
+    // mengembalikan token baru. Simpan SEBELUM kembali supaya request
+    // ber-auth berikutnya tidak 401 -> logout. Tanpa token (pembuatan
+    // pertama) -> token lama dibiarkan.
+    final newToken = (res.asMap['token'] ?? '').toString();
+    if (newToken.isNotEmpty) {
+      await SessionService.saveToken(newToken);
+    }
   }
 
   /// Langkah 1 (alur staff baru / lupa passcode) — minta OTP via email.
