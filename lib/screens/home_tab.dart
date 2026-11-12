@@ -12,6 +12,7 @@ import '../widgets/uploaded_file_image.dart';
 import '../widgets/attendance_entry_flow.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../models/attendance_policy.dart';
 import '../models/models.dart';
 import '../services/attendance_provider.dart';
 import '../services/api_client.dart';
@@ -126,6 +127,15 @@ class _HomeTabState extends State<HomeTab> {
   bool _locationInRange = false;
   String _locationMessage = '';
   Position? _lastPosition;
+
+  /// Kebijakan Absensi efektif (GPS wajib? radius? deteksi mock?). Diambil
+  /// ulang tiap `_checkLocation`; gagal -> cache -> strict default.
+  AttendancePolicy _policy = AttendancePolicy.strictDefault;
+
+  /// Tombol check-in/out aktif dari sisi GPS. Bila kebijakan tidak
+  /// mewajibkan GPS, status lokasi tidak menggerbangi tombol sama sekali.
+  bool get _canGpsAction =>
+      !_policy.wajibGps || (_locationOn && _locationChecked && _locationInRange);
 
   /// Lokasi kerja staff dari database (nama + alamat), bukan teks hardcode.
   String get _officeName => AppSession.staff?.lokasiNama ?? 'Lokasi Kerja';
@@ -277,7 +287,11 @@ class _HomeTabState extends State<HomeTab> {
   Future<void> _checkLocation() async {
     setState(() => _checkingLoc = true);
 
-    final result = await LocationService.current();
+    _policy = await AttendanceService.policy();
+    if (!mounted) return;
+    final result = await LocationService.current(
+        blockMocked: _policy.blocksMockedGps,
+        timeLimit: LocationService.timeLimitFor(wajibGps: _policy.wajibGps));
     if (!mounted) return;
 
     if (!result.ok) {
@@ -308,8 +322,8 @@ class _HomeTabState extends State<HomeTab> {
         _checkingLoc = false;
         _locationChecked = true;
         _locationOn = true;
-        _fakeLocation = pos.isMocked;
-        _locationInRange = !pos.isMocked;
+        _fakeLocation = pos.isMocked && _policy.blocksMockedGps;
+        _locationInRange = !_fakeLocation;
         _lastPosition = pos;
         _locationMessage = 'Lokasi kerja belum ditetapkan admin.';
       });
@@ -322,18 +336,24 @@ class _HomeTabState extends State<HomeTab> {
       lat2: lat,
       lon2: lng,
     ).round();
-    final inRange = distance <= radius + pos.accuracy.round().clamp(0, 50);
+    // Kebijakan cekRadius=false: radius tidak ditegakkan (server yang
+    // memutuskan) -> jangan alarm/blokir di sini.
+    final inRange = !_policy.radiusEnforced ||
+        distance <= radius + pos.accuracy.round().clamp(0, 50);
+    final outsideMsg = distance > radius + pos.accuracy.round().clamp(0, 50);
 
     setState(() {
       _checkingLoc = false;
       _locationChecked = true;
       _locationOn = true;
-      _fakeLocation = pos.isMocked;
+      _fakeLocation = pos.isMocked && _policy.blocksMockedGps;
       _lastPosition = pos;
-      _locationInRange = inRange && !pos.isMocked;
-      _locationMessage = inRange
-          ? 'Berada di area $_officeName (~$distance m dari titik kantor).'
-          : 'Anda $distance m dari $_officeName, di luar radius $radius m.';
+      _locationInRange = inRange && !_fakeLocation;
+      _locationMessage = !_policy.radiusEnforced
+          ? 'Jarak ~$distance m dari titik $_officeName (radius tidak diperiksa).'
+          : !outsideMsg
+              ? 'Berada di area $_officeName (~$distance m dari titik kantor).'
+              : 'Anda $distance m dari $_officeName, di luar radius $radius m.';
     });
   }
 
@@ -386,10 +406,12 @@ class _HomeTabState extends State<HomeTab> {
 
     try {
       await _att.checkInRemote(
-        fotoPath: result.imagePath,
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-        accuracy: pos.accuracy,
+        fotoPath: entry.fotoPath,
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+        accuracy: pos?.accuracy,
+        lokasiPalsu: entry.lokasiPalsu,
+        liveness: entry.liveness,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -424,10 +446,12 @@ class _HomeTabState extends State<HomeTab> {
 
     try {
       await _att.checkOutRemote(
-        fotoPath: result.imagePath,
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-        accuracy: pos.accuracy,
+        fotoPath: entry.fotoPath,
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+        accuracy: pos?.accuracy,
+        lokasiPalsu: entry.lokasiPalsu,
+        liveness: entry.liveness,
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -1223,6 +1247,23 @@ class _HomeTabState extends State<HomeTab> {
         ),
       );
     }
+    if (!_locationOn && !_policy.wajibGps) {
+      return SectionCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            const Icon(Icons.gps_off_rounded,
+                color: AppColors.slate400, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+                child: Text(
+                    'GPS tidak wajib untuk absensi Anda, tetapi tidak terbaca.',
+                    style: AppText.body2)),
+            TextButton(onPressed: _checkLocation, child: const Text('Coba')),
+          ],
+        ),
+      );
+    }
     if (!_locationOn) {
       return SectionCard(
         padding: const EdgeInsets.all(14),
@@ -1297,20 +1338,22 @@ class _HomeTabState extends State<HomeTab> {
                       width: 7,
                       height: 7,
                       decoration: BoxDecoration(
-                          color: _locationInRange
+                          color: (_locationInRange || !_policy.radiusEnforced)
                               ? AppColors.brandLimeDark
                               : AppColors.danger,
                           shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 5),
                     Text(
-                        _locationInRange
-                            ? 'TERVERIFIKASI · DALAM AREA'
-                            : 'DI LUAR JANGKAUAN AREA',
+                        !_policy.radiusEnforced
+                            ? 'LOKASI TERBACA'
+                            : _locationInRange
+                                ? 'TERVERIFIKASI · DALAM AREA'
+                                : 'DI LUAR JANGKAUAN AREA',
                         style: GoogleFonts.inter(
                             fontSize: 9,
                             fontWeight: FontWeight.w700,
-                            color: _locationInRange
+                            color: (_locationInRange || !_policy.radiusEnforced)
                                 ? AppColors.brandLimeDark
                                 : AppColors.danger,
                             letterSpacing: 0.5)),
@@ -1614,8 +1657,7 @@ class _HomeTabState extends State<HomeTab> {
   }
 
   Widget _buildAttendanceContent() {
-    final canGpsAction =
-        _locationOn && _locationChecked && _locationInRange;
+    final canGpsAction = _canGpsAction;
 
     switch (_status) {
       // ── Belum check-in ────────────────────────────────────────
@@ -1981,8 +2023,7 @@ class _HomeTabState extends State<HomeTab> {
 
   // ── Check-in Blocked (setelah jam 12) ─────────────────────────
   Widget _buildCheckinBlockedAfterNoon() {
-    final canGpsAction =
-        _locationOn && _locationChecked && _locationInRange;
+    final canGpsAction = _canGpsAction;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(8),

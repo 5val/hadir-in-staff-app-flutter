@@ -1,15 +1,17 @@
 # Absensi, Shift, dan Lembur — Aturan dari Sisi App
 
-Apa yang **app** lakukan dan tidak lakukan untuk absensi. Prinsip dasar: **server adalah hakim** (geofence, jam, lembur, status); app menampilkan, mengumpulkan foto + GPS, dan memberi peringatan dini. Aturan bisnis lintas repo (ambang lembur, pembulatan, shift malam, auto-checkout, hari libur): [ATURAN-BISNIS-PENGGAJIAN.md §6–§7](../../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md). Kontrak: [mobile-api.md bagian 3](../../../hadir-in-api-backend-express-js/docs/mobile-api.md) (#9–#16, #35). Diverifikasi terhadap kode 2026-11-06.
+Apa yang **app** lakukan dan tidak lakukan untuk absensi. Prinsip dasar: **server adalah hakim** (geofence, jam, lembur, status); app menampilkan, mengumpulkan foto + GPS, dan memberi peringatan dini. Aturan bisnis lintas repo (ambang lembur, pembulatan, shift malam, auto-checkout, hari libur): [ATURAN-BISNIS-PENGGAJIAN.md §6–§7](../../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md). Kontrak: [mobile-api.md bagian 3](../../../hadir-in-api-backend-express-js/docs/mobile-api.md) (#9–#16, #35). Diverifikasi terhadap kode 2026-11-06; bagian 1, 2, 3, 4 diperbarui 2026-11-12 (Kebijakan Absensi + liveness, lihat bagian 3b).
 
-Kode utama: `lib/screens/home_tab.dart`, `lib/screens/main_screen.dart` (FAB + penjaga), `lib/screens/camera_checkin_screen.dart`, `lib/services/attendance_service.dart`, `attendance_provider.dart` (`AttendanceProvider` + `AttendanceRules`), `location_service.dart`, `calendar_service.dart`, `lib/widgets/open_session_dialog.dart`, `early_checkout_dialog.dart`, `lib/config/testing_config.dart`. Test: `test/attendance_rules_test.dart`, `holiday_overtime_test.dart`, `join_date_gate_test.dart`.
+Kode utama: `lib/screens/home_tab.dart`, `lib/screens/main_screen.dart` (FAB + penjaga), `lib/screens/camera_checkin_screen.dart`, `lib/services/attendance_service.dart`, `attendance_provider.dart` (`AttendanceProvider` + `AttendanceRules`), `location_service.dart`, `calendar_service.dart`, `lib/widgets/open_session_dialog.dart`, `early_checkout_dialog.dart`, `lib/config/testing_config.dart`. Test: `test/attendance_rules_test.dart`, `holiday_overtime_test.dart`, `join_date_gate_test.dart`, `attendance_entry_flow_test.dart`, `liveness_challenge_test.dart`, `attendance_policy_test.dart`. Liveness/kebijakan: `lib/services/liveness_challenge.dart` (state machine murni), `lib/models/attendance_policy.dart`.
 
 ## 1. Alur satu hari
 
 ```
-[Home / FAB]  ► (sesi menggantung? ► OpenSessionDialog ► auto-checkout)
-              ► kamera depan + deteksi wajah ► foto ► konfirmasi (hanya aktif bila dalam radius)
-              ► GPS segar (LocationService.current) ► POST check-in {lat,lng,accuracy,fotoMasuk(base64),time?}
+[Home / FAB]  ► GET attendance/policy (gagal ► cache ► strict default)
+              ► (sesi menggantung? ► OpenSessionDialog ► auto-checkout)
+              ► [wajibFoto] kamera depan + deteksi wajah (+ liveness bila wajibLiveness) ► foto ► konfirmasi
+                (diblokir di luar radius hanya bila wajibGps && cekRadius)
+              ► GPS segar (LocationService.current) ► POST check-in {lat,lng,accuracy,lokasiPalsu,fotoMasuk(base64),liveness?,time?}
    ... Break In (POST break-in) ⇄ Break Out (POST break-out) boleh berkali-kali ...
               ► kamera ► POST check-out {lat,lng,accuracy,fotoKeluar,time?}
 ```
@@ -19,25 +21,47 @@ Status diturunkan dari satu record (`GET attendance/today`) di `AttendanceProvid
 ## 2. Geofence
 
 - **Yang mengikat adalah server** (`lib/geo.ts` backend): check-in/out di luar radius → HTTP 403 dengan pesan jarak & radius, ditampilkan apa adanya. Akurasi GPS dikirim (`accuracy`) sebagai toleransi tambahan di server.
-- **App hanya menampilkan & menggerbangi UI.** Jarak dihitung `Geolocator.distanceBetween` ke titik `lokasiLatitude/Longitude` staff (dari profil); dianggap dalam radius bila `jarak <= lokasiRadius + clamp(accuracy, 0, 50)` (radius default 100 m bila kosong). Di Home hasilnya mengaktifkan/mematikan kartu Check-In/Check-Out; di layar kamera tombol konfirmasi (`onPressed: inRange ? _confirm : null`, `camera_checkin_screen.dart:1653`) hanya aktif bila dalam radius.
+- **App hanya menampilkan & menggerbangi UI.** Jarak dihitung `Geolocator.distanceBetween` ke titik `lokasiLatitude/Longitude` staff (dari profil); dianggap dalam radius bila `jarak <= lokasiRadius + clamp(accuracy, 0, 50)` (radius default 100 m bila kosong). Di Home hasilnya mengaktifkan/mematikan kartu Check-In/Check-Out; di layar kamera tombol konfirmasi (`_canConfirm`) hanya aktif bila dalam radius. **Sejak 2026-11-12 kedua gerbang itu hanya berlaku bila kebijakan `wajibGps && cekRadius`** (`AttendancePolicy.radiusEnforced`): dengan `cekRadius=false` jarak tetap ditampilkan netral ("Lokasi terbaca", bukan merah) dan tidak memblokir; dengan `wajibGps=false` status/kegagalan GPS tidak menggerbangi tombol sama sekali (server tetap memutuskan).
 - **Staff tanpa lokasi kerja** (`lat/lng` null, mis. lapangan): tidak ada geofence — app menganggap "dalam area" dan server melewati pemeriksaan.
-- **Izin & GPS** (`LocationService.current`): cek layanan lokasi → minta izin → `getCurrentPosition(accuracy: high, timeLimit: 20 dtk)`. Kegagalan dipetakan ke pesan khusus (`GpsFailure`: GPS mati / izin ditolak / ditolak permanen / timeout / lainnya). Koordinat dibaca ulang segar tepat sebelum kirim (bukan hasil cek beberapa menit lalu).
+- **Izin & GPS** (`LocationService.current`): cek layanan lokasi → minta izin → `getCurrentPosition(accuracy: high, timeLimit: 20 dtk; 5 dtk bila kebijakan `wajibGps=false`, `LocationService.timeLimitFor`)`. Kegagalan dipetakan ke pesan khusus (`GpsFailure`: GPS mati / izin ditolak / ditolak permanen / timeout / lainnya). Koordinat dibaca ulang segar tepat sebelum kirim (bukan hasil cek beberapa menit lalu).
 
 ## 3. Batas deteksi wajah (JANGAN diklaim sebagai verifikasi identitas)
 
-`CameraCheckinScreen` memakai ML Kit `FaceDetector` dengan `performanceMode: fast`, `enableClassification/Landmarks/Contours/Tracking: false`, `minFaceSize: 0.15` (`camera_checkin_screen.dart:149-157`). Tombol shutter aktif hanya bila `_faceDetected && _faceInCenter` (pusat kotak wajah dalam ±28% dari pusat frame, `_isFaceCentered`). Artinya:
+`CameraCheckinScreen` memakai ML Kit `FaceDetector` dengan `performanceMode: fast`, `enableClassification/Landmarks/Contours/Tracking: false`, `minFaceSize: 0.15` (dengan liveness mati; dengan liveness: `accurate` + klasifikasi + tracking, lihat 3b). Tombol shutter aktif hanya bila `_faceDetected && _faceInCenter` (pusat kotak wajah dalam ±28% dari pusat frame, `_isFaceCentered`). Artinya:
 
 - Yang diperiksa: **ada wajah (≥ 15% frame) dan berada di tengah**. Wajah terbesar yang dipakai.
-- **Tidak ada**: liveness (kedip/gerak), pencocokan identitas, deteksi foto-dari-layar. Foto orang lain / foto dari foto lolos.
+- **Tidak ada**: pencocokan identitas dan deteksi foto-dari-layar. Dengan liveness mati, foto orang lain / foto dari foto lolos (liveness 2026-11-12 menahan foto statis, bukan orang lain yang bergerak).
 - Di Web (`kIsWeb`) shutter aktif tanpa deteksi wajah.
+- Itu kondisi bila liveness MATI. Bila kebijakan mewajibkan liveness, lihat bagian 3b. **Liveness (gerak nyata) bukan pencocokan identitas**: tetap tidak ada yang memastikan wajah itu milik staff yang bersangkutan.
 - Kamera: kamera **depan**, portrait terkunci. Foto dikirim sebagai base64 (`fotoMasuk`/`fotoKeluar` + `fotoMimeType`), disimpan server ke Google Drive; path file lokal tidak diterima server.
 - Bila `takePicture()` melempar (F3, diperbaiki 2026-11-08): aksi **digagalkan** -- snackbar "Gagal mengambil foto. Silakan coba lagi.", deteksi wajah dinyalakan lagi, tidak masuk ke overlay konfirmasi. `_confirm()` menolak bila `_capturedFile == null`, dan `runAttendanceEntry` menolak `CameraResult` tanpa `imagePath` ("Foto wajah tidak tersimpan"). Server sebenarnya menganggap foto **opsional** (`attendance.ts`: foto hanya disimpan bila ada), tetapi foto wajah adalah bukti absensi di sisi app, jadi app tetap memblokir tanpa foto. Tidak ada perubahan backend.
+
+## 3b. Kebijakan Absensi & liveness (2026-11-12)
+
+Kontrak: [sprint3.md 2026-11-12](../../../hadir-in-api-backend-express-js/docs/api-contracts/sprint3.md). `AttendanceService.policy()` (`GET .../attendance/policy`) dipanggil di awal `runAttendanceEntry` (dan oleh `HomeTab._checkLocation` untuk gerbang kartu). Gagal -> cache memori terakhir yang berhasil (per staffId, `AttendancePolicyCache`) -> `AttendancePolicy.strictDefault` (foto, GPS, radius, deteksi mock wajib; liveness tidak). Policy hanya advisory: server menghitung ulang.
+
+| Flag | Efek di app |
+|---|---|
+| `wajibFoto=false` | layar kamera dilewati sepenuhnya, tidak ada foto terkirim |
+| `wajibGps=false` | GPS dibaca best-effort (maks 5 dtk); gagal tidak memblokir, tombol Home tidak digerbangi lokasi |
+| `cekRadius=false` | GPS dibaca & dikirim; "di luar radius" tidak memblokir/merah |
+| `deteksiMockGps=true` (+GPS wajib) | `isMocked` diblokir (F4) |
+| `deteksiMockGps=false` | `isMocked` diizinkan; `lokasiPalsu:true` dikirim, server mencatat |
+| `wajibLiveness` (dan `wajibFoto`) | tantangan gerak di kamera (di bawah) |
+
+`lokasiPalsu` (bool) SELALU dikirim bila koordinat terbaca; tidak dikirim bila GPS tak terbaca. `liveness` dikirim hanya bila tantangan dijalankan.
+
+**Tantangan liveness** (check-in DAN check-out): urutan TETAP, bukan acak: (1) kedip 1x, (2) toleh kiri ATAU kanan (pilihan staff), (3) kembali lurus -> foto otomatis -> overlay konfirmasi biasa. State machine murni di `lib/services/liveness_challenge.dart` (`LivenessChallenge.feed(LivenessSample)`), layar mengubah `Face` ML Kit menjadi sampel. Ambang (`LivenessConfig`): mata tertutup < 0.2 dan terbuka > 0.6 (kedua mata), toleh |yaw| > 25 derajat, lurus |yaw| < 10 derajat, batas 10 dtk per percobaan (jam mulai di wajah valid pertama), 3 percobaan. Wajah hilang / ganti `trackingId` / lebih dari satu wajah -> langkah diulang dari awal (tidak menambah hitungan gagal; hanya timeout yang menghitung). Detektor memakai `accurate` karena `headEulerAngleY` hanya dijamin di mode itu.
+
+**Tidak pernah memblokir:** gagal 3x -> tombol "Lanjut tanpa verifikasi gerak" -> shutter manual (status `dilewati`). Detektor melempar/gagal 8 frame beruntun, atau platform bukan Android/iOS (mis. web) -> `tidak_didukung`, shutter manual tanpa gerbang wajah. Admin melihat rekaman bertanda di web. Body: `liveness: {status: lolos|dilewati|tidak_didukung, langkah:["kedip","toleh_kiri"|"toleh_kanan"], percobaan, durasiMs, versi:"1"}`. Label kiri/kanan memakai asumsi `positiveYawIsUserLeft` (perlu diverifikasi di perangkat; kedua sisi tetap lolos).
+
+**Error server baru:** 400 "Foto selfie wajib...", 400 "Data liveness tidak valid.", 403 "Terdeteksi lokasi palsu..." ditampilkan apa adanya. 400 "Perbarui aplikasi..." (liveness diwajibkan padahal app mengira tidak): `AttendanceProvider._explainPolicyError` mengambil ulang kebijakan (dan memaksa cache memakai liveness bila fetch gagal) lalu meminta staff menekan absen lagi -- bukan jalan buntu.
 
 ## 4. GPS palsu (mock location)
 
 Sejak F4 (2026-11-08) keputusan "lokasi palsu = ditolak" ada di **satu tempat**: `LocationService.current()` memanggil `LocationService.guardMocked(position)`, yang mengembalikan `GpsResult.failed(GpsFailure.mockLocation)` bila `Position.isMocked` (geolocator, Android). Karena FAB, kartu Home, dan layar kamera semuanya membaca lokasi lewat `current()`, ketiganya memblokir. Kartu Home menampilkan peringatan "fake location terdeteksi" (`_fakeLocation = failure == mockLocation`) dan tidak mengaktifkan kartu Check-In/Out. Keterbatasan:
 
-- Server **tidak** menerima/menimbang flag `isMocked` (hanya geofence jarak) -- ini pagar sisi-app saja, bisa dilewati bila API dipanggil langsung. Tidak ada perubahan backend.
+- **Diperbarui 2026-11-12:** server kini menerima `lokasiPalsu` dan menegakkan `deteksiMockGps` dari Kebijakan Absensi (403 bila `lokasiPalsu && deteksiMockGps && wajibGps`; selain itu dicatat `mockLokasiMasuk/Keluar`). `LocationService.current({blockMocked})` hanya memblokir di app bila `policy.blocksMockedGps`. Flag `lokasiPalsu` datang dari app, jadi tetap bisa dipalsukan bila API dipanggil langsung.
 - `isMocked` hanya terdeteksi di Android; tidak ada deteksi lain (root, developer options, emulator).
 - Di mode testing `fakePosition()` sengaja `isMocked: false` dan `current()` mengembalikannya sebelum `guardMocked` (bypass `TestingConfig` tetap satu-satunya).
 

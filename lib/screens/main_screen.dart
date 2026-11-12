@@ -710,19 +710,23 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     try {
       if (result.actionType == CameraActionType.checkIn) {
         await _attendance.checkInRemote(
-          fotoPath: result.imagePath,
-          latitude: pos.latitude,
-          longitude: pos.longitude,
-          accuracy: pos.accuracy,
+          fotoPath: entry.fotoPath,
+          latitude: pos?.latitude,
+          longitude: pos?.longitude,
+          accuracy: pos?.accuracy,
+          lokasiPalsu: entry.lokasiPalsu,
+          liveness: entry.liveness,
         );
         if (!mounted) return;
         _showSuccessSnackbar('Check-in berhasil! Selamat bekerja 💪');
       } else {
         await _attendance.checkOutRemote(
-          fotoPath: result.imagePath,
-          latitude: pos.latitude,
-          longitude: pos.longitude,
-          accuracy: pos.accuracy,
+          fotoPath: entry.fotoPath,
+          latitude: pos?.latitude,
+          longitude: pos?.longitude,
+          accuracy: pos?.accuracy,
+          lokasiPalsu: entry.lokasiPalsu,
+          liveness: entry.liveness,
         );
         if (!mounted) return;
         final uangMakan = _attendance.uangMakan;

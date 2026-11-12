@@ -58,6 +58,17 @@ extension GpsFailureMessage on GpsFailure {
 class LocationService {
   const LocationService._();
 
+  /// Batas tunggu fix GPS bila kebijakan MEWAJIBKAN GPS (perilaku lama).
+  static const Duration requiredTimeLimit = Duration(seconds: 20);
+
+  /// Batas tunggu fix GPS bila GPS TIDAK wajib (koordinat opsional, dikirim
+  /// bila sempat terbaca) -- keputusan user 2026-11-12: tetap baca, maks ~5 dtk.
+  static const Duration bestEffortTimeLimit = Duration(seconds: 5);
+
+  /// Batas tunggu sesuai kebijakan `wajibGps`.
+  static Duration timeLimitFor({required bool wajibGps}) =>
+      wajibGps ? requiredTimeLimit : bestEffortTimeLimit;
+
   /// Membaca posisi sekarang, sekaligus mengurus service + izin.
   ///
   /// TESTING — bila `TestingConfig.locationOverrideActive` bernilai true,
@@ -67,7 +78,18 @@ class LocationService {
   /// home_tab, layar kamera, dan FAB di main_screen semuanya ikut.
   /// Matikan dengan `TestingConfig.enabled = false` — kode GPS asli di bawah
   /// tidak diubah sedikit pun dan langsung aktif kembali.
-  static Future<GpsResult> current() async {
+  ///
+  /// [blockMocked] (kebijakan `deteksiMockGps`): true = tolak `isMocked`
+  /// (perilaku F4, default); false = izinkan -- pemanggil wajib mengirim
+  /// `lokasiPalsu: position.isMocked` ke server.
+  ///
+  /// [timeLimit]: batas tunggu fix GPS. Default 20 dtk (GPS wajib); alur absen
+  /// memakai [bestEffortTimeLimit] bila kebijakan tidak mewajibkan GPS, supaya
+  /// staff tidak menunggu lama hanya demi koordinat opsional.
+  static Future<GpsResult> current({
+    bool blockMocked = true,
+    Duration timeLimit = requiredTimeLimit,
+  }) async {
     if (TestingConfig.locationOverrideActive) {
       return GpsResult.success(fakePosition());
     }
@@ -89,12 +111,12 @@ class LocationService {
       }
 
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
+        locationSettings: LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 20),
+          timeLimit: timeLimit,
         ),
       );
-      return guardMocked(position);
+      return blockMocked ? guardMocked(position) : GpsResult.success(position);
     } on LocationServiceDisabledException {
       return const GpsResult.failed(GpsFailure.serviceDisabled);
     } on PermissionDeniedException {

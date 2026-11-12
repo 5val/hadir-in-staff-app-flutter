@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../config/testing_config.dart';
+import '../models/attendance_policy.dart';
 import '../models/models.dart';
+import 'api_client.dart';
 import 'attendance_service.dart';
+import 'liveness_challenge.dart';
+import 'session_service.dart';
 import 'calendar_service.dart';
 
 /// Status kehadiran karyawan hari ini
@@ -693,6 +697,35 @@ class AttendanceProvider extends ChangeNotifier {
     hydrateFromToday(await AttendanceService.today());
   }
 
+  /// Server menolak karena liveness diwajibkan (kebijakan berubah / cache
+  /// basi): ambil ulang kebijakan lalu minta staff mengulang -- kali ini alur
+  /// kamera menjalankan liveness -- bukan jalan buntu.
+  Future<ApiException> _explainPolicyError(ApiException e) async {
+    if (!AttendancePolicyCache.isLivenessRequiredError(e.message)) return e;
+    final p = await AttendanceService.policy();
+    if (p.wajibFoto && !p.wajibLiveness) {
+      // Gagal mengambil ulang: paksa cache memakai liveness supaya percobaan
+      // berikutnya tidak buntu di error yang sama.
+      final id = await SessionService.getStaffId();
+      if (id != null && id.isNotEmpty) {
+        AttendancePolicyCache.put(
+            id,
+            AttendancePolicy(
+                sumber: p.sumber,
+                kebijakanId: p.kebijakanId,
+                nama: p.nama,
+                wajibFoto: p.wajibFoto,
+                wajibGps: p.wajibGps,
+                cekRadius: p.cekRadius,
+                deteksiMockGps: p.deteksiMockGps,
+                wajibLiveness: true));
+      }
+    }
+    return ApiException(
+        'Kebijakan absensi kantor berubah: sekarang perlu verifikasi gerak '
+        '(kedip lalu toleh). Silakan tekan absen lagi.');
+  }
+
   /// Check-in ke backend lalu update state. Melempar [ApiException] bila gagal
   /// — termasuk saat koordinat GPS berada di luar radius lokasi kerja.
   Future<void> checkInRemote({
@@ -700,13 +733,22 @@ class AttendanceProvider extends ChangeNotifier {
     double? latitude,
     double? longitude,
     double? accuracy,
+    bool? lokasiPalsu,
+    LivenessReport? liveness,
   }) async {
-    final rec = await AttendanceService.checkIn(
-      fotoMasuk: fotoPath,
-      latitude: latitude,
-      longitude: longitude,
-      accuracy: accuracy,
-    );
+    final AttendanceRecord rec;
+    try {
+      rec = await AttendanceService.checkIn(
+        fotoMasuk: fotoPath,
+        latitude: latitude,
+        longitude: longitude,
+        accuracy: accuracy,
+        lokasiPalsu: lokasiPalsu,
+        liveness: liveness,
+      );
+    } on ApiException catch (e) {
+      throw await _explainPolicyError(e);
+    }
     hydrateFromToday(rec);
   }
 
@@ -716,13 +758,22 @@ class AttendanceProvider extends ChangeNotifier {
     double? latitude,
     double? longitude,
     double? accuracy,
+    bool? lokasiPalsu,
+    LivenessReport? liveness,
   }) async {
-    final rec = await AttendanceService.checkOut(
-      fotoKeluar: fotoPath,
-      latitude: latitude,
-      longitude: longitude,
-      accuracy: accuracy,
-    );
+    final AttendanceRecord rec;
+    try {
+      rec = await AttendanceService.checkOut(
+        fotoKeluar: fotoPath,
+        latitude: latitude,
+        longitude: longitude,
+        accuracy: accuracy,
+        lokasiPalsu: lokasiPalsu,
+        liveness: liveness,
+      );
+    } on ApiException catch (e) {
+      throw await _explainPolicyError(e);
+    }
     hydrateFromToday(rec);
   }
 

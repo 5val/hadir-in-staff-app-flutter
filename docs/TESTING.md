@@ -40,13 +40,15 @@ Test regresi yang tidak pernah merah tidak membuktikan apa pun. Untuk setiap per
 | `slip_followup_test.dart` | Tipe & label periode, `SlipFilter`, label status kartu, flag batal-setuju & bukti, notifikasi slip (`SlipDeepLink`), `AttentionPulse`, detail slip (batalkan persetujuan, bukti), `SlipBuktiScreen` |
 | `slip_and_rekening_screens_test.dart` | Widget `SalaryDetailScreen` (Fasilitas bagian sendiri, status menentukan tombol, dialog Tolak dengan centang, banner pencairan, penolakan sekali + tanda revisi) dan `RekeningScreen` |
 | `logout_and_drafts_test.dart` | F2: draft dokumen per staffId; `clearSession` membersihkan draft + penanda notifikasi + kredensial |
-| `attendance_entry_flow_test.dart` | F3/F4/F5: `LocationService.guardMocked`; `runAttendanceEntry` (dialog "Belum Jam Pulang!", konfirmasi hari libur, foto wajib, GPS palsu) |
+| `attendance_entry_flow_test.dart` | F3/F4/F5: `LocationService.guardMocked`; `runAttendanceEntry` (dialog "Belum Jam Pulang!", konfirmasi hari libur, foto wajib, GPS palsu); 2026-11-12: alur mengikuti kebijakan (wajibFoto=false lewati kamera, wajibGps=false tidak memblokir, deteksiMockGps, `lokasiPalsu`, liveness terbawa) |
+| `liveness_challenge_test.dart` | State machine liveness (kedip, toleh kiri/kanan, kembali lurus, reset trackingId/wajah hilang/banyak wajah, timeout, 3 gagal -> fallback) + `LivenessReport` |
+| `attendance_policy_test.dart` | `AttendancePolicy.fromApi` + normalisasi + strict default, `AttendancePolicyCache.resolve` (server -> cache -> strict), `AttendanceService.buildCheckBody` (`lokasiPalsu`/`liveness` ikut/tidak) |
 | `subordinate_approval_test.dart` | F6: body PATCH setujui/tolak (`alasanTolak`), parsing lembur bawahan, dialog tolak dengan alasan opsional |
 | `notification_settings_test.dart` | F7: `NotificationDelivery.decide` (sakelar + mode bunyi), preferensi tersimpan, `unreadCount` |
 | `admin_contact_and_copy_test.dart` | F8: normalisasi nomor WA, peringatan ganti rekening |
 | `widget_test.dart` |
 
-Tidak ada test untuk: `LoginScreen`/`PasscodeUnlockScreen`, `CameraCheckinScreen`, `HomeTab`/`MainScreen`, `LeaveTab` (pengajuan), `OnboardingDocumentsScreen`, `ApiClient`, `FcmService`/`NotificationCenter`, `SubordinateService`. Perubahan di area itu tidak punya jaring pengaman otomatis — verifikasi manual dan tulis test bila memungkinkan.
+Tidak ada test untuk: `LoginScreen`/`PasscodeUnlockScreen`, `CameraCheckinScreen` (UI liveness; hanya state machine-nya yang diuji), `HomeTab`/`MainScreen`, `LeaveTab` (pengajuan), `OnboardingDocumentsScreen`, `ApiClient`, `FcmService`/`NotificationCenter`, `SubordinateService`. Perubahan di area itu tidak punya jaring pengaman otomatis — verifikasi manual dan tulis test bila memungkinkan.
 
 ## Test yang akan perlu diubah bersama perilakunya
 

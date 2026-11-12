@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../config/testing_config.dart';
+import '../models/attendance_policy.dart';
 import '../models/models.dart';
 import 'api_client.dart';
+import 'liveness_challenge.dart';
 import 'session_service.dart';
 
 /// Panggilan backend untuk absensi staff yang sedang login.
@@ -49,6 +53,55 @@ class AttendanceService {
     return 'image/jpeg';
   }
 
+  /// GET kebijakan absensi efektif. Gagal jaringan/server -> cache terakhir
+  /// yang berhasil -> [AttendancePolicy.strictDefault] (tidak pernah melempar).
+  static Future<AttendancePolicy> policy() async {
+    final String id;
+    try {
+      id = await _staffId();
+    } catch (_) {
+      return AttendancePolicy.strictDefault;
+    }
+    return AttendancePolicyCache.resolve(id, () async {
+      final res = await ApiClient.instance
+          .get('/mobile/staff/$id/attendance/policy');
+      return AttendancePolicy.fromApi(res.asMap);
+    });
+  }
+
+  /// Susun body check-in/check-out (murni, bisa diuji).
+  ///
+  /// - foto: hanya bila ada; `fotoMimeType` menyertainya.
+  /// - `lokasiPalsu` SELALU dikirim bila koordinat dikirim (GPS terbaca),
+  ///   dan tidak dikirim bila GPS tidak terbaca.
+  /// - `liveness` hanya bila tantangan dijalankan (kebijakan mewajibkan).
+  @visibleForTesting
+  static Map<String, dynamic> buildCheckBody({
+    required bool isCheckIn,
+    String? fotoBase64,
+    String? fotoPath,
+    double? latitude,
+    double? longitude,
+    double? accuracy,
+    bool? lokasiPalsu,
+    LivenessReport? liveness,
+    String? jamTesting,
+  }) {
+    final fotoKey = isCheckIn ? 'fotoMasuk' : 'fotoKeluar';
+    final gpsRead = latitude != null && longitude != null;
+    return {
+      if (fotoBase64 != null) fotoKey: fotoBase64,
+      if (fotoBase64 != null && fotoPath != null)
+        'fotoMimeType': _mimeFromPath(fotoPath),
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (accuracy != null) 'accuracy': accuracy,
+      if (gpsRead) 'lokasiPalsu': lokasiPalsu ?? false,
+      if (liveness != null) 'liveness': liveness.toJson(),
+      if (jamTesting != null) 'time': jamTesting,
+    };
+  }
+
   /// POST check-in.
   ///
   /// [latitude]/[longitude] WAJIB bila staff punya lokasi kerja: server
@@ -61,6 +114,8 @@ class AttendanceService {
     double? latitude,
     double? longitude,
     double? accuracy,
+    bool? lokasiPalsu,
+    LivenessReport? liveness,
   }) async {
     final id = await _staffId();
     final foto = await _encodePhoto(fotoMasuk);
@@ -72,15 +127,17 @@ class AttendanceService {
 
     final res = await ApiClient.instance.post(
       '/mobile/staff/$id/attendance/check-in',
-      body: {
-        if (foto != null) 'fotoMasuk': foto,
-        if (foto != null && fotoMasuk != null)
-          'fotoMimeType': _mimeFromPath(fotoMasuk),
-        if (latitude != null) 'latitude': latitude,
-        if (longitude != null) 'longitude': longitude,
-        if (accuracy != null) 'accuracy': accuracy,
-        if (jamTesting != null) 'time': jamTesting,
-      },
+      body: buildCheckBody(
+        isCheckIn: true,
+        fotoBase64: foto,
+        fotoPath: fotoMasuk,
+        latitude: latitude,
+        longitude: longitude,
+        accuracy: accuracy,
+        lokasiPalsu: lokasiPalsu,
+        liveness: liveness,
+        jamTesting: jamTesting,
+      ),
     );
     return AttendanceRecord.fromApi(res.asMap);
   }
@@ -91,6 +148,8 @@ class AttendanceService {
     double? latitude,
     double? longitude,
     double? accuracy,
+    bool? lokasiPalsu,
+    LivenessReport? liveness,
   }) async {
     final id = await _staffId();
     final foto = await _encodePhoto(fotoKeluar);
@@ -100,15 +159,17 @@ class AttendanceService {
 
     final res = await ApiClient.instance.post(
       '/mobile/staff/$id/attendance/check-out',
-      body: {
-        if (foto != null) 'fotoKeluar': foto,
-        if (foto != null && fotoKeluar != null)
-          'fotoMimeType': _mimeFromPath(fotoKeluar),
-        if (latitude != null) 'latitude': latitude,
-        if (longitude != null) 'longitude': longitude,
-        if (accuracy != null) 'accuracy': accuracy,
-        if (jamTesting != null) 'time': jamTesting,
-      },
+      body: buildCheckBody(
+        isCheckIn: false,
+        fotoBase64: foto,
+        fotoPath: fotoKeluar,
+        latitude: latitude,
+        longitude: longitude,
+        accuracy: accuracy,
+        lokasiPalsu: lokasiPalsu,
+        liveness: liveness,
+        jamTesting: jamTesting,
+      ),
     );
     return AttendanceRecord.fromApi(res.asMap);
   }

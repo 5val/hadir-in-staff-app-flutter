@@ -1,20 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../models/attendance_policy.dart';
 import '../screens/camera_checkin_screen.dart';
 import '../services/attendance_provider.dart';
 import '../services/attendance_service.dart';
 import '../services/calendar_service.dart';
+import '../services/liveness_challenge.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import 'early_checkout_dialog.dart';
 import 'open_session_dialog.dart';
 
-/// Hasil gerbang absensi yang lolos: foto dari kamera + fix GPS segar.
+/// Hasil gerbang absensi yang lolos: foto dari kamera (bila kebijakan
+/// mewajibkan) + fix GPS segar (null bila GPS tidak wajib dan tidak terbaca)
+/// + kebijakan yang dipakai.
 class AttendanceEntryResult {
   final CameraResult camera;
-  final Position position;
-  const AttendanceEntryResult(this.camera, this.position);
+  final Position? position;
+  final AttendancePolicy policy;
+  const AttendanceEntryResult(this.camera, this.position,
+      [this.policy = AttendancePolicy.strictDefault]);
+
+  /// Path foto, null bila kebijakan tidak mewajibkan foto.
+  String? get fotoPath => camera.imagePath;
+
+  /// Dikirim ke server HANYA bila GPS terbaca (null = jangan kirim).
+  bool? get lokasiPalsu => position?.isMocked;
+
+  /// Hasil liveness untuk body; null bila tantangan tidak dijalankan.
+  LivenessReport? get liveness => camera.liveness;
 }
 
 /// Titik sambung ke dunia luar untuk [runAttendanceEntry]. Defaultnya
@@ -25,9 +40,18 @@ class AttendanceEntryHooks {
   final Future<void> Function() refreshTodayAndSnapshot;
   final bool Function() isHolidayWork;
   final bool Function() isAfterEarliestCheckout;
-  final Future<CameraResult?> Function(BuildContext, CameraActionType)
+  final Future<CameraResult?> Function(
+          BuildContext, CameraActionType, AttendancePolicy)
       openCamera;
-  final Future<GpsResult> Function() readGps;
+
+  /// Argumen: blokir lokasi palsu? (kebijakan `deteksiMockGps` + GPS wajib),
+  /// dan batas tunggu fix GPS (pendek bila GPS tidak wajib).
+  final Future<GpsResult> Function(bool blockMocked, Duration timeLimit)
+      readGps;
+
+  /// Kebijakan efektif; tidak pernah melempar (cache -> strict default).
+  /// Null = selalu [AttendancePolicy.strictDefault] (tes lama).
+  final Future<AttendancePolicy> Function()? fetchPolicy;
   final Future<bool> Function(BuildContext, OpenAttendanceSession)
       closeOpenSession;
 
@@ -39,6 +63,7 @@ class AttendanceEntryHooks {
     required this.openCamera,
     required this.readGps,
     required this.closeOpenSession,
+    this.fetchPolicy,
   });
 
   factory AttendanceEntryHooks.live(AttendanceProvider att) =>
@@ -64,14 +89,16 @@ class AttendanceEntryHooks {
         },
         isHolidayWork: () => AppCalendar.instance.hariIni.kerjaHariLibur,
         isAfterEarliestCheckout: () => AttendanceRules.isAfterEarliestCheckout,
-        openCamera: (ctx, type) => Navigator.push<CameraResult>(
+        openCamera: (ctx, type, policy) => Navigator.push<CameraResult>(
           ctx,
           MaterialPageRoute(
             fullscreenDialog: true,
-            builder: (_) => CameraCheckinScreen(actionType: type),
+            builder: (_) => CameraCheckinScreen(actionType: type, policy: policy),
           ),
         ),
-        readGps: LocationService.current,
+        readGps: (blockMocked, timeLimit) => LocationService.current(
+            blockMocked: blockMocked, timeLimit: timeLimit),
+        fetchPolicy: AttendanceService.policy,
         closeOpenSession: (ctx, open) => showOpenSessionDialog(ctx, att, open),
       );
 }
@@ -80,13 +107,16 @@ class AttendanceEntryHooks {
 /// dan kartu Home -- sebelumnya kartu Home melewati dialog "Belum Jam
 /// Pulang!" dan konfirmasi hari libur yang hanya ada di FAB. Urutan:
 ///
-///  check-in : absensi menggantung -> konfirmasi hari libur -> kamera -> GPS
-///  check-out: "Belum Jam Pulang!" (kecuali hari libur) -> kamera -> GPS
+///  check-in : kebijakan -> absensi menggantung -> konfirmasi hari libur -> kamera -> GPS
+///  check-out: kebijakan -> "Belum Jam Pulang!" (kecuali hari libur) -> kamera -> GPS
 ///
-/// GPS dibaca lewat [LocationService.current], yang juga menolak lokasi palsu
-/// (F4). Foto wajib: kamera yang mengembalikan `confirmed` tanpa path
-/// ditolak di sini (F3) -- foto wajah adalah bukti absensi di sisi app,
-/// walau server menganggap foto opsional.
+/// Foto/GPS/radius/mock/liveness mengikuti Kebijakan Absensi efektif
+/// (`GET .../attendance/policy`, [AttendanceService.policy]; gagal -> cache ->
+/// strict default). GPS dibaca lewat [LocationService.current], yang menolak
+/// lokasi palsu (F4) hanya bila kebijakan `deteksiMockGps` + GPS wajib.
+/// Bila kebijakan mewajibkan foto: kamera yang mengembalikan `confirmed`
+/// tanpa path ditolak di sini (F3). Bila tidak: kamera dilewati sama sekali.
+/// Server tetap menghitung ulang semuanya.
 ///
 /// Mengembalikan null bila dibatalkan/ditolak; alasannya (bila perlu
 /// diberitahukan) lewat [onMessage]. Pemanggil lalu mengirim ke server.
@@ -97,6 +127,11 @@ Future<AttendanceEntryResult?> runAttendanceEntry({
   required void Function(String message, {bool error}) onMessage,
 }) async {
   final isCheckIn = actionType == CameraActionType.checkIn;
+
+  final policy = hooks.fetchPolicy == null
+      ? AttendancePolicy.strictDefault
+      : await hooks.fetchPolicy!();
+  if (!context.mounted) return null;
 
   if (isCheckIn) {
     // Server menolak check-in baru (409) selama absensi lama menggantung.
@@ -132,25 +167,34 @@ Future<AttendanceEntryResult?> runAttendanceEntry({
     }
   }
 
-  final camera = await hooks.openCamera(context, actionType);
-  if (!context.mounted || camera == null || !camera.confirmed) return null;
-
-  final path = camera.imagePath;
-  if (path == null || path.isEmpty) {
-    onMessage('Foto wajah tidak tersimpan. Silakan ambil foto ulang.',
-        error: true);
-    return null;
+  CameraResult camera;
+  if (policy.wajibFoto) {
+    final shot = await hooks.openCamera(context, actionType, policy);
+    if (!context.mounted || shot == null || !shot.confirmed) return null;
+    final path = shot.imagePath;
+    if (path == null || path.isEmpty) {
+      onMessage('Foto wajah tidak tersimpan. Silakan ambil foto ulang.',
+          error: true);
+      return null;
+    }
+    camera = shot;
+  } else {
+    // Kebijakan tidak mewajibkan foto: tanpa kamera, tanpa foto terkirim.
+    camera = CameraResult(confirmed: true, actionType: actionType);
   }
 
-  // Fix GPS SEGAR tepat saat absen (staff bisa saja sudah berpindah).
-  final gps = await hooks.readGps();
+  // Fix GPS SEGAR tepat saat absen (staff bisa saja sudah berpindah). GPS
+  // tidak wajib: gagal baca tidak memblokir (koordinat dikirim bila ada).
+  final gps = await hooks.readGps(
+      policy.blocksMockedGps,
+      LocationService.timeLimitFor(wajibGps: policy.wajibGps));
   if (!context.mounted) return null;
-  if (!gps.ok) {
+  if (!gps.ok && policy.wajibGps) {
     onMessage(gps.failure!.message, error: true);
     return null;
   }
 
-  return AttendanceEntryResult(camera, gps.position!);
+  return AttendanceEntryResult(camera, gps.position, policy);
 }
 
 /// Popup konfirmasi check-in di hari libur. True bila staff melanjutkan.

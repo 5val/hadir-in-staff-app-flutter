@@ -47,7 +47,7 @@ Tap notifikasi / banner → `_onTabTap(index)` (peta di [NOTIFICATION-SYSTEM.md]
 | Banner Rekening belum diisi | buka `RekeningScreen` | profil | hilang bila `rekeningLengkap` |
 | Banner MODE TESTING | penanda | `TestingConfig` | hanya `--dart-define=TESTING_MODE=true` |
 | Kartu lokasi | GPS + jarak ke titik kantor, peringatan GPS palsu | `geolocator` (lokal) | `_checkLocation` saat buka + tarik-refresh |
-| Kartu Check-In | buka kamera → `POST check-in` (#10) | | tombol aktif hanya bila GPS aktif, **dalam radius**, dan bukan `isMocked`; kartu diganti "Belum Mulai Bekerja" (sebelum `joinDate`) atau kartu Hari Libur (`hariIni.bolehAbsen=false`) |
+| Kartu Check-In | buka kamera → `POST check-in` (#10) | | tombol aktif hanya bila GPS aktif, **dalam radius**, dan bukan `isMocked` (masing-masing mengikuti Kebijakan Absensi sejak 2026-11-12: radius hanya bila `cekRadius`, GPS hanya bila `wajibGps`, mock hanya bila `deteksiMockGps`); kartu diganti "Belum Mulai Bekerja" (sebelum `joinDate`) atau kartu Hari Libur (`hariIni.bolehAbsen=false`) |
 | Kartu Aktivitas Saat Ini | hitung mundur ke jam pulang, lalu timer lembur naik | `AttendanceRules` | status checkedIn/onBreak/breakEnded |
 | Tombol Istirahat / Break | `POST break-in` (#14); selesai istirahat `POST break-out` (#15) | | hanya setelah check-in, sebelum check-out |
 | Tombol Check-Out | buka kamera → `POST check-out` (#11) | | lihat catatan "kartu vs FAB" di bawah |
@@ -55,7 +55,7 @@ Tap notifikasi / banner → `_onTabTap(index)` (peta di [NOTIFICATION-SYSTEM.md]
 | Tarik-refresh | muat ulang profil, absensi hari ini, cek ulang lokasi | #6, #9 | — |
 | Tombol **SOS** (FAB Home) | dialog "Hubungi Admin/HR": nomor `kontakAdminPhone` office (profil), tombol "Hubungi WhatsApp" membuka `wa.me` (fallback salin nomor); bila kosong dialog berisi info "belum diatur" tanpa tombol hubungi | profil (#6) | F8 |
 
-**Dua pintu absen (setara sejak F5).** FAB MainScreen dan kartu Home memakai SATU alur `runAttendanceEntry` (`widgets/attendance_entry_flow.dart`): sesi menggantung -> konfirmasi hari libur -> dialog "Belum Jam Pulang!" -> kamera -> GPS segar (+ tolak lokasi palsu, F4) -> pemanggil mengirim ke server. Foto wajib (F3). Aturan rinci: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md).
+**Dua pintu absen (setara sejak F5).** FAB MainScreen dan kartu Home memakai SATU alur `runAttendanceEntry` (`widgets/attendance_entry_flow.dart`): sesi menggantung -> konfirmasi hari libur -> dialog "Belum Jam Pulang!" -> kamera -> GPS segar (+ tolak lokasi palsu, F4) -> pemanggil mengirim ke server. Foto wajib (F3) bila kebijakan `wajibFoto`; kebijakan (`GET attendance/policy`) menentukan foto/GPS/radius/mock dan liveness kedip+toleh (2026-11-12). Aturan rinci: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md).
 
 Status absensi lokal (`AttendanceProviderStatus`): `notCheckedIn` → `checkedIn` → `onBreak` ⇄ `breakEnded` → `checkedOut`; semuanya diturunkan dari satu record `attendance/today` di `AttendanceProvider.hydrateFromToday` (tidak ada jalur lain yang menebak status).
 
@@ -111,7 +111,7 @@ Rekening (`RekeningScreen`, dari Akun → Informasi Akun atau banner Home): isi/
 
 | Layar | Fungsi |
 |-------|--------|
-| `CameraCheckinScreen` | kamera depan, deteksi wajah ML Kit (hanya "ada wajah & di tengah"), kartu lokasi/jarak, konfirmasi; shutter aktif hanya bila wajah terdeteksi dan di tengah. Detail: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md) |
+| `CameraCheckinScreen` | kamera depan, deteksi wajah ML Kit ("ada wajah & di tengah"; bukan identitas), tantangan liveness kedip -> toleh -> lurus bila kebijakan mewajibkan (foto otomatis; fallback "Lanjut tanpa verifikasi gerak"), kartu lokasi/jarak, konfirmasi; shutter manual aktif bila wajah terdeteksi dan di tengah (liveness mati / fallback). Detail: [ABSENSI-SHIFT-RULES.md](ABSENSI-SHIFT-RULES.md) |
 | `NotificationScreen` | daftar + filter + mark-read (#40, #41) |
 | `OtpVerificationScreen` | halaman OTP 6 digit reusable; dipakai hanya untuk ganti nomor HP (login punya langkah OTP sendiri di `login_screen.dart`) |
 | `SlipBuktiScreen` | penampil bukti transfer (gambar/PDF) |

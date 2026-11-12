@@ -6,8 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../config/testing_config.dart';
+import '../models/attendance_policy.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import '../services/liveness_challenge.dart';
 import '../services/location_service.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
@@ -39,17 +41,29 @@ class CameraResult {
   /// Alamat lokasi saat check-in/out
   final String? address;
 
+  /// Hasil tantangan liveness; null bila kebijakan tidak mewajibkannya.
+  final LivenessReport? liveness;
+
   CameraResult({
     required this.confirmed,
     required this.actionType,
     this.imagePath,
     this.address,
+    this.liveness,
   });
 }
 
 class CameraCheckinScreen extends StatefulWidget {
   final CameraActionType actionType;
-  const CameraCheckinScreen({super.key, required this.actionType});
+
+  /// Kebijakan Absensi efektif. Menentukan: liveness (kedip + toleh), apakah
+  /// layar memblokir di luar radius, dan apakah lokasi palsu diblokir.
+  final AttendancePolicy policy;
+  const CameraCheckinScreen({
+    super.key,
+    required this.actionType,
+    this.policy = AttendancePolicy.strictDefault,
+  });
 
   @override
   State<CameraCheckinScreen> createState() => _CameraCheckinScreenState();
@@ -70,6 +84,24 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   bool _faceDetected = false;
   bool _faceInCenter = false;
   bool _processingFrame = false;
+  // ── Liveness (hanya bila kebijakan mewajibkan) ──────────────
+  // Jalur: kedip -> toleh -> lurus -> foto otomatis. Gagal 3x atau detektor
+  // tidak tersedia TIDAK memblokir staff (fallback + dicatat di server).
+  static const int _kMaxConsecutiveDetectorErrors = 8;
+
+  LivenessChallenge? _challenge;
+
+  /// null = tantangan berjalan; `dilewati` / `tidak_didukung` = shutter manual.
+  String? _livenessOutcome;
+  LivenessReport? _livenessReport;
+  String? _livenessNotice;
+  int _detectorErrors = 0;
+  bool _autoCapturePending = false;
+  final Stopwatch _sw = Stopwatch()..start();
+
+  bool get _livenessOn => widget.policy.livenessActive;
+  bool get _livenessRunning => _challenge != null && _livenessOutcome == null;
+
   // Warna oval: putih = idle/tidak ada wajah, hijau = wajah OK, kuning = wajah tapi tidak center
   Color get _ovalColor {
     if (_processingCapture || _showConfirmOverlay)
@@ -104,6 +136,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   bool _checkingLocation = false;
   bool _locationChecked = false;
   bool _locationInRange = false;
+  bool _gpsFailed = false;
   String _currentAddress = '';
   double _distanceMeters = 0;
 
@@ -111,6 +144,17 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   /// bukan lagi konstanta 200 m yang tidak pernah ada di data mana pun.
   double get _officeRadiusMeters =>
       (AppSession.staff?.lokasiRadius ?? 100).toDouble();
+
+  /// Alarm lokasi (merah + blokir konfirmasi) hanya sejauh kebijakan
+  /// mewajibkannya: GPS gagal saat GPS wajib, atau di luar radius saat radius
+  /// ditegakkan. Selain itu lokasi hanya informasi (server yang memutuskan).
+  bool get _locationAlarm {
+    if (!_locationChecked) return false;
+    if (_gpsFailed) return widget.policy.wajibGps;
+    return widget.policy.radiusEnforced && !_locationInRange;
+  }
+
+  bool get _canConfirm => !_locationAlarm;
 
   // ── Clock ───────────────────────────────────────────────────
   // TestingConfig.now() = jam asli HP di mode normal, jam hardcode di mode
@@ -141,19 +185,36 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
     _resultScale = Tween<double>(begin: 0.7, end: 1.0).animate(
         CurvedAnimation(parent: _resultCtrl, curve: Curves.elasticOut));
 
-    _clockTimer = Timer.periodic(const Duration(seconds: 1),
-        (_) => setState(() => _now = TestingConfig.now()));
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_livenessRunning && !_processingCapture && !_showConfirmOverlay) {
+        _onLivenessEvent(_challenge!.tick(_sw.elapsedMilliseconds));
+      }
+      setState(() => _now = TestingConfig.now());
+    });
 
-    // Inisialisasi face detector
+    // Liveness hanya di Android/iOS; platform lain = tidak_didukung.
+    if (_livenessOn) {
+      if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+        _markUnsupported();
+      } else {
+        _challenge = LivenessChallenge();
+      }
+    }
+
+    // Inisialisasi face detector. Klasifikasi mata + tracking hanya bila
+    // liveness aktif (lebih berat). headEulerAngleY hanya dijamin di mode
+    // accurate, jadi liveness memakai accurate.
     if (!kIsWeb) {
+      final live = _challenge != null;
       _faceDetector = FaceDetector(
         options: FaceDetectorOptions(
-          enableClassification: false,
+          enableClassification: live,
           enableLandmarks: false,
           enableContours: false,
-          enableTracking: false,
+          enableTracking: live,
           minFaceSize: 0.15,
-          performanceMode: FaceDetectorMode.fast,
+          performanceMode:
+              live ? FaceDetectorMode.accurate : FaceDetectorMode.fast,
         ),
       );
     }
@@ -252,12 +313,14 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       try {
         final inputImage = _buildInputImage(image, camDesc);
         if (inputImage == null) {
+          _noteDetectorError();
           _processingFrame = false;
           return;
         }
 
         final faces = await _faceDetector!.processImage(inputImage);
         if (!mounted) return;
+        _detectorErrors = 0;
 
         if (faces.isEmpty) {
           setState(() {
@@ -278,12 +341,116 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
             _faceInCenter = centered;
           });
         }
+
+        if (_livenessRunning) {
+          _feedLiveness(faces);
+          // Tantangan lolos: foto otomatis begitu wajah di tengah.
+          if (_autoCapturePending &&
+              _faceInCenter &&
+              !_processingCapture &&
+              !_showConfirmOverlay) {
+            _autoCapturePending = false;
+            _capturePhoto();
+          }
+        }
       } catch (_) {
-        // silent error — tidak hentikan stream
+        // tidak hentikan stream; bila terus gagal, liveness -> tidak_didukung
+        _noteDetectorError();
       } finally {
         _processingFrame = false;
       }
     });
+  }
+
+  // ── Liveness helpers ─────────────────────────────────────────
+  void _noteDetectorError() {
+    if (!_livenessRunning) return;
+    _detectorErrors++;
+    if (_detectorErrors >= _kMaxConsecutiveDetectorErrors && mounted) {
+      setState(_markUnsupported);
+    }
+  }
+
+  void _markUnsupported() {
+    _livenessOutcome = LivenessReport.statusTidakDidukung;
+    _livenessReport = const LivenessReport.unsupported();
+    _challenge = null;
+    _autoCapturePending = false;
+    _livenessNotice = null;
+  }
+
+  void _feedLiveness(List<Face> faces) {
+    final now = _sw.elapsedMilliseconds;
+    final LivenessSample sample;
+    if (faces.isEmpty) {
+      sample = LivenessSample.noFace(now);
+    } else {
+      final f = faces.reduce((a, b) =>
+          (a.boundingBox.width * a.boundingBox.height >
+                  b.boundingBox.width * b.boundingBox.height)
+              ? a
+              : b);
+      sample = LivenessSample(
+        trackingId: f.trackingId,
+        leftEyeOpen: f.leftEyeOpenProbability,
+        rightEyeOpen: f.rightEyeOpenProbability,
+        yaw: f.headEulerAngleY,
+        faceCount: faces.length,
+        timestampMs: now,
+      );
+    }
+    _onLivenessEvent(_challenge!.feed(sample));
+  }
+
+  void _onLivenessEvent(LivenessEvent ev) {
+    final c = _challenge;
+    if (c == null) return;
+    switch (ev) {
+      case LivenessEvent.none:
+      case LivenessEvent.stepDone:
+        break;
+      case LivenessEvent.reset:
+        _livenessNotice = 'Wajah hilang atau lebih dari satu. Ulangi dari awal.';
+        break;
+      case LivenessEvent.attemptTimedOut:
+        _livenessNotice =
+            'Waktu habis. Coba lagi (percobaan ${c.currentAttempt}/${c.config.maxAttempts}).';
+        break;
+      case LivenessEvent.fallbackAllowed:
+        _livenessNotice = null;
+        break;
+      case LivenessEvent.passed:
+        _livenessNotice = null;
+        _livenessReport = c.buildReport(LivenessReport.statusLolos,
+            nowMs: _sw.elapsedMilliseconds);
+        _autoCapturePending = true;
+        break;
+    }
+    if (ev != LivenessEvent.none && mounted) setState(() {});
+  }
+
+  /// Staff memilih lanjut tanpa verifikasi gerak setelah gagal 3x.
+  void _skipLiveness() {
+    final c = _challenge;
+    if (c == null) return;
+    setState(() {
+      _livenessOutcome = LivenessReport.statusDilewati;
+      _livenessReport = c.buildReport(LivenessReport.statusDilewati,
+          nowMs: _sw.elapsedMilliseconds);
+      _livenessNotice = null;
+    });
+  }
+
+  void _restartLiveness() {
+    if (!_livenessOn ||
+        _livenessOutcome == LivenessReport.statusTidakDidukung) {
+      return;
+    }
+    _challenge = LivenessChallenge();
+    _livenessOutcome = null;
+    _livenessReport = null;
+    _livenessNotice = null;
+    _autoCapturePending = false;
   }
 
   /// Buat InputImage dari CameraImage untuk MLKit
@@ -293,9 +460,18 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
     if (format == null) return null;
 
     final plane = image.planes.first;
-    final bytes = image.planes
-        .map((p) => p.bytes)
-        .reduce((a, b) => Uint8List.fromList([...a, ...b]));
+    // Satu plane (NV21 Android / BGRA iOS) dipakai langsung tanpa salinan;
+    // multi-plane digabung sekali lewat WriteBuffer (bukan spread berulang).
+    final Uint8List bytes;
+    if (image.planes.length == 1) {
+      bytes = plane.bytes;
+    } else {
+      final wb = WriteBuffer();
+      for (final p in image.planes) {
+        wb.putUint8List(p.bytes);
+      }
+      bytes = wb.done().buffer.asUint8List();
+    }
 
     // Rotasi kamera ke device
     final sensorOrientation = camDesc.sensorOrientation;
@@ -353,13 +529,17 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       _locationChecked = false;
     });
 
-    final result = await LocationService.current();
+    final result = await LocationService.current(
+        blockMocked: widget.policy.blocksMockedGps,
+        timeLimit: LocationService.timeLimitFor(
+            wajibGps: widget.policy.wajibGps));
     if (!mounted) return;
 
     if (!result.ok) {
       setState(() {
         _checkingLocation = false;
         _locationChecked = true;
+        _gpsFailed = true;
         _locationInRange = false;
         _distanceMeters = 0;
         _currentAddress = result.failure!.message;
@@ -367,6 +547,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       return;
     }
 
+    _gpsFailed = false;
     final pos = result.position!;
     final lat = AppSession.staff?.lokasiLatitude;
     final lng = AppSession.staff?.lokasiLongitude;
@@ -443,7 +624,14 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       // izinkan mengulang (deteksi wajah dinyalakan lagi).
       _capturedFile = null;
       if (!mounted) return;
-      setState(() => _processingCapture = false);
+      setState(() {
+        _processingCapture = false;
+        // Tantangan yang sudah lolos diulang supaya tidak memicu foto
+        // otomatis berulang-ulang.
+        if (_livenessReport?.status == LivenessReport.statusLolos) {
+          _restartLiveness();
+        }
+      });
       _restartFaceStream();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Gagal mengambil foto. Silakan coba lagi.'),
@@ -583,6 +771,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
           actionType: widget.actionType,
           imagePath: _capturedFile?.path,
           address: _currentAddress.isNotEmpty ? _currentAddress : null,
+          liveness: _livenessReport,
         ));
   }
 
@@ -593,6 +782,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
       _showConfirmOverlay = false;
       _faceDetected = false;
       _faceInCenter = false;
+      _restartLiveness();
     });
     _fetchLocation();
     _restartFaceStream();
@@ -613,6 +803,21 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   }
 
   // ── Styling helpers ─────────────────────────────────────────
+  Color get _locationColor {
+    if (!_locationChecked) return Colors.white54;
+    if (_locationAlarm) return Colors.redAccent;
+    return widget.policy.radiusEnforced && !_gpsFailed
+        ? Colors.greenAccent
+        : Colors.white70;
+  }
+
+  String get _locationLabel {
+    if (!_locationChecked) return 'GPS...';
+    if (_locationAlarm) return '✗ Di luar area';
+    if (_gpsFailed) return 'GPS tidak terbaca';
+    return widget.policy.radiusEnforced ? '✓ Dalam area' : 'Lokasi terbaca';
+  }
+
   Color get _actionColor => widget.actionType == CameraActionType.checkIn
       ? AppColors.brandNavy
       : const Color(0xFFB01E1E);
@@ -764,7 +969,10 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
         !_showConfirmOverlay &&
         !checkoutBlocked &&
         !checkinBlocked &&
-        (kIsWeb || (_faceDetected && _faceInCenter));
+        !_livenessRunning &&
+        (kIsWeb ||
+            _livenessOutcome == LivenessReport.statusTidakDidukung ||
+            (_faceDetected && _faceInCenter));
 
     return SafeArea(
       child: Column(
@@ -943,15 +1151,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                                         strokeWidth: 1.5,
                                         color: Colors.white54))
                                 : Icon(
-                                    _locationInRange
-                                        ? Icons.location_on_rounded
-                                        : Icons.location_off_rounded,
+                                    _locationAlarm
+                                        ? Icons.location_off_rounded
+                                        : Icons.location_on_rounded,
                                     size: 14,
-                                    color: _locationChecked
-                                        ? (_locationInRange
-                                            ? Colors.greenAccent
-                                            : Colors.redAccent)
-                                        : Colors.white54,
+                                    color: _locationColor,
                                   ),
                             const SizedBox(width: 6),
                             Flexible(
@@ -961,19 +1165,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                                   Text(
                                     _checkingLocation
                                         ? 'Mendeteksi...'
-                                        : (_locationChecked
-                                            ? (_locationInRange
-                                                ? '✓ Dalam area'
-                                                : '✗ Di luar area')
-                                            : 'GPS...'),
+                                        : _locationLabel,
                                     style: GoogleFonts.inter(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
-                                        color: _locationChecked
-                                            ? (_locationInRange
-                                                ? Colors.greenAccent
-                                                : Colors.redAccent)
-                                            : Colors.white54),
+                                        color: _locationColor),
                                   ),
                                   if (_locationChecked &&
                                       _currentAddress.isNotEmpty)
@@ -983,7 +1179,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                                         style: GoogleFonts.inter(
                                             fontSize: 9,
                                             color: Colors.white38)),
-                                  if (_locationChecked)
+                                  if (_locationChecked && !_gpsFailed)
                                     Text(
                                       '${_distanceMeters.toStringAsFixed(0)} m dari kantor',
                                       style: GoogleFonts.inter(
@@ -1000,8 +1196,14 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                 ),
                 const SizedBox(height: 16),
 
+                // Liveness: instruksi + progres (menggantikan indikator wajah)
+                if (_livenessRunning && !checkoutBlocked && !checkinBlocked)
+                  _buildLivenessPanel(),
+                if (_livenessOutcome != null) _buildLivenessOutcomeNote(),
+
                 // Face detection status indicator
                 if (!kIsWeb &&
+                    !_livenessRunning &&
                     !checkoutBlocked &&
                     !checkinBlocked &&
                     _cameraReady)
@@ -1165,7 +1367,11 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                           ? 'Anda sudah check-in — tap oval untuk Check-Out'
                           : !_cameraReady
                               ? 'Menginisialisasi kamera depan...'
-                              : kIsWeb
+                              : _livenessRunning
+                                  ? 'Ikuti petunjuk di atas — foto diambil otomatis'
+                                  : (kIsWeb ||
+                                          _livenessOutcome ==
+                                              LivenessReport.statusTidakDidukung)
                                   ? 'Posisikan wajah di dalam oval, lalu tap tombol kamera'
                                   : _faceInCenter
                                       ? 'Sempurna! Tap tombol kamera untuk foto'
@@ -1185,6 +1391,111 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Panel liveness: 3 langkah + instruksi + fallback ────────
+  Widget _buildLivenessPanel() {
+    final c = _challenge!;
+    final fallback = c.fallbackAllowed;
+    const labels = ['Kedip', 'Toleh', 'Lurus'];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.15)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < labels.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                _livenessStepChip(labels[i], i + 1,
+                    done: c.stepsDone > i, active: !fallback && c.stepsDone == i),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(c.instruction,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: fallback ? Colors.orangeAccent : Colors.white)),
+          const SizedBox(height: 2),
+          Text(
+              fallback
+                  ? 'Gagal ${c.config.maxAttempts}x. Anda tetap bisa melanjutkan.'
+                  : 'Percobaan ${c.currentAttempt}/${c.config.maxAttempts}',
+              style: GoogleFonts.inter(fontSize: 10, color: Colors.white60)),
+          if (_livenessNotice != null && !fallback) ...[
+            const SizedBox(height: 4),
+            Text(_livenessNotice!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                    fontSize: 10, color: Colors.orangeAccent)),
+          ],
+          if (fallback) ...[
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _skipLiveness,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.white54),
+                foregroundColor: Colors.white,
+              ),
+              child: Text('Lanjut tanpa verifikasi gerak',
+                  style: GoogleFonts.inter(
+                      fontSize: 12, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: 4),
+            Text('Admin akan melihat absensi ini ditandai tanpa verifikasi gerak.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(fontSize: 9, color: Colors.white54)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _livenessStepChip(String label, int n,
+      {required bool done, required bool active}) {
+    final color = done
+        ? Colors.greenAccent
+        : active
+            ? Colors.white
+            : Colors.white38;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(done ? Icons.check_circle_rounded : Icons.circle_outlined,
+            size: 14, color: color),
+        const SizedBox(width: 4),
+        Text('$n. $label',
+            style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                color: color)),
+      ],
+    );
+  }
+
+  /// Catatan singkat setelah fallback / perangkat tidak didukung.
+  Widget _buildLivenessOutcomeNote() {
+    final unsupported = _livenessOutcome == LivenessReport.statusTidakDidukung;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(
+        unsupported
+            ? 'Verifikasi gerak tidak tersedia di perangkat ini. Ambil foto biasa; admin akan melihat absensi ini ditandai.'
+            : 'Tanpa verifikasi gerak. Ambil foto biasa; admin akan melihat absensi ini ditandai.',
+        textAlign: TextAlign.center,
+        style: GoogleFonts.inter(fontSize: 10, color: Colors.orangeAccent),
       ),
     );
   }
@@ -1494,7 +1805,7 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
   //   );
   // }
   Widget _buildConfirmOverlay() {
-  final inRange = _locationInRange;
+  final inRange = !_locationAlarm;
 
   return Positioned.fill(
     child: Container(
@@ -1579,7 +1890,9 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
 
                             Text(
                               inRange
-                                  ? 'Foto & Lokasi Terverifikasi'
+                                  ? (_gpsFailed
+                                      ? 'Foto Siap Dikirim'
+                                      : 'Foto & Lokasi Terverifikasi')
                                   : 'Di Luar Area Kantor',
                               style: GoogleFonts.inter(
                                   fontSize: 14,
@@ -1670,10 +1983,10 @@ class _CameraCheckinScreenState extends State<CameraCheckinScreen>
                             Expanded(
                               flex: 2, // Tombol konfirmasi dibuat lebih lebar
                               child: ElevatedButton.icon(
-                                onPressed: inRange ? _confirm : null,
+                                onPressed: _canConfirm ? _confirm : null,
                                 icon: const Icon(Icons.check_rounded, size: 16),
                                 label: Text(
-                                  inRange ? 'Konfirmasi' : 'Di Luar Area',
+                                  _canConfirm ? 'Konfirmasi' : 'Di Luar Area',
                                   style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                                 ),
                                 style: ElevatedButton.styleFrom(
