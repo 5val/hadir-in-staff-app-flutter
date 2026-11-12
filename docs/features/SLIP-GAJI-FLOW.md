@@ -46,17 +46,21 @@ Dialog `_TolakSlipDialog` ("Apa yang salah?"):
 - `SalaryService.susunAlasanTolak` menyusun satu string: `Bagian yang salah: <label; label>. Catatan: <teks>` (dipotong ke 500).
 - Body: `{alasan, dikirimKonfirmasiAt?, bagian?}` — `bagian` **hanya disertakan bila tidak kosong** (`SalaryService.tolakBody`).
 - Setelah sukses: lokal `statusSlip: ditolak`, `bisaTolak: false`, `bagianTolak` terisi; snackbar "Slip ditolak. HR akan memeriksa dan merevisinya."
-- **Tolak hanya sekali** per slip (`ditolakAt`). Setelah HR memperbaiki dan mengirim ulang, tombol "Ada yang salah" hilang (`bisaTolak` false) dan staff hanya bisa Setujui. Bagian yang ditolak ditandai ikon ⓘ **merah**, bagian yang direvisi HR ⓘ **hijau** (ketuk untuk detail; daftar "Slip sudah direvisi HR" merangkum semua perubahan).
+- **Tolak hanya sekali** per slip (`tolakDipakaiAt`; batal-setuju tidak memakainya, lihat bagian 6). Setelah HR memperbaiki dan mengirim ulang, tombol "Ada yang salah" hilang (`bisaTolak` false) dan staff hanya bisa Setujui. Bagian yang ditolak ditandai ikon ⓘ **merah**, bagian yang direvisi HR ⓘ **hijau** (ketuk untuk detail; daftar "Slip sudah direvisi HR" merangkum semua perubahan).
 
 ### R9 (diperbaiki 2026-11-08): kirim Tolak wajib centang + catatan
 
 `_TolakSlipDialogState._valid` = `_checked.isNotEmpty && catatan.trim().length >= 5`: tombol **Kirim ke HR** hanya aktif bila **minimal satu bagian dicentang DAN catatan >= 5 karakter**; tanpa centang tampil helper "Centang minimal satu bagian yang salah." `SalaryService.tolakBody` selalu mengirim `bagian`. Alasan: server mewajibkan `bagian` minimal 1 sejak 2026-10-25 (`slipTolakSchema`, [sprint3.md "Penggajian follow-up 2026-10-25" #1](../../../hadir-in-api-backend-express-js/docs/api-contracts/sprint3.md)), request tanpa centang dulu berakhir 400. Test: `slip_and_rekening_screens_test.dart` (grup "tolak dialog" dan "reject dialog").
 
-## 6. Batalkan persetujuan
+## 6. Batalkan persetujuan (BIZ-A05, 2026-11-12)
 
-Kartu "Ada yang keliru? Selama kantor belum menyetujui pencairan, Anda bisa membatalkan persetujuan" + tombol **Batalkan persetujuan**, tampil bila `bisaBatalSetujuEfektif` (server: `terkunci`/`dikonfirmasi`, `unpaid`, belum Setujui Cair). `BatalSetujuDialog`: alasan **5–300 karakter** (dihitung UTF-16 sama dengan `.length` JS server; `Utf16LengthLimitingFormatter`). `POST .../batal-setuju` `{alasan, dikirimKonfirmasiAt?}` (#34). Sukses → lokal `ditolak`, alasan `Persetujuan dibatalkan staff: <alasan>`, `bisaUnduh/bisaBatalSetuju/bisaTolak` false. **409** (mis. "sudah disetujui untuk dicairkan") → pesan server apa adanya, layar tetap terbuka, slip disegarkan (`_refreshSlip`) agar tombol hilang.
+Kartu "Ada yang keliru? Selama kantor belum menyetujui pencairan, Anda bisa membatalkan persetujuan" + tombol **Batalkan persetujuan**, tampil bila `bisaBatalSetujuEfektif` (server: `terkunci`/`dikonfirmasi`, `unpaid`, belum Setujui Cair).
 
-**RENCANA (disetujui 2026-11-06, belum di kode, mobile-api bagian 7 & ATURAN-BISNIS §10.1):** batal-setuju tidak lagi menghabiskan jatah Tolak, dan staff **mewajibkan mencentang bagian yang salah** saat membatalkan. Saat ini (kode): dialog hanya alasan; server mengisi `ditolakAt` sehingga setelah dikoreksi staff hanya bisa Setujui. Perubahan ini butuh backend (`bagian[]` di `batal-setuju`) **dan** dialog baru di app.
+`BatalSetujuDialog(items: _tolakItems())`: staff **wajib mencentang minimal satu bagian** yang salah (daftar centang SAMA dengan dialog Tolak, widget bersama `SlipBagianChecklist` + `TolakItem`) **dan** menulis alasan **5-300 karakter** (UTF-16 sama dengan `.length` JS server; `Utf16LengthLimitingFormatter`). Tombol aktif hanya bila keduanya terpenuhi; tanpa centang tampil helper "Centang minimal satu bagian yang salah." Salinan dialog menjelaskan bahwa bagian yang dicentang adalah yang akan diperbaiki HR dan bahwa membatalkan persetujuan **tidak menghabiskan jatah "Ada yang salah"**. Boleh diulang berkali-kali (server mengizinkan sampai Setujui Cair), tanpa batas di client.
+
+`POST .../batal-setuju` `{alasan, bagian: string[] (wajib, key sama dengan Tolak), dikirimKonfirmasiAt?}` (#34); tanpa `bagian` server 400 (`SalaryService.batalSetujuBody` selalu mengirimnya). Sukses: `SalaryService.batalSetuju` mengembalikan slip dari respons server (`SalarySlip?`, null bila respons kosong) dan layar memakainya; fallback lokal: `ditolak`, alasan `Persetujuan dibatalkan staff: <alasan>`, `bagianTolak` = centang, `ditolakAt` = sekarang, `bisaUnduh/bisaBatalSetuju/bisaTolak` false (status `ditolak`, belum menunggu konfirmasi), `tolakDipakaiAt` TIDAK disentuh. **409** (mis. "sudah disetujui untuk dicairkan") → pesan server apa adanya, layar tetap terbuka, slip disegarkan (`_refreshSlip`) agar tombol hilang.
+
+**Jatah Tolak vs `ditolakAt`:** server punya dua kolom. `tolakDipakaiAt` = jatah Tolak sekali terpakai (hanya diisi Tolak sungguhan); `bisaTolak = menunggu_konfirmasi && !tolakDipakaiAt`. `ditolakAt` terisi juga oleh batal-setuju dan hanya menjadi jangkar diff revisi (`SlipLineRevision.sinceRejection`) / penanda `pernahDitolak`. Jadi setelah batal-setuju lalu HR mengirim ulang, tombol "Ada yang salah" MUNCUL lagi (satu kali) dan banner "Slip sudah direvisi HR" menyebutnya. Fallback model bila server lama tidak mengirim `bisaTolak` memakai `tolakDipakaiAt`, bukan `ditolakAt`.
 
 ## 7. Komponen slip, Fasilitas, "Di luar THP"
 
@@ -92,4 +96,3 @@ Semua `rawType` berawalan `slip_`, `gaji_`, `pencairan_` membuka tab Gaji dan (b
 - Komentar di build `SalaryDetailScreen` ("Take Home Pay = Gaji Bersih + Tunjangan - Potongan") basi; angka THP = `gajiNetto` server.
 - `filterSlipsByMonths` dead code.
 - Dialog "Ganti rekening gaji?" kini menyebut (F8) bahwa slip yang sudah disetujui cair tetapi belum dibayar dibatalkan persetujuan cairnya (`rekeningReplaceWarning`; server: `rekening.ts` A9 `revokeSiapCairForStaff`, hanya bila bank/nomor/nama pemilik berubah).
-- RENCANA batal-setuju (bagian 6) belum ada di kode maupun backend.

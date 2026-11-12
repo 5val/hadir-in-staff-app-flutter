@@ -161,24 +161,37 @@ class SalaryService {
   static const batalAlasanMin = 5;
   static const batalAlasanMax = 300;
 
+  /// [bagian] WAJIB minimal 1 (BIZ-A05, key sama dengan Tolak); tanpa itu
+  /// server membalas 400. Server menyusun label bagian sendiri.
   static Map<String, dynamic> batalSetujuBody(
-          String alasan, String? dikirimKonfirmasiAt) =>
+          String alasan, String? dikirimKonfirmasiAt,
+          {required List<String> bagian}) =>
       {
         'alasan': alasan.trim(),
         if (dikirimKonfirmasiAt != null)
           'dikirimKonfirmasiAt': dikirimKonfirmasiAt,
+        'bagian': bagian,
       };
 
   /// POST: staff membatalkan persetujuannya (D1) selama slip belum disetujui
-  /// cair. Slip menjadi `ditolak` di server. 409 membawa pesan server yang
-  /// ditampilkan apa adanya.
-  static Future<void> batalSetuju(String slipId, String alasan,
-      {String? dikirimKonfirmasiAt}) async {
+  /// cair. Slip menjadi `ditolak` di server dan jatah Tolak sekali TIDAK
+  /// terpakai. 409 membawa pesan server yang ditampilkan apa adanya.
+  /// Mengembalikan slip dari respons server, atau null bila respons kosong /
+  /// tidak terbaca (pemanggil lalu memakai keadaan lokal).
+  static Future<SalarySlip?> batalSetuju(String slipId, String alasan,
+      {String? dikirimKonfirmasiAt, required List<String> bagian}) async {
     final id = await _staffId();
-    await ApiClient.instance.post(
+    final res = await ApiClient.instance.post(
       '/mobile/staff/$id/gaji/slip/$slipId/batal-setuju',
-      body: batalSetujuBody(alasan, dikirimKonfirmasiAt),
+      body: batalSetujuBody(alasan, dikirimKonfirmasiAt, bagian: bagian),
     );
+    final data = res.asMap;
+    if (data['id'] == null) return null;
+    try {
+      return SalarySlip.fromApi(data);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// GET berkas bukti pembayaran (gambar atau PDF) dengan header auth.

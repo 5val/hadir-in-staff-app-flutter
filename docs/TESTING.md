@@ -37,7 +37,7 @@ Test regresi yang tidak pernah merah tidak membuktikan apa pun. Untuk setiap per
 | `work_date_picker_and_drive_guard_test.dart` | `WorkCalendar.hasSelectableForSubmission`, `showWorkDatePicker` tanpa tanggal terpilih, penjaga unggah ganda `SlipDriveSync` (`claimUpload`) |
 | `rekening_test.dart` | `RekeningValidator` (5–20 digit, spasi/strip ditoleransi), rekening di `StaffProfile` |
 | `salary_slip_test.dart` | `SalarySlip`: `KonfirmasiResult` (server memutuskan status), round-trip `dikirimKonfirmasiAt`, `alasanTolak` hanya saat `ditolak`, state pencairan, **THP = `gajiNetto`** (regresi EPIC 9), komponen di luar THP, potongan BPJS (EPIC 9c), statistik kehadiran |
-| `slip_followup_test.dart` | Tipe & label periode, `SlipFilter`, label status kartu, flag batal-setuju & bukti, notifikasi slip (`SlipDeepLink`), `AttentionPulse`, detail slip (batalkan persetujuan, bukti), `SlipBuktiScreen` |
+| `slip_followup_test.dart` | Tipe & label periode, `SlipFilter`, label status kartu, flag batal-setuju & bukti, notifikasi slip (`SlipDeepLink`), `AttentionPulse`, detail slip (batalkan persetujuan: wajib centang bagian + alasan, body `bagian`, slip dari respons server; bukti), `SlipBuktiScreen` |
 | `slip_and_rekening_screens_test.dart` | Widget `SalaryDetailScreen` (Fasilitas bagian sendiri, status menentukan tombol, dialog Tolak dengan centang, banner pencairan, penolakan sekali + tanda revisi) dan `RekeningScreen` |
 | `logout_and_drafts_test.dart` | F2: draft dokumen per staffId; `clearSession` membersihkan draft + penanda notifikasi + kredensial |
 | `attendance_entry_flow_test.dart` | F3/F4/F5: `LocationService.guardMocked`; `runAttendanceEntry` (dialog "Belum Jam Pulang!", konfirmasi hari libur, foto wajib, GPS palsu); 2026-11-12: alur mengikuti kebijakan (wajibFoto=false lewati kamera, wajibGps=false tidak memblokir, deteksiMockGps, `lokasiPalsu`, liveness terbawa) |
@@ -53,7 +53,7 @@ Tidak ada test untuk: `LoginScreen`/`PasscodeUnlockScreen`, `CameraCheckinScreen
 ## Test yang akan perlu diubah bersama perilakunya
 
 - ~~Dialog Tolak slip (R9)~~ -- SELESAI 2026-11-08: kedua grup test diubah bersama `_valid`; tombol harus mati tanpa centang walau catatan >= 5 karakter, dan terbukti merah terhadap `_valid` lama (3 test gagal).
-- **RENCANA batal-setuju** (centang bagian wajib saat membatalkan): test dialog batal-setuju di `slip_followup_test.dart` ("detail slip: batalkan persetujuan", memakai `BatalSetujuDialog` yang sekarang hanya meminta alasan 5–300 karakter) perlu diubah bersama dialog barunya, dan test baru harus terbukti merah terhadap dialog lama.
+- **Batal-setuju (BIZ-A05) sudah dibangun:** dialog sekarang memakai `BatalSetujuDialog(items:)` (centang wajib); test dialog di `slip_followup_test.dart` sudah diubah bersamanya dan test baru (dialog, body, fallback `tolakDipakaiAt` di `salary_slip_test.dart`, slip dari respons server) terbukti merah terhadap kode lama.
 
 ## Konvensi
 

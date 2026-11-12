@@ -121,11 +121,14 @@ class _AttentionPulseState extends State<AttentionPulse>
 // ─────────────────────────────────────────────────────────────────────────────
 // BATAL SETUJU DIALOG
 // ─────────────────────────────────────────────────────────────────────────────
-/// Dialog alasan pembatalan persetujuan. Mengembalikan alasan (trim) lewat
-/// `Navigator.pop`; tombol aktif bila panjang alasan 5-300 karakter (batas
-/// server).
+/// Dialog pembatalan persetujuan (BIZ-A05). Staff WAJIB mencentang minimal
+/// satu bagian slip yang salah (daftar centang yang sama dengan dialog Tolak,
+/// [SlipBagianChecklist]) dan menulis alasan 5-300 karakter (batas server).
+/// Mengembalikan `(alasan trim, bagian = key baris)` lewat `Navigator.pop`.
 class BatalSetujuDialog extends StatefulWidget {
-  const BatalSetujuDialog({super.key});
+  const BatalSetujuDialog({super.key, required this.items});
+
+  final List<TolakItem> items;
 
   @override
   State<BatalSetujuDialog> createState() => _BatalSetujuDialogState();
@@ -133,6 +136,7 @@ class BatalSetujuDialog extends StatefulWidget {
 
 class _BatalSetujuDialogState extends State<BatalSetujuDialog> {
   final _ctrl = TextEditingController();
+  final _checked = <int>{};
 
   @override
   void dispose() {
@@ -145,34 +149,53 @@ class _BatalSetujuDialogState extends State<BatalSetujuDialog> {
     // Panjang dihitung dalam unit UTF-16 (Dart `String.length`) -- sama
     // dengan `.length` JS di server -- bukan jumlah grapheme.
     final len = _ctrl.text.trim().length;
-    final ok = len >= SalaryService.batalAlasanMin &&
+    final ok = _checked.isNotEmpty &&
+        len >= SalaryService.batalAlasanMin &&
         len <= SalaryService.batalAlasanMax;
     return AlertDialog(
       title: const Text('Batalkan persetujuan?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-              'Slip akan dikembalikan ke HR untuk diperbaiki. Tulis alasannya.'),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('batal-alasan'),
-            controller: _ctrl,
-            maxLines: 3,
-            inputFormatters: [
-              Utf16LengthLimitingFormatter(SalaryService.batalAlasanMax),
-            ],
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText:
-                  'Alasan (minimal ${SalaryService.batalAlasanMin} karakter)',
-              border: const OutlineInputBorder(),
-              // Hitungan sama persis dengan yang divalidasi server.
-              counterText: '$len/${SalaryService.batalAlasanMax}',
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Slip akan dikembalikan ke HR untuk diperbaiki. Centang bagian '
+                'yang salah: itu yang akan diperbaiki HR. Membatalkan '
+                'persetujuan TIDAK menghabiskan jatah "Ada yang salah" Anda.'),
+            const SizedBox(height: 8),
+            Flexible(
+              child: SlipBagianChecklist(
+                items: widget.items,
+                checked: _checked,
+                onChanged: (i, v) => setState(() {
+                  v ? _checked.add(i) : _checked.remove(i);
+                }),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('batal-alasan'),
+              controller: _ctrl,
+              maxLines: 3,
+              inputFormatters: [
+                Utf16LengthLimitingFormatter(SalaryService.batalAlasanMax),
+              ],
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText:
+                    'Alasan (minimal ${SalaryService.batalAlasanMin} karakter)',
+                border: const OutlineInputBorder(),
+                // Hitungan sama persis dengan yang divalidasi server.
+                counterText: '$len/${SalaryService.batalAlasanMax}',
+                helperText: _checked.isEmpty
+                    ? 'Centang minimal satu bagian yang salah.'
+                    : null,
+              ),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -180,7 +203,15 @@ class _BatalSetujuDialogState extends State<BatalSetujuDialog> {
             child: const Text('Kembali')),
         FilledButton(
           key: const Key('batal-kirim'),
-          onPressed: ok ? () => Navigator.pop(context, _ctrl.text.trim()) : null,
+          onPressed: ok
+              ? () => Navigator.pop(context, (
+                    alasan: _ctrl.text.trim(),
+                    bagian: [
+                      for (var i = 0; i < widget.items.length; i++)
+                        if (_checked.contains(i)) widget.items[i].key,
+                    ],
+                  ))
+              : null,
           child: const Text('Batalkan persetujuan'),
         ),
       ],
@@ -934,8 +965,8 @@ class SalaryDetailScreen extends StatefulWidget {
   final UserProfile user;
 
   /// Hanya untuk test: pengganti `SalaryService.batalSetuju` / `slipById`.
-  final Future<void> Function(String slipId, String alasan,
-      {String? dikirimKonfirmasiAt})? batalSetujuCall;
+  final Future<SalarySlip?> Function(String slipId, String alasan,
+      {String? dikirimKonfirmasiAt, required List<String> bagian})? batalSetujuCall;
   final Future<SalarySlip> Function(String slipId)? slipLoader;
 
   @override
@@ -1055,25 +1086,33 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
 
   // ── Batalkan persetujuan (D1) ─────────────────────────────
   Future<void> _batalSetuju() async {
-    final alasan = await showDialog<String>(
+    final hasil = await showDialog<({String alasan, List<String> bagian})>(
       context: context,
-      builder: (ctx) => const BatalSetujuDialog(),
+      builder: (ctx) => BatalSetujuDialog(items: _tolakItems()),
     );
-    if (alasan == null || _busy) return;
+    if (hasil == null || _busy) return;
+    final alasan = hasil.alasan;
 
     setState(() => _busy = true);
     try {
-      await (widget.batalSetujuCall ?? SalaryService.batalSetuju)(slip.id, alasan,
-          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt);
+      final fromServer = await (widget.batalSetujuCall ??
+          SalaryService.batalSetuju)(slip.id, alasan,
+          dikirimKonfirmasiAt: slip.dikirimKonfirmasiAt, bagian: hasil.bagian);
       if (!mounted) return;
-      setState(() => slip = slip.copyWith(
+      // Slip dari respons server bila ada; kalau tidak, tebak lokal. Slip jadi
+      // `ditolak`; jatah Tolak sekali TIDAK terpakai (BIZ-A05) jadi
+      // `tolakDipakaiAt` tidak disentuh, dan `bisaTolak` baru relevan lagi
+      // setelah HR mengirim ulang (status menunggu_konfirmasi).
+      setState(() => slip = fromServer ??
+          slip.copyWith(
             statusSlip: 'ditolak',
-            alasanTolak: 'Persetujuan dibatalkan staff: ${alasan.trim()}',
+            alasanTolak: 'Persetujuan dibatalkan staff: $alasan',
             bisaUnduh: false,
             bisaBatalSetuju: false,
-            ditolakAt: DateTime.now(), // reject-once: setelah dikirim ulang HR hanya bisa dikonfirmasi
-            bisaTolak: false,
+            ditolakAt: DateTime.now(),
+            bisaTolak: false, // status `ditolak` -> belum menunggu konfirmasi
             perluAksiServer: false,
+            bagianTolak: hasil.bagian,
           ));
       _snack('Persetujuan dibatalkan. HR akan memperbaiki dan mengirim ulang slip.');
     } on ApiException catch (e) {
@@ -1151,7 +1190,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
   /// Bagian slip yang bisa dicentang staff saat menolak: hanya Gaji Pokok,
   /// Lembur, tiap Tunjangan dan tiap Fasilitas. Baris lain (bonus, THR, uang
   /// makan, pajak, potongan, kehadiran, THP) tidak bisa ditolak.
-  List<_TolakItem> _tolakItems() {
+  List<TolakItem> _tolakItems() {
     String? sectionOf(SalaryComponent c) {
       if (c.key == 'col:gajiPokok' || c.key == 'col:lemburTotal') {
         return 'Pendapatan Pokok';
@@ -1164,7 +1203,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     return [
       for (final c in slip.components)
         if (sectionOf(c) != null)
-          _TolakItem(
+          TolakItem(
               key: c.key,
               section: sectionOf(c)!,
               label: c.label,
@@ -1191,6 +1230,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
             alasanTolak: alasan.trim(),
             bisaTolak: false,
             ditolakAt: DateTime.now(),
+            tolakDipakaiAt: DateTime.now(),
             bagianTolak: hasil.bagian,
           ));
       _snack('Slip ditolak. HR akan memeriksa dan merevisinya.');
@@ -1220,8 +1260,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         body = 'HR sudah memeriksa penolakan Anda dan mengirim ulang slip ini. '
             'Ikon ⓘ merah = bagian yang Anda tolak, ikon ⓘ hijau = hasil revisi '
             'pihak kantor (ketuk untuk melihat detailnya).\n\n'
-            'Penolakan hanya bisa dilakukan sekali. Jika masih ada yang tidak '
-            'sesuai, hubungi HR secara langsung.';
+            '${slip.bisaTolak ? 'Jika masih ada yang tidak sesuai, Anda masih bisa menekan "Ada yang salah" satu kali.' : 'Penolakan hanya bisa dilakukan sekali. Jika masih ada yang tidak sesuai, hubungi HR secara langsung.'}';
         action = _buildRevisiList();
         break;
       case 'menunggu_konfirmasi':
@@ -2649,13 +2688,13 @@ class _SummaryRow extends StatelessWidget {
 // DIALOG: alasan menolak slip
 // ─────────────────────────────────────────────────────────────────────────────
 /// Satu baris yang bisa dicentang di dialog tolak.
-class _TolakItem {
+class TolakItem {
   /// Kunci baris (lihat [SalaryComponent.key]) yang dikirim sebagai `bagian`.
   final String key;
   final String section;
   final String label;
   final String? amount;
-  const _TolakItem(
+  const TolakItem(
       {required this.key,
       required this.section,
       required this.label,
@@ -2665,8 +2704,68 @@ class _TolakItem {
   String get text => '$section: $label';
 }
 
+/// Daftar centang bagian slip (dikelompokkan per seksi), dipakai bersama oleh
+/// dialog Tolak dan dialog Batal-setuju supaya aturannya tidak bercabang.
+/// Stateless: pemanggil memegang himpunan indeks [checked].
+class SlipBagianChecklist extends StatelessWidget {
+  const SlipBagianChecklist({
+    super.key,
+    required this.items,
+    required this.checked,
+    required this.onChanged,
+  });
+
+  final List<TolakItem> items;
+  final Set<int> checked;
+  final void Function(int index, bool value) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final sections = <String>[];
+    for (final i in items) {
+      if (!sections.contains(i.section)) sections.add(i.section);
+    }
+    final maxHeight = MediaQuery.of(context).size.height * 0.4;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: ListView(
+        shrinkWrap: true,
+        children: [
+          for (final section in sections) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 2),
+              child: Text(section,
+                  style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.slate600)),
+            ),
+            for (var i = 0; i < items.length; i++)
+              if (items[i].section == section)
+                CheckboxListTile(
+                  key: ValueKey('tolak-item-$i'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: checked.contains(i),
+                  onChanged: (v) => onChanged(i, v == true),
+                  title: Text(items[i].label,
+                      style: GoogleFonts.inter(fontSize: 13)),
+                  secondary: items[i].amount == null
+                      ? null
+                      : Text(items[i].amount!,
+                          style: GoogleFonts.inter(
+                              fontSize: 12, color: AppColors.slate700)),
+                ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _TolakSlipDialog extends StatefulWidget {
-  final List<_TolakItem> items;
+  final List<TolakItem> items;
   const _TolakSlipDialog({required this.items});
 
   @override
@@ -2697,12 +2796,6 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final sections = <String>[];
-    for (final i in widget.items) {
-      if (!sections.contains(i.section)) sections.add(i.section);
-    }
-    final maxHeight = MediaQuery.of(context).size.height * 0.4;
-
     return AlertDialog(
       title: const Text('Apa yang salah?'),
       content: SizedBox(
@@ -2718,43 +2811,12 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
                 'bagian yang salah sudah dicentang.'),
             const SizedBox(height: 8),
             Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: maxHeight),
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final section in sections) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 2),
-                        child: Text(section,
-                            style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.slate600)),
-                      ),
-                      for (var i = 0; i < widget.items.length; i++)
-                        if (widget.items[i].section == section)
-                          CheckboxListTile(
-                            key: ValueKey('tolak-item-$i'),
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            controlAffinity: ListTileControlAffinity.leading,
-                            value: _checked.contains(i),
-                            onChanged: (v) => setState(() {
-                              v == true ? _checked.add(i) : _checked.remove(i);
-                            }),
-                            title: Text(widget.items[i].label,
-                                style: GoogleFonts.inter(fontSize: 13)),
-                            secondary: widget.items[i].amount == null
-                                ? null
-                                : Text(widget.items[i].amount!,
-                                    style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: AppColors.slate700)),
-                          ),
-                    ],
-                  ],
-                ),
+              child: SlipBagianChecklist(
+                items: widget.items,
+                checked: _checked,
+                onChanged: (i, v) => setState(() {
+                  v ? _checked.add(i) : _checked.remove(i);
+                }),
               ),
             ),
             const SizedBox(height: 8),

@@ -37,6 +37,19 @@ SalarySlip slip(String periode,
 final Uint8List _png = base64Decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
 
+const _items = [
+  TolakItem(
+      key: 'col:gajiPokok',
+      section: 'Pendapatan Pokok',
+      label: 'Gaji Pokok',
+      amount: 'Rp 5.000.000'),
+  TolakItem(
+      key: 'tunjangan:Transport',
+      section: 'Tunjangan',
+      label: 'Transport',
+      amount: 'Rp 300.000'),
+];
+
 void main() {
   setUpAll(() => GoogleFonts.config.allowRuntimeFetching = false);
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -156,12 +169,18 @@ void main() {
           isFalse);
     });
     test('body batal-setuju & deteksi PDF', () {
-      expect(SalaryService.batalSetujuBody('  salah angka ', 'T'),
-          {'alasan': 'salah angka', 'dikirimKonfirmasiAt': 'T'});
       expect(
-          SalaryService.batalSetujuBody('x', null)
-              .containsKey('dikirimKonfirmasiAt'),
-          isFalse);
+          SalaryService.batalSetujuBody('  salah angka ', 'T',
+              bagian: ['col:gajiPokok', 'tunjangan:Transport']),
+          {
+            'alasan': 'salah angka',
+            'dikirimKonfirmasiAt': 'T',
+            'bagian': ['col:gajiPokok', 'tunjangan:Transport'],
+          });
+      final noStamp =
+          SalaryService.batalSetujuBody('x', null, bagian: ['col:gajiPokok']);
+      expect(noStamp.containsKey('dikirimKonfirmasiAt'), isFalse);
+      expect(noStamp['bagian'], ['col:gajiPokok']); // BIZ-A05: selalu dikirim
       expect(
           SalaryService.isPdfBytes(
               Uint8List.fromList([0x25, 0x50, 0x44, 0x46, 1])),
@@ -289,13 +308,16 @@ void main() {
       expect(find.byKey(const Key('btn-batal-setuju')), findsNothing);
     });
 
-    testWidgets('dialog alasan: kirim aktif hanya >= 5 karakter', (t) async {
-      String? result;
+    testWidgets('dialog: kirim aktif hanya bila >= 1 bagian dicentang DAN alasan >= 5 karakter',
+        (t) async {
+      ({String alasan, List<String> bagian})? result;
       await t.pumpWidget(MaterialApp(
         home: Builder(
             builder: (ctx) => TextButton(
-                onPressed: () async => result = await showDialog<String>(
-                    context: ctx, builder: (_) => const BatalSetujuDialog()),
+                onPressed: () async => result = await showDialog<
+                        ({String alasan, List<String> bagian})>(
+                    context: ctx,
+                    builder: (_) => BatalSetujuDialog(items: _items)),
                 child: const Text('buka'))),
       ));
       await t.tap(find.text('buka'));
@@ -308,10 +330,36 @@ void main() {
       expect(btn().onPressed, isNull);
       await t.enterText(find.byKey(const Key('batal-alasan')), ' angka salah ');
       await t.pump();
+      // Alasan cukup tapi belum ada centang -> tetap nonaktif (BIZ-A05).
+      expect(btn().onPressed, isNull);
+      await t.tap(find.byKey(const ValueKey('tolak-item-1')));
+      await t.pump();
       expect(btn().onPressed, isNotNull);
+      // Lepas centang -> nonaktif lagi.
+      await t.tap(find.byKey(const ValueKey('tolak-item-1')));
+      await t.pump();
+      expect(btn().onPressed, isNull);
+      await t.tap(find.byKey(const ValueKey('tolak-item-0')));
+      await t.tap(find.byKey(const ValueKey('tolak-item-1')));
+      await t.pump();
       await t.tap(find.byKey(const Key('batal-kirim')));
       await t.pumpAndSettle();
-      expect(result, 'angka salah');
+      expect(result?.alasan, 'angka salah');
+      expect(result?.bagian, ['col:gajiPokok', 'tunjangan:Transport']);
+    });
+
+    testWidgets('dialog: salinan menjelaskan jatah Tolak tidak terpakai', (t) async {
+      await t.pumpWidget(MaterialApp(
+        home: Builder(
+            builder: (ctx) => TextButton(
+                onPressed: () => showDialog<void>(
+                    context: ctx,
+                    builder: (_) => BatalSetujuDialog(items: _items)),
+                child: const Text('buka'))),
+      ));
+      await t.tap(find.text('buka'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('TIDAK menghabiskan jatah'), findsOneWidget);
     });
 
     testWidgets('paid: tombol Lihat bukti pembayaran', (t) async {
@@ -418,13 +466,15 @@ void main() {
       await t.pumpWidget(MaterialApp(
           home: Builder(
               builder: (c) => TextButton(
-                  onPressed: () => showDialog<String>(
-                      context: c, builder: (_) => const BatalSetujuDialog()),
+                  onPressed: () => showDialog<void>(
+                      context: c,
+                      builder: (_) => BatalSetujuDialog(items: _items)),
                   child: const Text('buka')))));
       await t.tap(find.text('buka'));
       await t.pumpAndSettle();
       // 3 emoji = 6 unit UTF-16 (>= 5) walau hanya 3 grapheme.
       await t.enterText(find.byKey(const Key('batal-alasan')), '\u{1F600}\u{1F600}\u{1F600}');
+      await t.tap(find.byKey(const ValueKey('tolak-item-0')));
       await t.pump();
       expect(find.text('6/300'), findsOneWidget);
       expect(t.widget<FilledButton>(find.byKey(const Key('batal-kirim'))).onPressed,
@@ -447,9 +497,11 @@ void main() {
             builder: (c) => TextButton(
                 onPressed: () => Navigator.of(c).push(MaterialPageRoute(
                     builder: (_) => SalaryDetailScreen(
-                          slip: slip('2026-10', extra: {'bisaBatalSetuju': true}),
+                          slip: slip('2026-10',
+                              extra: {'bisaBatalSetuju': true, 'gajiPokok': 5000000}),
                           user: AppSession.currentUser,
-                          batalSetujuCall: (id, a, {dikirimKonfirmasiAt}) async =>
+                          batalSetujuCall: (id, a,
+                                  {dikirimKonfirmasiAt, required bagian}) async =>
                               throw ApiException(
                                   'Slip sudah disetujui untuk dicairkan, persetujuan tidak bisa dibatalkan lagi.',
                                   statusCode: 409),
@@ -462,12 +514,79 @@ void main() {
       await t.tap(find.byKey(const Key('btn-batal-setuju')));
       await t.pumpAndSettle();
       await t.enterText(find.byKey(const Key('batal-alasan')), 'angka salah');
+      await t.tap(find.byKey(const ValueKey('tolak-item-0')));
       await t.pump();
       await t.tap(find.byKey(const Key('batal-kirim')));
       await t.pumpAndSettle();
       expect(find.byType(SalaryDetailScreen), findsOneWidget); // tidak ter-pop
       expect(find.textContaining('sudah disetujui untuk dicairkan'), findsOneWidget);
       expect(find.byKey(const Key('btn-batal-setuju')), findsNothing); // disegarkan
+    });
+
+    testWidgets('batal-setuju sukses: body membawa bagian; status jadi ditolak, jatah Tolak utuh',
+        (t) async {
+      t.view.physicalSize = const Size(1080, 2400);
+      t.view.devicePixelRatio = 2.0;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+      List<String>? sentBagian;
+      String? sentAlasan;
+      await t.pumpWidget(MaterialApp(
+        home: SalaryDetailScreen(
+          slip: slip('2026-10',
+              extra: {'bisaBatalSetuju': true, 'gajiPokok': 5000000}),
+          user: AppSession.currentUser,
+          batalSetujuCall: (id, a, {dikirimKonfirmasiAt, required bagian}) async {
+            sentAlasan = a;
+            sentBagian = bagian;
+            return null; // respons kosong -> pakai keadaan lokal
+          },
+        ),
+      ));
+      await t.pump();
+      await t.tap(find.byKey(const Key('btn-batal-setuju')));
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const Key('batal-alasan')), 'angka salah');
+      await t.tap(find.byKey(const ValueKey('tolak-item-0')));
+      await t.pump();
+      await t.tap(find.byKey(const Key('batal-kirim')));
+      await t.pumpAndSettle();
+      expect(sentAlasan, 'angka salah');
+      expect(sentBagian, ['col:gajiPokok']);
+      // Slip kini ditolak: tombol batal hilang, tidak bisa diunduh.
+      expect(find.byKey(const Key('btn-batal-setuju')), findsNothing);
+      expect(find.textContaining('Persetujuan dibatalkan'), findsWidgets);
+    });
+
+    testWidgets('batal-setuju sukses: slip dari respons server dipakai apa adanya',
+        (t) async {
+      t.view.physicalSize = const Size(1080, 2400);
+      t.view.devicePixelRatio = 2.0;
+      addTearDown(t.view.resetPhysicalSize);
+      addTearDown(t.view.resetDevicePixelRatio);
+      final fromServer = slip('2026-10', status: 'ditolak', extra: {
+        'bisaBatalSetuju': false,
+        'ditolakAt': '2026-10-20T03:00:00.000Z',
+        'alasanTolak': 'Persetujuan dibatalkan staff: dari server',
+      });
+      await t.pumpWidget(MaterialApp(
+        home: SalaryDetailScreen(
+          slip: slip('2026-10',
+              extra: {'bisaBatalSetuju': true, 'gajiPokok': 5000000}),
+          user: AppSession.currentUser,
+          batalSetujuCall: (id, a, {dikirimKonfirmasiAt, required bagian}) async =>
+              fromServer,
+        ),
+      ));
+      await t.pump();
+      await t.tap(find.byKey(const Key('btn-batal-setuju')));
+      await t.pumpAndSettle();
+      await t.enterText(find.byKey(const Key('batal-alasan')), 'angka salah');
+      await t.tap(find.byKey(const ValueKey('tolak-item-0')));
+      await t.pump();
+      await t.tap(find.byKey(const Key('batal-kirim')));
+      await t.pumpAndSettle();
+      expect(find.textContaining('dari server'), findsWidgets);
     });
 
     testWidgets('banner legacy dikonfirmasi = "Disetujui"', (t) async {

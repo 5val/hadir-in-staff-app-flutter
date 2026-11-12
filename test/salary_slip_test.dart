@@ -480,9 +480,31 @@ void main() {
     test('bisaTolak dari server; fallback: menunggu & belum pernah ditolak', () {
       final p = _slipPayload()..['statusSlip'] = 'menunggu_konfirmasi';
       expect(SalarySlip.fromApi(p).bisaTolak, isTrue);
-      expect(SalarySlip.fromApi({...p, 'ditolakAt': '2026-09-02T03:00:00.000Z'}).bisaTolak,
+      expect(SalarySlip.fromApi({...p, 'tolakDipakaiAt': '2026-09-02T03:00:00.000Z'}).bisaTolak,
           isFalse);
       expect(SalarySlip.fromApi({...p, 'bisaTolak': false}).bisaTolak, isFalse);
+    });
+
+    test('BIZ-A05: fallback bisaTolak memakai tolakDipakaiAt, bukan ditolakAt', () {
+      final p = _slipPayload()..['statusSlip'] = 'menunggu_konfirmasi';
+      // Slip hasil batal-setuju lalu dikirim ulang HR: ada ditolakAt, jatah utuh.
+      final batal = SalarySlip.fromApi({...p, 'ditolakAt': '2026-09-02T03:00:00.000Z'});
+      expect(batal.bisaTolak, isTrue);
+      expect(batal.pernahDitolak, isTrue); // tetap "sudah direvisi"
+      expect(batal.tolakDipakaiAt, isNull);
+      // Tolak sungguhan: kedua kolom terisi -> jatah habis.
+      final tolak = SalarySlip.fromApi({
+        ...p,
+        'ditolakAt': '2026-09-02T03:00:00.000Z',
+        'tolakDipakaiAt': '2026-09-02T03:00:00.000Z',
+      });
+      expect(tolak.bisaTolak, isFalse);
+      expect(tolak.tolakDipakaiAt, isNotNull);
+      // Nilai server tetap menang.
+      expect(
+          SalarySlip.fromApi({...p, 'bisaTolak': true, 'tolakDipakaiAt': '2026-09-02T03:00:00.000Z'})
+              .bisaTolak,
+          isTrue);
     });
 
     test('baris punya kunci yang sama dengan server', () {

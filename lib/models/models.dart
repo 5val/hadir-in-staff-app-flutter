@@ -917,8 +917,13 @@ class SalarySlip {
   final bool bisaTolak;
 
   /// Kapan staff menolak (bertahan setelah HR mengirim ulang). Null = belum
-  /// pernah ditolak. Batal-setuju juga mengisinya (slip menjadi `ditolak`).
+  /// pernah ditolak. Batal-setuju juga mengisinya (slip menjadi `ditolak`),
+  /// jadi ini jangkar diff revisi, BUKAN penanda jatah Tolak terpakai.
   final DateTime? ditolakAt;
+
+  /// Kapan jatah Tolak sekali terpakai (hanya diisi oleh Tolak sungguhan,
+  /// bukan batal-setuju). Null = jatah masih utuh.
+  final DateTime? tolakDipakaiAt;
 
   /// Kunci baris yang dicentang staff saat menolak (lihat [SalaryComponent.key];
   /// plus `umum:kehadiran` / `umum:thp`).
@@ -962,10 +967,11 @@ class SalarySlip {
     this.buktiGabungan = false,
     bool? bisaTolak,
     this.ditolakAt,
+    this.tolakDipakaiAt,
     this.bagianTolak = const [],
     this.revisi = const {},
   }) : bisaTolak = bisaTolak ??
-            (statusSlip == 'menunggu_konfirmasi' && ditolakAt == null);
+            (statusSlip == 'menunggu_konfirmasi' && tolakDipakaiAt == null);
 
   /// Alias agar kompatibel dengan salary_screen yang pakai `slip.workDays`
   int get workDays => workingDays;
@@ -1156,6 +1162,7 @@ class SalarySlip {
       buktiGabungan: j['buktiGabungan'] == true,
       bisaTolak: j['bisaTolak'] is bool ? j['bisaTolak'] as bool : null,
       ditolakAt: ditolakAt,
+      tolakDipakaiAt: date('tolakDipakaiAt'),
       bagianTolak: bagianRaw is List
           ? bagianRaw.map((e) => e.toString()).toList()
           : const [],
@@ -1336,6 +1343,7 @@ class SalarySlip {
     DateTime? paidAt,
     bool? bisaTolak,
     DateTime? ditolakAt,
+    DateTime? tolakDipakaiAt,
     List<String>? bagianTolak,
   }) {
     return SalarySlip(
@@ -1372,6 +1380,7 @@ class SalarySlip {
       buktiGabungan: buktiGabungan,
       bisaTolak: bisaTolak ?? this.bisaTolak,
       ditolakAt: ditolakAt ?? this.ditolakAt,
+      tolakDipakaiAt: tolakDipakaiAt ?? this.tolakDipakaiAt,
       bagianTolak: bagianTolak ?? this.bagianTolak,
       revisi: revisi,
     );
