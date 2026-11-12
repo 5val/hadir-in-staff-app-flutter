@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../models/aturan_lampiran.dart';
 import '../models/models.dart';
 import 'api_client.dart';
 import 'session_service.dart';
@@ -26,6 +27,20 @@ class LeaveService {
       query: {if (status != null) 'status': status},
     );
     return res.asList.map(LeaveRequest.fromApi).toList();
+  }
+
+  /// GET aturan lampiran bukti per jenis (2026-11-12). Gagal apa pun ->
+  /// [AturanLampiran.fallback] (izin opsional, cuti tidak perlu): server tetap
+  /// menegakkan aturan sebenarnya dan menjawab 400 saat submit.
+  static Future<AturanLampiran> aturanLampiran() async {
+    try {
+      final id = await _staffId();
+      final res = await ApiClient.instance
+          .get('/mobile/staff/$id/leave/aturan-lampiran');
+      return AturanLampiran.fromApi(res.asMap);
+    } catch (_) {
+      return AturanLampiran.fallback;
+    }
   }
 
   /// Batas lampiran per pengajuan — sama dengan `MAX_LAMPIRAN` backend.

@@ -3,12 +3,13 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../theme/app_theme.dart';
 import '../widgets/work_date_picker.dart';
 import '../widgets/common_widgets.dart';
+import '../models/aturan_lampiran.dart';
 import '../models/models.dart';
+import '../widgets/leave_photo_field.dart';
 import '../services/leave_service.dart';
 import '../services/api_client.dart';
 import '../services/overtime_service.dart';
@@ -1009,7 +1010,7 @@ class _LeaveTabState extends State<LeaveTab> {
                   ],
                 ),
               ),
-              _CutiForm(onSubmitted: _loadLeaves),
+              CutiForm(onSubmitted: _loadLeaves),
             ],
           ),
         ),
@@ -1065,7 +1066,7 @@ class _LeaveTabState extends State<LeaveTab> {
                   ],
                 ),
               ),
-              _IzinForm(onSubmitted: _loadLeaves),
+              IzinForm(onSubmitted: _loadLeaves),
             ],
           ),
         ),
@@ -1177,6 +1178,16 @@ class _LeaveTabState extends State<LeaveTab> {
                             _filterType == LeaveType.school
                                 ? null
                                 : LeaveType.school),
+                      ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Dinas',
+                        icon: Icons.business_center_rounded,
+                        selected: _filterType == LeaveType.dinas,
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.dinas
+                                ? null
+                                : LeaveType.dinas),
                       ),
                     ],
                   ),
@@ -1531,10 +1542,11 @@ DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
 /// Geser [d] sebanyak [months] bulan; tanggal yang tidak ada di bulan tujuan
 /// dijepit ke hari terakhirnya (31 Jan + 1 bulan = 28/29 Feb).
-DateTime _addMonthsClamped(DateTime d, int months) {
-  final lastDay = DateTime(d.year, d.month + months + 1, 0).day;
-  return DateTime(d.year, d.month + months, d.day < lastDay ? d.day : lastDay);
-}
+DateTime _addMonthsClamped(DateTime d, int months) =>
+    addMonthsClamped(d, months);
+
+/// Dinas: hari ini - 1 bulan s/d hari ini + 1 bulan (hari ini boleh).
+({DateTime first, DateTime last}) _dinasRange() => dinasRange(DateTime.now());
 
 /// Cuti: besok s/d 1 bulan ke depan.
 ({DateTime first, DateTime last}) _cutiRange() {
@@ -1609,6 +1621,14 @@ class _DateRangeFields extends StatelessWidget {
     required this.onEnd,
   });
 
+  /// Izin (masa lalu) mulai dari ujung akhir rentang, Dinas dari hari ini
+  /// (tengah rentang), Cuti dari awal rentang.
+  DateTime _initialStart(({DateTime first, DateTime last}) range) {
+    if (jenis == 'Izin') return range.last;
+    if (jenis == 'Dinas') return _dateOnly(DateTime.now());
+    return range.first;
+  }
+
   Future<void> _pick(BuildContext context, bool isStart) async {
     final s = start;
     final first = !isStart && s != null && !s.isBefore(range.first)
@@ -1617,7 +1637,7 @@ class _DateRangeFields extends StatelessWidget {
     final picked = await showWorkDatePicker(
       context: context,
       initialDate: isStart
-          ? (s ?? (jenis == 'Izin' ? range.last : range.first))
+          ? (s ?? _initialStart(range))
           : (end ?? s ?? range.first),
       firstDate: first,
       lastDate: range.last,
@@ -1670,18 +1690,37 @@ class _DateRangeFields extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════
 // CUTI FORM
 // ═══════════════════════════════════════════════════════════
-class _CutiForm extends StatefulWidget {
+class CutiForm extends StatefulWidget {
   final VoidCallback? onSubmitted;
-  const _CutiForm({this.onSubmitted});
+
+  /// Aturan lampiran siap pakai (test). Null -> diambil dari server.
+  @visibleForTesting
+  final AturanLampiran? rules;
+
+  const CutiForm({super.key, this.onSubmitted, this.rules});
   @override
-  State<_CutiForm> createState() => _CutiFormState();
+  State<CutiForm> createState() => _CutiFormState();
 }
 
-class _CutiFormState extends State<_CutiForm> {
+class _CutiFormState extends State<CutiForm> {
   final user = SampleData.currentUser;
   DateTime? _start, _end;
   final _reasonCtrl = TextEditingController();
+  final List<File> _photos = [];
   bool _submitting = false;
+  late AturanLampiran _rules = widget.rules ?? AturanLampiran.fallback;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.rules == null) {
+      LeaveService.aturanLampiran().then((r) {
+        if (mounted) setState(() => _rules = r);
+      });
+    }
+  }
+
+  AturanLampiranJenis get _rule => _rules.untuk(LampiranJenis.cutiTahunan);
 
   @override
   void dispose() {
@@ -1703,6 +1742,7 @@ class _CutiFormState extends State<_CutiForm> {
     if (!_rangeValid) return false;
     if (_reasonCtrl.text.trim().isEmpty) return false;
     if (_days > _remaining) return false;
+    if (!lampiranTerpenuhi(_rule, _days, _photos.length)) return false;
     return true;
   }
 
@@ -1717,6 +1757,9 @@ class _CutiFormState extends State<_CutiForm> {
         tanggalMulai: _start!,
         tanggalSelesai: _end!,
         jumlahHari: _days,
+        // Kolom foto hanya muncul bila aturan opsional/wajib; bila tidak,
+        // daftar ini kosong.
+        lampiran: _rule.tampil ? List.of(_photos) : const [],
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -1725,12 +1768,23 @@ class _CutiFormState extends State<_CutiForm> {
         SnackBar(content: Text(e.message), backgroundColor: AppColors.danger),
       );
       return;
+    } on FileSystemException {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Foto tidak bisa dibaca. Hapus lalu pilih ulang.'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
     }
     if (!mounted) return;
     setState(() {
       _submitting = false;
       _start = null;
       _end = null;
+      _photos.clear();
       _reasonCtrl.clear();
     });
     widget.onSubmitted?.call();
@@ -1819,6 +1873,17 @@ class _CutiFormState extends State<_CutiForm> {
               hintText: 'Tuliskan alasan cuti kamu...',
             ),
           ),
+          if (_rule.tampil) ...[
+            const SizedBox(height: 14),
+            LeavePhotoField(
+              rule: _rule,
+              photos: _photos,
+              maxLampiran: _rules.maxLampiran,
+              busy: _submitting,
+              hint: 'Mis. surat pendukung cuti.',
+              onChanged: () => setState(() {}),
+            ),
+          ],
           const SizedBox(height: 16),
 
           GradientButton(
@@ -1838,113 +1903,81 @@ class _CutiFormState extends State<_CutiForm> {
 // ═══════════════════════════════════════════════════════════
 // IZIN FORM
 // ═══════════════════════════════════════════════════════════
-class _IzinForm extends StatefulWidget {
+class IzinForm extends StatefulWidget {
   final VoidCallback? onSubmitted;
-  const _IzinForm({this.onSubmitted});
+
+  /// Aturan lampiran siap pakai (test). Null -> diambil dari server.
+  @visibleForTesting
+  final AturanLampiran? rules;
+
+  const IzinForm({super.key, this.onSubmitted, this.rules});
   @override
-  State<_IzinForm> createState() => _IzinFormState();
+  State<IzinForm> createState() => _IzinFormState();
 }
 
-class _IzinFormState extends State<_IzinForm> {
+class _IzinFormState extends State<IzinForm> {
   String? _type;
   DateTime? _startDate;
   DateTime? _endDate;
   final _noteCtrl = TextEditingController();
-  final _picker = ImagePicker();
   final List<File> _photos = [];
   bool _submitting = false;
+  late AturanLampiran _rules = widget.rules ?? AturanLampiran.fallback;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.rules == null) {
+      LeaveService.aturanLampiran().then((r) {
+        if (mounted) setState(() => _rules = r);
+      });
+    }
+  }
 
   static const _types = [
     ('Sakit', Icons.local_hospital_rounded),
     ('Seminar', Icons.school_rounded),
     ('Lainnya', Icons.event_note_rounded),
+    ('Dinas', Icons.business_center_rounded),
   ];
 
   void _onTypeChanged(String type) {
     setState(() => _type = type);
   }
 
+  bool get _isDinas => _type == 'Dinas';
+
+  /// Izin: masa lalu (kemarin ke belakang). Dinas: -1 s/d +1 bulan.
+  ({DateTime first, DateTime last}) get _range =>
+      _isDinas ? _dinasRange() : _izinRange();
+
+  String get _rangeJenis => _isDinas ? 'Dinas' : 'Izin';
+
   bool get _rangeValid =>
       _startDate != null &&
       _endDate != null &&
-      _rangeError(_startDate, _endDate, _izinRange(), 'Izin') == null;
+      _rangeError(_startDate, _endDate, _range, _rangeJenis) == null;
+
+  /// Hari kerja pada rentang -- angka yang sama dengan yang dikirim ke server.
+  int get _days => _rangeValid ? _workingDaysBetween(_startDate!, _endDate!) : 0;
+
+  AturanLampiranJenis get _rule =>
+      _rules.untuk(LampiranJenis.forIzinType(_type));
 
   bool get _canSubmit {
     if (_type == null) return false;
     if (!_rangeValid) return false;
     if (_noteCtrl.text.trim().isEmpty) return false;
+    if (!lampiranTerpenuhi(_rule, _days, _photos.length)) return false;
     return true;
-  }
-
-  Future<void> _addPhoto() async {
-    if (_photos.length >= LeaveService.maxLampiran) return;
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.slate200,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              leading: const Icon(Icons.photo_camera_rounded,
-                  color: AppColors.brandCyanDark),
-              title: Text('Ambil Foto', style: AppText.body1),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded,
-                  color: AppColors.brandCyanDark),
-              title: Text('Pilih dari Galeri', style: AppText.body1),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (source == null) return;
-
-    XFile? picked;
-    try {
-      picked = await _picker.pickImage(
-        source: source,
-        // Ditekan supaya 3 foto sekaligus tetap jauh di bawah batas body
-        // JSON backend (12 MB) setelah di-base64.
-        imageQuality: 75,
-        maxWidth: 1600,
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Gagal membuka kamera/galeri. Periksa izin aplikasi.'),
-          backgroundColor: AppColors.danger,
-        ),
-      );
-      return;
-    }
-    if (picked == null || !mounted) return;
-    final path = picked.path;
-    setState(() => _photos.add(File(path)));
   }
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
     // Petakan jenis izin UI → tipe/subTipe backend.
-    final String tipe = _type == 'Sakit' ? 'Sakit' : 'Izin';
-    final String subTipe = _type == 'Sakit' ? '' : (_type ?? '');
+    final api = izinTypeToApi(_type!);
+    final String tipe = api.tipe;
+    final String subTipe = api.subTipe;
     final int jumlahHari = _workingDaysBetween(_startDate!, _endDate!);
 
     setState(() => _submitting = true);
@@ -1956,7 +1989,7 @@ class _IzinFormState extends State<_IzinForm> {
         tanggalMulai: _startDate!,
         tanggalSelesai: _endDate!,
         jumlahHari: jumlahHari,
-        lampiran: List.of(_photos),
+        lampiran: _rule.tampil ? List.of(_photos) : const [],
       );
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -2012,81 +2045,6 @@ class _IzinFormState extends State<_IzinForm> {
   void dispose() {
     _noteCtrl.dispose();
     super.dispose();
-  }
-
-  Widget _photoInput() {
-    final canAdd = _photos.length < LeaveService.maxLampiran && !_submitting;
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        for (var i = 0; i < _photos.length; i++)
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.file(
-                  _photos[i],
-                  width: 76,
-                  height: 76,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
-                    width: 76,
-                    height: 76,
-                    color: AppColors.slate100,
-                    child: const Icon(Icons.broken_image_rounded,
-                        color: AppColors.slate400),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: -6,
-                right: -6,
-                child: GestureDetector(
-                  onTap: _submitting
-                      ? null
-                      : () => setState(() => _photos.removeAt(i)),
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: const BoxDecoration(
-                        color: AppColors.danger, shape: BoxShape.circle),
-                    child: const Icon(Icons.close_rounded,
-                        size: 14, color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        if (canAdd)
-          GestureDetector(
-            onTap: _addPhoto,
-            child: Container(
-              width: 76,
-              height: 76,
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.slate200),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.add_a_photo_rounded,
-                      size: 22, color: AppColors.brandCyanDark),
-                  const SizedBox(height: 4),
-                  Text('Tambah',
-                      style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.brandCyanDark)),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
   }
 
   @override
@@ -2147,12 +2105,12 @@ class _IzinFormState extends State<_IzinForm> {
 
           const SizedBox(height: 14),
 
-          // ── Date range — 1 bulan ke belakang s/d kemarin ─────
+          // ── Date range — Izin: 1 bulan ke belakang s/d kemarin; Dinas: -1/+1 bulan ──
           _DateRangeFields(
             start: _startDate,
             end: _endDate,
-            range: _izinRange(),
-            jenis: 'Izin',
+            range: _range,
+            jenis: _rangeJenis,
             onStart: (d) => setState(() => _startDate = d),
             onEnd: (d) => setState(() => _endDate = d),
           ),
@@ -2160,7 +2118,7 @@ class _IzinFormState extends State<_IzinForm> {
           if (_rangeValid) ...[
             const SizedBox(height: 8),
             Text(
-              'Total: ${_endDate!.difference(_startDate!).inDays + 1} hari',
+              'Total: $_days hari kerja',
               style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -2184,15 +2142,15 @@ class _IzinFormState extends State<_IzinForm> {
 
           const SizedBox(height: 14),
 
-          // ── Foto bukti ────────────────────────────────
-          Text('Foto Bukti (opsional)', style: AppText.label),
-          const SizedBox(height: 2),
-          Text(
-            'Mis. surat dokter atau undangan. Maks. ${LeaveService.maxLampiran} foto.',
-            style: GoogleFonts.inter(fontSize: 11, color: AppColors.slate400),
-          ),
-          const SizedBox(height: 8),
-          _photoInput(),
+          // ── Foto bukti (aturan per jenis dari server) ──
+          if (_type != null && _rule.tampil)
+            LeavePhotoField(
+              rule: _rule,
+              photos: _photos,
+              maxLampiran: _rules.maxLampiran,
+              busy: _submitting,
+              onChanged: () => setState(() {}),
+            ),
 
           const SizedBox(height: 16),
 
@@ -2283,6 +2241,12 @@ class _RequestHistoryTile extends StatelessWidget {
     }
   }
 
+  String get _typeLabel => request.type == LeaveType.annual
+      ? 'Cuti Tahunan'
+      : request.type == LeaveType.dinas
+          ? 'Dinas'
+          : 'Izin';
+
   String get _statusLabel {
     switch (request.status) {
       case RequestStatus.approved:
@@ -2313,7 +2277,9 @@ class _RequestHistoryTile extends StatelessWidget {
               child: Icon(
                 request.type == LeaveType.annual
                     ? Icons.beach_access_rounded
-                    : Icons.medical_services_rounded,
+                    : request.type == LeaveType.dinas
+                        ? Icons.business_center_rounded
+                        : Icons.medical_services_rounded,
                 color: _statusColor,
                 size: 16,
               ),
@@ -2324,7 +2290,7 @@ class _RequestHistoryTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    request.type == LeaveType.annual ? 'Cuti Tahunan' : 'Izin',
+                    _typeLabel,
                     style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -2385,8 +2351,7 @@ class _RequestHistoryTile extends StatelessWidget {
             Text('Detail Pengajuan',
                 style: AppText.headline3.copyWith(color: AppColors.slate900)),
             const SizedBox(height: 16),
-            _DetailRow('Jenis',
-                request.type == LeaveType.annual ? 'Cuti Tahunan' : 'Izin'),
+            _DetailRow('Jenis', _typeLabel),
             _DetailRow('Tanggal Mulai', f.format(request.startDate)),
             _DetailRow('Tanggal Selesai', f.format(request.endDate)),
             _DetailRow('Durasi', '${request.dayCount} hari'),

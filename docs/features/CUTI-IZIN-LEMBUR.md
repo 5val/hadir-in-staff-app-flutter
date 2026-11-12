@@ -11,14 +11,20 @@ Tab **Cuti & Izin** (`LeaveTab`), sub-tab `Cuti | Izin | Lembur | Riwayat`. Tari
 ### 1.1 Cuti
 - Hanya **cuti tahunan**: `POST /staff/:id/leave` `{tipe: "Cuti", subTipe: "Cuti Tahunan", alasan, tanggalMulai, tanggalSelesai, jumlahHari}` (#24).
 - Jendela tanggal (`_cutiRange`, harus sama dengan `leaveDateWindow` backend): **besok s/d +1 bulan** (`_addMonthsClamped`).
-- Sisa cuti dari profil (`AppSession.staff.sisaCuti` / `totalCuti`); tombol Kirim mati bila `jumlah hari kerja > sisa` atau alasan kosong. Hari dihitung dengan `_workingDaysBetween` = hari kerja shift minus hari libur (`AppCalendar.isSelectable`); `jumlahHari` yang dikirim **diabaikan server** (dihitung ulang di `lib/leave-days.ts`). Tidak ada lampiran untuk cuti.
+- Sisa cuti dari profil (`AppSession.staff.sisaCuti` / `totalCuti`); tombol Kirim mati bila `jumlah hari kerja > sisa` atau alasan kosong. Hari dihitung dengan `_workingDaysBetween` = hari kerja shift minus hari libur (`AppCalendar.isSelectable`); `jumlahHari` yang dikirim **diabaikan server** (dihitung ulang di `lib/leave-days.ts`). **Lampiran (2026-11-12):** kolom "Foto Bukti" hanya muncul bila aturan `cuti_tahunan` = opsional/wajib (bawaan: tidak perlu -> tidak ada kolom, perilaku lama). Lihat 1.2a.
 - Sukses → dialog "Pengajuan cuti telah dikirim ke admin"; notifikasi office `leave_request_submitted`.
 
 ### 1.2 Izin / Sakit
-- Pilihan UI: **Sakit** (→ `tipe: "Sakit"`), **Seminar**, **Lainnya** (→ `tipe: "Izin"`, `subTipe` = pilihan). Server memetakan `Izin` ke enum DB `Ijin`. Tipe `Dinas` didukung server tetapi **tidak ada di UI**.
-- Jendela tanggal (`_izinRange`): **−1 bulan s/d kemarin** (izin dicatat setelah kejadian). Dinas (server) bebas.
-- **Lampiran foto**: kamera atau galeri (`image_picker`, `imageQuality: 75`, `maxWidth: 1600`), **maks 3** (`LeaveService.maxLampiran`, sama dengan `MAX_LAMPIRAN` backend). Dikirim sebagai `lampiran: [{base64, mimeType}]`; server menyimpan ke Google Drive dan URL-nya masuk `dokumen` yang dilihat admin. **Lampiran opsional di app** — `_canSubmit` hanya butuh jenis, rentang valid, dan alasan; foto tidak diwajibkan, untuk jenis apa pun termasuk Sakit.
+- Pilihan UI: **Sakit** (→ `tipe: "Sakit"`), **Seminar**, **Lainnya** (→ `tipe: "Izin"`, `subTipe` = pilihan). Server memetakan `Izin` ke enum DB `Ijin`. Pilihan ke-4 **Dinas** (2026-11-12) -> `tipe: "Dinas"`, `subTipe: ""` (BUKAN Izin; `izinTypeToApi` di `models/aturan_lampiran.dart`). Dinas tetap lewat persetujuan normal (pending) dan tampil sebagai "Dinas" di riwayat/filter (`LeaveType.dinas`; dulu salah dipetakan ke Seminar).
+- Jendela tanggal Izin (`_izinRange`): **−1 bulan s/d kemarin** (izin dicatat setelah kejadian). **Dinas** (`dinasRange`): **hari ini −1 bulan s/d hari ini +1 bulan**, inklusif, bulan dijepit seperti backend. Total hari yang ditampilkan = hari kerja (`_workingDaysBetween`), sama dengan yang dikirim.
+- **Lampiran foto**: kamera atau galeri (`image_picker`, `imageQuality: 75`, `maxWidth: 1600`), **maks 3** (`LeaveService.maxLampiran`, sama dengan `MAX_LAMPIRAN` backend). Dikirim sebagai `lampiran: [{base64, mimeType}]`; server menyimpan ke Google Drive dan URL-nya masuk `dokumen` yang dilihat admin. Wajib/tidaknya mengikuti aturan lampiran (1.2a).
 - Foto tidak terbaca (`FileSystemException`) → snackbar "Foto tidak bisa dibaca. Hapus lalu pilih ulang."
+
+### 1.2a Aturan lampiran per jenis (2026-11-12)
+- `GET /staff/:id/leave/aturan-lampiran` (`LeaveService.aturanLampiran`, model `models/aturan_lampiran.dart`) -> mode per jenis (`sakit`, `izin_seminar`, `izin_lainnya`, `dinas`, `cuti_tahunan`): `tidak_perlu` | `opsional` | `wajib` (+ `lebihDariHari`). Bawaan bila fetch gagal: izin/dinas opsional, cuti tidak perlu; server tetap menegakkan dan menjawab 400 (pesan ditampilkan sebagai snackbar).
+- `wajib(jumlahHari)` = mode wajib dan (`lebihDariHari` kosong atau `jumlahHari > lebihDariHari`); `jumlahHari` = hari kerja (`_workingDaysBetween`). Server yang menentukan bila hitungan berbeda.
+- Kolom foto (widget bersama `widgets/leave_photo_field.dart`, dipakai form Izin/Dinas dan Cuti): `tidak_perlu` -> disembunyikan; `opsional` -> "Foto Bukti (opsional)"; `wajib` -> "Foto Bukti (wajib)" atau "(wajib bila lebih dari N hari)". Tombol Kirim mati sampai >= 1 foto bila `wajib(jumlahHari)`; dihitung ulang saat tanggal/jenis berubah. Di form Izin kolom baru muncul setelah jenis dipilih. Cuti ikut mengirim `lampiran`.
+- Test: `test/aturan_lampiran_test.dart`.
 
 ### 1.3 Penolakan server yang umum (ditampilkan apa adanya sebagai snackbar)
 Field wajib, tanggal selesai < mulai, di luar jendela, sebelum `joinDate`, **periode gaji sudah ditutup**, tanggal mulai/selesai jatuh di **hari libur** atau bukan hari kerja shift, lampiran > 3. Date picker (`showWorkDatePicker`, `work_date_picker.dart`) sudah menonaktifkan hari libur, bukan hari kerja, periode tertutup, dan sebelum `joinDate` (`isSelectableForSubmission`); `WorkCalendar.hasSelectableForSubmission` menggerbangi tombol bila seluruh rentang tertutup.
@@ -60,11 +66,10 @@ Aturan server (#50): Manager **atau** Supervisor di lokasi staff boleh memproses
 
 ## 4. RENCANA (belum di kode)
 
-- **Lampiran bukti izin/sakit dapat dikonfigurasi per jenis** (Sakit/Izin/Dinas/Cuti: Tidak perlu / Opsional / Wajib, plus "wajib jika > N hari") oleh admin; validasi di backend, app mengikuti (keputusan 2026-11-06, [ATURAN-BISNIS §10.4](../../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md)). **Sekarang:** `lampiran[]` maks 3, tidak pernah wajib (mobile-api #24: "Rencana: setting wajib/opsional per jenis (belum ada)"). Dampak ke app nanti: UI Izin harus membaca setting (endpoint belum ada — **perlu kontrak backend baru**; flutter-dev tidak boleh menebak shapenya) dan menandai foto wajib.
+- ~~**Lampiran bukti izin/sakit dapat dikonfigurasi per jenis** (Sakit/Izin/Dinas/Cuti: Tidak perlu / Opsional / Wajib, plus "wajib jika > N hari") oleh admin; validasi di backend, app mengikuti (keputusan 2026-11-06, [ATURAN-BISNIS §10.4](../../../hadir-in-web-admin-react/docs/product/ATURAN-BISNIS-PENGGAJIAN.md)). **Sekarang:** `lampiran[]` maks 3, tidak pernah wajib (mobile-api #24: "Rencana: setting wajib/opsional per jenis (belum ada)"). Dampak ke app nanti: UI Izin harus membaca setting (endpoint belum ada — **perlu kontrak backend baru**; flutter-dev tidak boleh menebak shapenya) dan menandai foto wajib.~~ SELESAI 2026-11-12 (1.2a).
 
 ## 5. Known issues
 
-- Lampiran tak pernah wajib di app (sesuai server saat ini).
 - `AllLeaveHistoryScreen` yatim (`_buildEmployeeTab`/`_EmployeeAppTile` mati di `leave_tab.dart` sudah dihapus).
 - Nama `_isSupervisor` di `leave_tab.dart:46` sebenarnya `isApprover`.
 - Tidak ada UI pembatalan pengajuan oleh staff (tidak ada endpoint mobile untuk itu di mobile-api).

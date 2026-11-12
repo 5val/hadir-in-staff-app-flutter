@@ -611,7 +611,7 @@ class LeaveRequest {
         case 'Sakit':
           return LeaveType.sick;
         case 'Dinas':
-          return LeaveType.seminar;
+          return LeaveType.dinas;
         case 'Izin':
         case 'Ijin': // enum DB memakai ejaan "Ijin"
           return subTipe.toLowerCase().contains('seminar')
@@ -664,7 +664,7 @@ class LeaveRequest {
   }
 }
 
-enum LeaveType { annual, sick, seminar, school }
+enum LeaveType { annual, sick, seminar, school, dinas }
 
 enum RequestStatus { pending, approved, rejected }
 

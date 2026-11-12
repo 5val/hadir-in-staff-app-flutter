@@ -43,6 +43,7 @@ Test regresi yang tidak pernah merah tidak membuktikan apa pun. Untuk setiap per
 | `attendance_entry_flow_test.dart` | F3/F4/F5: `LocationService.guardMocked`; `runAttendanceEntry` (dialog "Belum Jam Pulang!", konfirmasi hari libur, foto wajib, GPS palsu); 2026-11-12: alur mengikuti kebijakan (wajibFoto=false lewati kamera, wajibGps=false tidak memblokir, deteksiMockGps, `lokasiPalsu`, liveness terbawa) |
 | `liveness_challenge_test.dart` | State machine liveness (kedip, toleh kiri/kanan, kembali lurus, reset trackingId/wajah hilang/banyak wajah, timeout, 3 gagal -> fallback) + `LivenessReport` |
 | `attendance_policy_test.dart` | `AttendancePolicy.fromApi` + normalisasi + strict default, `AttendancePolicyCache.resolve` (server -> cache -> strict), `AttendanceService.buildCheckBody` (`lokasiPalsu`/`liveness` ikut/tidak) |
+| `aturan_lampiran_test.dart` | 2026-11-12: parsing aturan lampiran + fallback, batas `wajib(N)`/`lampiranTerpenuhi`, Dinas (tipe Dinas/subTipe kosong, `LeaveType.dinas`, `dinasRange` + month clamp), kolom foto form Cuti/Izin per aturan |
 | `subordinate_approval_test.dart` | F6: body PATCH setujui/tolak (`alasanTolak`), parsing lembur bawahan, dialog tolak dengan alasan opsional |
 | `notification_settings_test.dart` | F7: `NotificationDelivery.decide` (sakelar + mode bunyi), preferensi tersimpan, `unreadCount` |
 | `admin_contact_and_copy_test.dart` | F8: normalisasi nomor WA, peringatan ganti rekening |

@@ -108,6 +108,16 @@ class _AllLeaveHistoryScreenState extends State<AllLeaveHistoryScreen> {
                                 ? null
                                 : LeaveType.school),
                       ),
+                      const SizedBox(width: 6),
+                      _FilterChip(
+                        label: 'Dinas',
+                        icon: Icons.business_center_rounded,
+                        selected: _filterType == LeaveType.dinas,
+                        onTap: () => setState(() => _filterType =
+                            _filterType == LeaveType.dinas
+                                ? null
+                                : LeaveType.dinas),
+                      ),
                     ],
                   ),
                 ),
@@ -362,6 +372,7 @@ class _RequestCard extends StatelessWidget {
       case LeaveType.sick:    return 'Izin Sakit';
       case LeaveType.seminar: return 'Izin Seminar';
       case LeaveType.school:  return 'Izin Lainnya';
+      case LeaveType.dinas:   return 'Dinas';
       default:                return 'Izin Lainnya';
     }
   }
@@ -371,6 +382,7 @@ class _RequestCard extends StatelessWidget {
       case LeaveType.annual:  return Icons.beach_access_rounded;
       case LeaveType.sick:    return Icons.local_hospital_rounded;
       case LeaveType.seminar: return Icons.school_rounded;
+      case LeaveType.dinas:   return Icons.business_center_rounded;
       default:                return Icons.event_note_rounded;
     }
   }

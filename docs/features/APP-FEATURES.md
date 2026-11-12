@@ -66,7 +66,7 @@ Status absensi lokal (`AttendanceProviderStatus`): `notCheckedIn` → `checkedIn
 | Sub-tab | Aksi | Endpoint |
 |---------|------|----------|
 | Cuti | ajukan cuti tahunan (`subTipe: "Cuti Tahunan"`) | `POST leave` (#24); sisa cuti dari profil |
-| Izin | Sakit / Seminar / Lainnya, foto lampiran opsional (maks 3) | `POST leave` (#24) |
+| Izin | Sakit / Seminar / Lainnya / Dinas (tipe Dinas, jendela -1/+1 bulan); foto lampiran sesuai aturan per jenis (tidak perlu/opsional/wajib, maks 3; Cuti juga bila aturannya aktif) | `POST leave` (#24), `GET leave/aturan-lampiran` |
 | Lembur | daftar hari lewat jam pulang yang bisa diajukan + lembur hari libur | `GET lembur/eligible-days` (#25), `POST lembur` (#27) |
 | Riwayat | riwayat cuti/izin (filter jenis/status) + riwayat lembur | `GET leave` (#22), `GET lembur` (#26) |
 | Header "See My Team" | hanya `isApprover`; buka `SubordinateRequestsScreen` (Setujui/Tolak cuti-izin bawahan) + riwayat tim | `GET subordinates/requests` (#49), `PATCH subordinates/leave/:id` (#50) |
