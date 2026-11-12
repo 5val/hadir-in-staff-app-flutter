@@ -645,7 +645,7 @@ class _SalaryScreenState extends State<SalaryScreen> {
                 letterSpacing: -0.5,
               ),
             ),
-            // Rincian pencairan (tanggal & nama admin) hanya setelah dicairkan.
+            // Rincian pencairan (tanggal & nama pencair) hanya setelah dicairkan.
             if (slip.pencairanDetail != null) ...[
               const SizedBox(height: 10),
               Text(slip.pencairanDetail!,
@@ -1110,7 +1110,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Ada yang keliru? Selama HR belum menyetujui pencairan, Anda bisa '
+            'Ada yang keliru? Selama kantor belum menyetujui pencairan, Anda bisa '
             'membatalkan persetujuan. Slip kembali ke HR untuk diperbaiki.',
             style: GoogleFonts.inter(
                 fontSize: 12, height: 1.45, color: AppColors.slate600),
@@ -1219,7 +1219,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         title = 'Slip sudah direvisi HR';
         body = 'HR sudah memeriksa penolakan Anda dan mengirim ulang slip ini. '
             'Ikon ⓘ merah = bagian yang Anda tolak, ikon ⓘ hijau = hasil revisi '
-            'admin/manajer (ketuk untuk melihat detailnya).\n\n'
+            'pihak kantor (ketuk untuk melihat detailnya).\n\n'
             'Penolakan hanya bisa dilakukan sekali. Jika masih ada yang tidak '
             'sesuai, hubungi HR secara langsung.';
         action = _buildRevisiList();
@@ -1321,7 +1321,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
         _InfoMarker(
           key: ValueKey('marker-revisi-${keys.first}'),
           color: _InfoMarker.revisiColor,
-          tooltip: 'Direvisi admin/manajer',
+          tooltip: 'Direvisi pihak kantor',
           onTap: () => _showRevisiInfo(r, sebelumnyaDitolak: ditolak),
         ),
       ];
@@ -1403,7 +1403,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
     );
   }
 
-  /// Status pencairan: "Sedang diproses pencairan" setelah HR menyetujui cair,
+  /// Status pencairan: "Sedang diproses pencairan" setelah kantor menyetujui cair,
   /// "Sudah dicairkan" setelah dibayar. Tidak tampil bila belum ada kabar.
   Widget _buildPencairanBanner() {
     final label = slip.pencairanLabel;
@@ -1420,7 +1420,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
               if (slip.paidAt != null) 'Waktu: ${formatTanggalJam(slip.paidAt!)}',
               if (slip.paidOleh != null) 'Dicairkan oleh: ${slip.paidOleh}',
             ].join('\n')
-          : 'HR sudah menyetujui slip ini untuk dicairkan. Gaji akan segera ditransfer.',
+          : 'Pencairan slip ini sudah disetujui kantor. Gaji akan segera ditransfer.',
       action: slip.tampilCatatanBuktiGabungan
           ? Text('Bukti transfer gabungan disimpan oleh HR',
               key: const Key('bukti-gabungan-note'),
@@ -2363,7 +2363,7 @@ class _SalaryDetailScreenState extends State<SalaryDetailScreen> {
       );
 
   /// Kolom "Komponen": nama baris + tanda ⓘ merah (ditolak staff) / hijau
-  /// (direvisi admin/manajer).
+  /// (direvisi pihak kantor).
   Widget _tdLabel(SalaryComponent comp) {
     final markers = comp.key.isEmpty ? const <Widget>[] : _markers([comp.key]);
     if (markers.isEmpty) return _td(comp.label, isBold: true);
@@ -2799,7 +2799,7 @@ class _TolakSlipDialogState extends State<_TolakSlipDialog> {
 // TANDA ⓘ & KEDIP STATUS
 // ─────────────────────────────────────────────────────────────────────────────
 /// Ikon ⓘ kecil di samping baris slip: merah = bagian yang ditolak staff,
-/// hijau = hasil revisi admin/manajer. Ketuk untuk detailnya.
+/// hijau = hasil revisi pihak kantor. Ketuk untuk detailnya.
 class _InfoMarker extends StatelessWidget {
   static const tolakColor = Color(0xFFDC2626);
   static const revisiColor = Color(0xFF16A34A);
@@ -2894,7 +2894,7 @@ class _SlipStep {
 
 const _slipSteps = [
   _SlipStep(Icons.calculate_outlined, 'HR menghitung & mengirim slip',
-      'Admin/manajer menghitung gaji periode ini lalu mengirim slip ke Anda untuk diperiksa.'),
+      'Pihak kantor menghitung gaji periode ini lalu mengirim slip ke Anda untuk diperiksa.'),
   _SlipStep(Icons.fact_check_outlined, 'Menunggu konfirmasi Anda',
       'Periksa angka di slip. Tekan "Konfirmasi" jika sudah benar, atau "Ada yang salah" jika tidak sesuai.'),
   _SlipStep(
@@ -2905,9 +2905,9 @@ const _slipSteps = [
   _SlipStep(Icons.verified_rounded, 'Staff menyetujui',
       'Anda menyetujui slip, slip terkunci dan bisa diunduh.'),
   _SlipStep(Icons.hourglass_top_rounded, 'Disetujui untuk dicairkan',
-      'HR menyetujui slip untuk dicairkan. Gaji segera ditransfer.'),
+      'Kantor menyetujui pencairan slip. Gaji segera ditransfer.'),
   _SlipStep(Icons.payments_rounded, 'Gaji dicairkan',
-      'Gaji sudah ditransfer. Tanggal, nama admin yang mencairkan dan bukti transfer ada di detail slip.'),
+      'Gaji sudah ditransfer. Tanggal, nama yang mencairkan dan bukti transfer ada di detail slip.'),
 ];
 
 /// Tahap [_slipSteps] tempat [slip] berada sekarang; null bila tidak ada slip.
@@ -2995,7 +2995,7 @@ Future<void> showSlipStatusGuide(BuildContext context, SalarySlip? slip) {
                               _InfoMarker.tolakColor, 'Bagian yang Anda tolak'),
                           const SizedBox(height: 4),
                           _guideLegend(_InfoMarker.revisiColor,
-                              'Hasil revisi admin/manajer'),
+                              'Hasil revisi pihak kantor'),
                         ],
                       )
                     : null,

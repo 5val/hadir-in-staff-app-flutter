@@ -217,7 +217,7 @@ class _AccountTabState extends State<AccountTab> {
                   const SizedBox(height: 20),
 
                   // ── Notifikasi dokumen ditolak ────────
-                  // Muncul hanya bila admin/manajer menolak salah satu
+                  // Muncul hanya bila pihak kantor menolak salah satu
                   // dokumen. Backend sudah membuat notifikasi
                   // `document_rejected` di inbox; kartu ini mengangkatnya ke
                   // halaman Profile supaya tidak terlewat, lengkap dengan

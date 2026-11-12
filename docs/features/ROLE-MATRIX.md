@@ -23,7 +23,7 @@ Penting: `Jabatan.isSupervisor` (atribut jabatan) **bukan** wewenang persetujuan
 | Dokumen onboarding, rekening, ganti nomor HP, passcode | ya | ya | — |
 | Tombol "See My Team" → setujui/tolak **cuti & izin** bawahan | tidak | **ya** (Manager *dan* Supervisor, per server) | — |
 | Riwayat pengajuan bawahan (`status=all`) | tidak | ya | — |
-| Setujui/tolak **lembur** bawahan | tidak | **server: hanya Manager; app: tidak ada UI** | — |
+| Setujui/tolak **lembur** bawahan | tidak | **ya, hanya Manager** (UI di `SubordinateRequestsScreen` bila `canApproveLembur`; Supervisor 403 dari server) | — |
 | Tab "Tim" (`AdminDashboardTab`) | tidak | tidak | **tidak pernah tampil** |
 
 ### Detail persetujuan atasan (apa yang benar-benar ada di UI)
@@ -42,9 +42,16 @@ Penting: `Jabatan.isSupervisor` (atribut jabatan) **bukan** wewenang persetujuan
 
 Pelaku yang "mengelola" (Admin/HRD, Manager sebagai pengelola) bekerja di **portal web**, bukan app ini. Atasan di app = staff biasa + `AuthorityGrant`.
 
+## Rework peran web (Direktur, 2026-11)
+
+- Akun **Direktur** dan **Admin** hanya ada di portal web. Staff yang tertaut ke akun Direktur/Admin tetap memakai app sebagai staff biasa.
+- Cuti/lembur mereka diproses Manager/Supervisor lokasinya, atau Admin di web.
+- "Setujui Cair" slip dilakukan Direktur atau Admin sesuai pengaturan office; Manager Lokasi view-only di payroll. App tidak berubah: yang tampil ke staff hanya `paidOleh` ("Dicairkan oleh ...") dan teks netral "kantor".
+- Pindah lokasi tidak punya layar di app. Staff hanya mendapat notifikasi saat disetujui; saat ditolak tidak ada notifikasi (berubah 2026-11-11).
+
 ## RENCANA (belum di kode)
 
-- **Direktur** (disetujui 2026-11-06, [authorization.md](../../../hadir-in-api-backend-express-js/docs/authorization.md)): peran baru untuk Setujui Cair slip. **Web-only** — tidak ada perubahan di app staff yang direncanakan; Direktur yang juga staff tetap memakai app sebagai staff biasa. Jangan menambah peran Direktur di app tanpa keputusan baru.
+- **Direktur** (sudah dikerjakan di web, lihat bagian di atas; disetujui 2026-11-06, [authorization.md](../../../hadir-in-api-backend-express-js/docs/authorization.md)): peran baru untuk Setujui Cair slip. **Web-only** — tidak ada perubahan di app staff yang direncanakan; Direktur yang juga staff tetap memakai app sebagai staff biasa. Jangan menambah peran Direktur di app tanpa keputusan baru.
 - Persetujuan lembur oleh Manager di app: belum direncanakan di dokumen mana pun yang saya temukan (**perlu dicek** dengan pemilik produk bila diinginkan).
 
 ## Known issues
